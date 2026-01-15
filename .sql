@@ -1,30 +1,5 @@
-CREATE TABLE gst_documents (
-    document_id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    customer_id BIGINT NOT NULL
-        REFERENCES customers(customer_id),
-    gstin BIGINT NOT NULL
-        REFERENCES gst_registration(gstin)
-        ON DELETE CASCADE,
-    ownership_category VARCHAR(50)
-    CHECK(ownership_category in ('PROPRIETARY','PARTNERSHIP_FIRM','COMPANY')),
-    document_type VARCHAR(50)
-        CHECK (document_type IN (
-            'PAN','AADHAAR','PHOTO',
-            'RENT_AGREEMENT','NOC',
-            'BANK_PROOF','PARTNERSHIP_DEED',
-            'MOA','AOA','COI','ELECTICITY_BILL',
-            'MUNICIPAL_TAX_RECIEPT','AUTHORISATION_LETTER',
-        )),
-    document_url TEXT NOT NULL,
-    verified BOOLEAN DEFAULT FALSE,
-    verified_by BIGINT REFERENCES users(user_id),
-    verified_at TIMESTAMP,
-    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 
 -- solvetax.crm_leads definition
-
 -- Drop table
 
 -- DROP TABLE solvetax.crm_leads;
@@ -69,7 +44,7 @@ CREATE TABLE solvetax.customers (
 	mobile varchar(15) NOT NULL,
 	business_name varchar(200) NULL,
 	business_description text NULL,
-	business_image text NULL,
+	business_image_url text NULL,
 	business_type varchar(50) NULL,
 	state varchar(100) NULL,
 	city varchar(100) NULL,
@@ -124,13 +99,14 @@ CREATE TABLE solvetax.gst_registration (
 	registration_status varchar(50) DEFAULT 'DRAFT'::character varying NULL,
 	suspension_reason text NULL,
 	cancellation_reason text NULL,
-	applied_date date NULL,
-	approval_date date NULL,
+	approved_at timestamp NULL,
 	is_rcm_applicable bool DEFAULT false NULL,
 	turnover_details varchar(50) DEFAULT 'LESS_THAN_2CR'::character varying NULL,
 	created_by int8 NULL,
 	created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
+	is_filing_needed bool DEFAULT true NULL,
+	mobile varchar(20) NULL,
 	CONSTRAINT gst_registration_gstin_key UNIQUE (gstin),
 	CONSTRAINT gst_registration_pkey PRIMARY KEY (id),
 	CONSTRAINT gst_registration_username_key UNIQUE (username)
@@ -160,6 +136,14 @@ CREATE TABLE solvetax.gst_registration_config (
 	CONSTRAINT gst_registration_config_pkey PRIMARY KEY (id)
 );
 
+1	registration_type	NORMAL	Normal	Normal GST registration type	true	1
+2	registration_type	COMPOSITION	Composition	Composition GST registration type	true	2
+3	ownership_category	PROPRIETARY	Proprietary	Proprietary ownership	true	1
+4	ownership_category	PARTNERSHIP_FIRM	Partnership Firm	Partnership firm ownership	true	2
+5	ownership_category	COMPANY	Company	Company ownership	true	3
+6	turnover_details	LESS_THAN_2CR	Less than 2 Cr	Turnover less than 2 crore	true	1
+7	turnover_details	LESS_THAN_5CR	Less than 5 Cr	Turnover less than 5 crore	true	2
+8	turnover_details	MORE_THAN_5CR	More than 5 Cr	Turnover more than 5 crore	true	3
 
 -- solvetax.password_reset_otps definition
 
@@ -229,3 +213,68 @@ CREATE TABLE solvetax.session_token (
 
 ALTER TABLE solvetax.session_token ADD CONSTRAINT session_token_emp_id_fkey FOREIGN KEY (emp_id) REFERENCES solvetax.employees(emp_id);
 
+
+CREATE TABLE solvetax.registration_config (
+    id BIGSERIAL PRIMARY KEY,
+    ownership_category VARCHAR(50) NOT NULL, -- 'PROPRIETOR', 'PARTNERSHIP_FIRM', 'COMPANY'
+    config_type VARCHAR(50) NOT NULL,        -- 'DOCUMENT_TYPE', 'ROLE', etc.
+    value VARCHAR(100) NOT NULL,             -- e.g., 'PAN', 'AADHAAR', 'PHOTO', 'PARTNERSHIP_DEED'
+    display_name VARCHAR(100) NOT NULL,      -- For dropdowns/UI
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    sort_order INT DEFAULT 0
+);
+
+
+-- Roles
+INSERT INTO solvetax.registration_config (ownership_category, config_type, value, display_name, description, sort_order) VALUES
+('PROPRIETOR', 'ROLE', 'PROPRIETOR', 'Proprietor', 'Individual business owner', 1);
+
+-- Document Types
+INSERT INTO solvetax.registration_config (ownership_category, config_type, value, display_name, description, sort_order) VALUES
+('PROPRIETOR', 'DOCUMENT_TYPE', 'PAN', 'PAN Card', 'PAN Card of Proprietor', 1),
+('PROPRIETOR', 'DOCUMENT_TYPE', 'AADHAAR', 'Aadhar Card', 'Aadhar Card of Proprietor', 2),
+('PROPRIETOR', 'DOCUMENT_TYPE', 'PHOTO', 'Passport Size Photo', 'Photo of Proprietor', 3),
+('PROPRIETOR', 'DOCUMENT_TYPE', 'PROPERTY_TAX_RECEIPT', 'Property Tax Receipt', 'Registered Office Address Proof', 4),
+('PROPRIETOR', 'DOCUMENT_TYPE', 'RENTAL_AGREEMENT', 'Rental Agreement', 'Registered Office Address Proof', 5),
+('PROPRIETOR', 'DOCUMENT_TYPE', 'NOC', 'No Objection Certificate', 'Registered Office Address Proof', 6),
+('PROPRIETOR', 'DOCUMENT_TYPE', 'CANCELLED_CHEQUE', 'Cancelled Cheque', 'Bank Account Proof', 7),
+('PROPRIETOR', 'DOCUMENT_TYPE', 'PASSBOOK', 'Front Page of Passbook', 'Bank Account Proof', 8),
+('PROPRIETOR', 'DOCUMENT_TYPE', 'BANK_STATEMENT', 'Latest Bank Statement', 'Bank Account Proof', 9);
+
+-- Roles
+INSERT INTO solvetax.registration_config (ownership_category, config_type, value, display_name, description, sort_order) VALUES
+('PARTNERSHIP_FIRM', 'ROLE', 'PARTNER', 'Partner', 'Partner in the firm', 1);
+
+-- Document Types
+INSERT INTO solvetax.registration_config (ownership_category, config_type, value, display_name, description, sort_order) VALUES
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'PAN', 'PAN Card', 'PAN Card of Partner', 1),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'AADHAAR', 'Aadhar Card', 'Aadhar Card of Partner', 2),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'PHOTO', 'Passport Size Photo', 'Photo of Partner', 3),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'PROPERTY_TAX_RECEIPT', 'Property Tax Receipt', 'Registered Office Address Proof', 4),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'RENTAL_AGREEMENT', 'Rental Agreement', 'Registered Office Address Proof', 5),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'NOC', 'No Objection Certificate', 'Registered Office Address Proof', 6),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'CANCELLED_CHEQUE', 'Cancelled Cheque', 'Bank Account Proof', 7),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'PASSBOOK', 'Front Page of Passbook', 'Bank Account Proof', 8),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'BANK_STATEMENT', 'Latest Bank Statement', 'Bank Account Proof', 9),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'PARTNERSHIP_DEED', 'Partnership Deed & Registration Certificate', 'Firm Document', 10),
+('PARTNERSHIP_FIRM', 'DOCUMENT_TYPE', 'AUTHORISATION_LETTER', 'Authorisation Letter', 'Firm Document', 11);
+
+-- Roles
+INSERT INTO solvetax.registration_config (ownership_category, config_type, value, display_name, description, sort_order) VALUES
+('COMPANY', 'ROLE', 'DIRECTOR', 'Director', 'Director in the company', 1);
+
+-- Document Types
+INSERT INTO solvetax.registration_config (ownership_category, config_type, value, display_name, description, sort_order) VALUES
+('COMPANY', 'DOCUMENT_TYPE', 'PAN', 'PAN Card', 'PAN Card of Director', 1),
+('COMPANY', 'DOCUMENT_TYPE', 'AADHAAR', 'Aadhar Card', 'Aadhar Card of Director', 2),
+('COMPANY', 'DOCUMENT_TYPE', 'PHOTO', 'Passport Size Photo', 'Photo of Director', 3),
+('COMPANY', 'DOCUMENT_TYPE', 'PROPERTY_TAX_RECEIPT', 'Property Tax Receipt', 'Registered Office Address Proof', 4),
+('COMPANY', 'DOCUMENT_TYPE', 'RENTAL_AGREEMENT', 'Rental Agreement', 'Registered Office Address Proof', 5),
+('COMPANY', 'DOCUMENT_TYPE', 'NOC', 'No Objection Certificate', 'Registered Office Address Proof', 6),
+('COMPANY', 'DOCUMENT_TYPE', 'CANCELLED_CHEQUE', 'Cancelled Cheque', 'Bank Account Proof', 7),
+('COMPANY', 'DOCUMENT_TYPE', 'PASSBOOK', 'Front Page of Passbook', 'Bank Account Proof', 8),
+('COMPANY', 'DOCUMENT_TYPE', 'BANK_STATEMENT', 'Latest Bank Statement', 'Bank Account Proof', 9),
+('COMPANY', 'DOCUMENT_TYPE', 'MOA', 'Memorandum of Association (MOA)', 'Company Document', 10),
+('COMPANY', 'DOCUMENT_TYPE', 'COI', 'Certificate of Incorporation (COI)', 'Company Document', 11),
+('COMPANY', 'DOCUMENT_TYPE', 'AUTHORISATION_LETTER', 'Authorisation Letter', 'Company Document', 12);
