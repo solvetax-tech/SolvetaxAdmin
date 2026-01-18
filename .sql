@@ -278,3 +278,258 @@ INSERT INTO solvetax.registration_config (ownership_category, config_type, value
 ('COMPANY', 'DOCUMENT_TYPE', 'MOA', 'Memorandum of Association (MOA)', 'Company Document', 10),
 ('COMPANY', 'DOCUMENT_TYPE', 'COI', 'Certificate of Incorporation (COI)', 'Company Document', 11),
 ('COMPANY', 'DOCUMENT_TYPE', 'AUTHORISATION_LETTER', 'Authorisation Letter', 'Company Document', 12);
+
+
+-- solvetax.registration_persons definition
+
+-- Drop table
+
+-- DROP TABLE solvetax.registration_persons;
+
+CREATE TABLE solvetax.registration_persons (
+	person_id bigserial NOT NULL,
+	customer_id int8 NULL,
+	gstin varchar(15) NOT NULL,
+	full_name varchar(150) NOT NULL,
+	"role" varchar(50) NOT NULL,
+	pan varchar(10) NULL,
+	aadhaar varchar(20) NULL,
+	email varchar(150) NULL,
+	mobile varchar(20) NULL,
+	is_primary_customer bool DEFAULT false NULL,
+	CONSTRAINT registration_persons_pkey PRIMARY KEY (person_id)
+);
+
+
+-- solvetax.registration_persons foreign keys
+
+ALTER TABLE solvetax.registration_persons ADD CONSTRAINT registration_persons_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES solvetax.customers(customer_id) ON DELETE CASCADE;
+ALTER TABLE solvetax.registration_persons ADD CONSTRAINT registration_persons_gstin_fkey FOREIGN KEY (gstin) REFERENCES solvetax.gst_registration(gstin) ON DELETE CASCADE;
+
+-- solvetax.registration_documents definition
+
+-- Drop table
+
+-- DROP TABLE solvetax.registration_documents;
+
+CREATE TABLE solvetax.registration_documents (
+	document_id bigserial NOT NULL,
+	gstin varchar(15) NOT NULL,
+	person_id int8 NULL,
+	document_type varchar(50) NOT NULL,
+	document_url text NOT NULL,
+	ownership_category varchar(50) NULL,
+	verified bool DEFAULT false NULL,
+	verified_by int8 NULL,
+	verified_at timestamp NULL,
+	uploaded_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
+	mobile varchar(10) NULL,
+	CONSTRAINT registration_documents_pkey PRIMARY KEY (document_id)
+);
+
+
+-- solvetax.registration_documents foreign keys
+
+ALTER TABLE solvetax.registration_documents ADD CONSTRAINT registration_documents_gstin_fkey FOREIGN KEY (gstin) REFERENCES solvetax.gst_registration(gstin) ON DELETE CASCADE;
+ALTER TABLE solvetax.registration_documents ADD CONSTRAINT registration_documents_person_id_fkey FOREIGN KEY (person_id) REFERENCES solvetax.registration_persons(person_id);
+ALTER TABLE solvetax.registration_documents ADD CONSTRAINT registration_documents_verified_by_fkey FOREIGN KEY (verified_by) REFERENCES solvetax.employees(emp_id);
+
+
+
+CREATE TABLE solvetax.company_registration (
+    id bigserial PRIMARY KEY,
+
+    customer_id int8 NOT NULL,
+
+	cin VARCHAR(21) NOT NULL,
+	username varchar(100) NOT NULL,
+	"password" text NOT NULL,
+	pan varchar(10) NOT NULL,
+
+    company_type varchar(50) NOT NULL,
+    -- PRIVATE_LIMITED / LLP/PUBLIC_LIMITED
+	business_type varchar(50) NULL,
+	business_description text NULL,
+
+
+    registered_email varchar(150) NOT NULL,
+    registered_mobile varchar(20) NOT NULL,
+
+    registered_office_address text NOT NULL,
+    state varchar(100) NOT NULL,
+    city varchar(100) NOT NULL,
+
+    registration_status varchar(50) DEFAULT 'DRAFT',
+
+    created_by int8 NULL,
+	rm_id int8 NULL,
+	is_filing_needed bool DEFAULT true NULL,
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp DEFAULT CURRENT_TIMESTAMP,
+
+    is_active bool DEFAULT true,
+
+    CONSTRAINT company_registration_customer_fk
+        FOREIGN KEY (customer_id)
+        REFERENCES solvetax.customers(customer_id),
+
+    CONSTRAINT company_registration_created_by_fk
+        FOREIGN KEY (created_by)
+        REFERENCES solvetax.employees(emp_id),
+
+    CONSTRAINT company_registration_rm_fk
+        FOREIGN KEY (rm_id)
+        REFERENCES solvetax.employees(emp_id)
+);
+
+
+CREATE TABLE solvetax.company_registration_persons (
+    person_id bigserial PRIMARY KEY,
+
+    cin varchar(21) NOT NULL,
+
+    role varchar(50) NOT NULL,
+    -- DIRECTOR / PARTNER / AUTH_SIGNATORY
+
+    full_name varchar(150) NOT NULL,
+
+    pan varchar(10) NOT NULL,
+    aadhaar varchar(20) NOT NULL,
+
+    voter_id varchar(20) NULL,
+    passport varchar(20) NULL,
+    driving_license varchar(20) NULL,
+
+    email varchar(150) NOT NULL,
+    mobile varchar(20) NOT NULL,
+
+	dsc_validity_date date NULL,
+	DIR_KYC_due_date date NULL,
+	DIR_KYC_done_date date NULL,
+
+	DIN_status varchar(50) DEFAULT 'active',
+    occupation varchar(50) NOT NULL,
+    area_of_occupation varchar(100) NOT NULL,
+
+    education_qualification varchar(100) NOT NULL,
+
+    present_residential_address text NOT NULL,
+    address_duration_years int4 NOT NULL,
+
+    is_active bool DEFAULT true,
+
+    CONSTRAINT company_person_company_fk
+        FOREIGN KEY (cin)
+        REFERENCES solvetax.company_registration(cin)
+        ON DELETE CASCADE
+);
+
+
+CREATE TABLE solvetax.company_registration_documents (
+    document_id bigserial PRIMARY KEY,
+
+    cin varchar(21) NOT NULL,
+    person_id int8 NULL,
+
+    document_type varchar(50) NOT NULL,
+    -- PROPOSED_NAME
+    -- AADHAAR / PAN / PHOTO
+    -- BANK_STATEMENT / ELECTRICITY_BILL
+    -- RENTAL_AGREEMENT / NOC
+    -- AUTHORIZATION_LETTER
+
+    document_url text NOT NULL,
+
+    verified bool DEFAULT false,
+    verified_by int8 NULL,
+    verified_at timestamp NULL,
+
+    uploaded_at timestamp DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT company_doc_company_fk
+        FOREIGN KEY (cin)
+        REFERENCES solvetax.company_registration(cin)
+        ON DELETE CASCADE,
+
+    CONSTRAINT company_doc_person_fk
+        FOREIGN KEY (person_id)
+        REFERENCES solvetax.company_registration_persons(person_id),
+
+    CONSTRAINT company_doc_verified_by_fk
+        FOREIGN KEY (verified_by)
+        REFERENCES solvetax.employees(emp_id)
+);
+
+CREATE TABLE solvetax.company_registration_config (
+    id BIGSERIAL PRIMARY KEY,
+
+    company_type VARCHAR(50) NOT NULL,
+    -- PRIVATE_LIMITED / LLP
+
+    config_type VARCHAR(50) NOT NULL,
+    -- INPUT / DOCUMENT / ROLE
+
+    value VARCHAR(100) NOT NULL,
+    -- PROPOSED_NAME, PAN, AADHAAR, ELECTRICITY_BILL etc.
+
+    display_name VARCHAR(150) NOT NULL,
+    description TEXT,
+
+    input_scope VARCHAR(50) NOT NULL,
+    -- COMPANY / PERSON
+
+    is_multiple BOOLEAN DEFAULT FALSE,
+    -- true = one per director/partner
+
+    is_active BOOLEAN DEFAULT TRUE,
+    sort_order INT DEFAULT 0
+);
+
+
+INSERT INTO solvetax.company_registration_config
+(company_type, config_type, value, display_name, description, input_scope, is_multiple, sort_order)
+VALUES
+('PRIVATE_LIMITED', 'ROLE', 'DIRECTOR', 'Director', 'Director of the company', 'PERSON', true, 1),
+('LLP', 'ROLE', 'PARTNER', 'Partner', 'Partner of the LLP', 'PERSON', true, 1);
+
+
+INSERT INTO solvetax.company_registration_config
+(company_type, config_type, value, display_name, description, input_scope, is_multiple, sort_order)
+VALUES
+('PRIVATE_LIMITED', 'INPUT', 'PROPOSED_NAME_1', 'Proposed Company Name 1', 'First proposed company name', 'COMPANY', false, 1),
+('PRIVATE_LIMITED', 'INPUT', 'PROPOSED_NAME_2', 'Proposed Company Name 2', 'Second proposed company name', 'COMPANY', false, 2),
+('PRIVATE_LIMITED', 'INPUT', 'BUSINESS_OBJECTIVES', 'Business Objectives', 'Main business activities', 'COMPANY', false, 3),
+('PRIVATE_LIMITED', 'INPUT', 'COMPANY_EMAIL', 'Company Email', 'Official company email', 'COMPANY', false, 4),
+('PRIVATE_LIMITED', 'INPUT', 'COMPANY_MOBILE', 'Company Mobile Number', 'Official company mobile', 'COMPANY', false, 5),
+('PRIVATE_LIMITED', 'INPUT', 'REGISTERED_OFFICE_ADDRESS', 'Registered Office Address', 'Office address of the company', 'COMPANY', false, 6);
+
+INSERT INTO solvetax.company_registration_config
+(company_type, config_type, value, display_name, description, input_scope, is_multiple, sort_order)
+VALUES
+('PRIVATE_LIMITED', 'INPUT', 'PERSON_EMAIL', 'Email of Director', 'Director email address', 'PERSON', true, 10),
+('PRIVATE_LIMITED', 'INPUT', 'PERSON_MOBILE', 'Mobile Number of Director', 'Director mobile number', 'PERSON', true, 11),
+('PRIVATE_LIMITED', 'INPUT', 'OCCUPATION', 'Occupation', 'Occupation of director', 'PERSON', true, 12),
+('PRIVATE_LIMITED', 'INPUT', 'AREA_OF_OCCUPATION', 'Area of Occupation', 'Work area', 'PERSON', true, 13),
+('PRIVATE_LIMITED', 'INPUT', 'EDUCATION', 'Educational Qualification', 'Highest qualification', 'PERSON', true, 14),
+('PRIVATE_LIMITED', 'INPUT', 'RESIDENTIAL_ADDRESS', 'Residential Address', 'Present residential address', 'PERSON', true, 15),
+('PRIVATE_LIMITED', 'INPUT', 'ADDRESS_DURATION', 'Duration of Stay', 'Years at current address', 'PERSON', true, 16);
+
+
+INSERT INTO solvetax.company_registration_config
+(company_type, config_type, value, display_name, description, input_scope, is_multiple, sort_order)
+VALUES
+('PRIVATE_LIMITED', 'DOCUMENT', 'AADHAAR', 'Aadhaar Card', 'Aadhaar of Director', 'PERSON', true, 20),
+('PRIVATE_LIMITED', 'DOCUMENT', 'PAN', 'PAN Card', 'PAN of Director', 'PERSON', true, 21),
+('PRIVATE_LIMITED', 'DOCUMENT', 'VOTER_ID', 'Voter ID', 'Voter ID / Passport / Driving License', 'PERSON', true, 22),
+('PRIVATE_LIMITED', 'DOCUMENT', 'PASSPORT', 'Passport', 'Passport of Director', 'PERSON', true, 23),
+('PRIVATE_LIMITED', 'DOCUMENT', 'DRIVING_LICENSE', 'Driving License', 'Driving License of Director', 'PERSON', true, 24),
+('PRIVATE_LIMITED', 'DOCUMENT', 'PHOTO', 'Passport Size Photo', 'Photo of Director', 'PERSON', true, 25),
+('PRIVATE_LIMITED', 'DOCUMENT', 'ADDRESS_PROOF', 'Address Proof', 'Electricity / Telephone / Mobile Bill', 'PERSON', true, 26);
+
+
+INSERT INTO solvetax.company_registration_config
+(company_type, config_type, value, display_name, description, input_scope, is_multiple, sort_order)
+VALUES
+('PRIVATE_LIMITED', 'DOCUMENT', 'ELECTRICITY_BILL', 'Electricity Bill', 'Registered office address proof', 'COMPANY', false, 30),
+('PRIVATE_LIMITED', 'DOCUMENT', 'RENTAL_AGREEMENT', 'Rental Agreement', 'Office rental agreement', 'COMPANY', false, 31),
+('PRIVATE_LIMITED', 'DOCUMENT', 'NOC', 'No Objection Certificate', 'NOC from property owner', 'COMPANY', false, 32);
