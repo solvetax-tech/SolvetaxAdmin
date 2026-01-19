@@ -87,6 +87,10 @@ async def create_registration_person(payload: RegistrationPersonIn):
             payload.is_primary_customer
         )
     except Exception as e:
+        import asyncpg
+        if isinstance(e, asyncpg.UniqueViolationError):
+            logger.warning("[request_id=%s] Duplicate registration person data: %s", request_id, str(e))
+            raise HTTPException(status_code=409, detail="Duplicate registration person data")
         logger.exception(
             "[request_id=%s] Registration person create failed: %s",
             request_id, str(e)

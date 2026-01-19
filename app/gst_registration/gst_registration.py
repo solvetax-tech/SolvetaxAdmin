@@ -7,7 +7,6 @@ from typing import Optional, List
 import uuid
 from datetime import datetime
 from app.gst_registration.schemas import GSTRegistrationIn, GSTRegistrationOut, GSTRegistrationEditIn
-
 from app.utils import get_db_pool, DB_SCHEMA
 
 router = APIRouter(

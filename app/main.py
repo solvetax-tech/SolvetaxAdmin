@@ -68,16 +68,12 @@ from app.sign_up.login import router as login_router
 from app.sign_up.forgot import router as forgot_password_router
 from app.sign_up.employee_edit import router as employee_edit_router
 from app.customer_registration.customer import router as customer_router
-
 from app.gst_registration.gst_registration import router as gst_registration_router
 from app.gst_registration.gst_people import router as gst_people_router
 from app.gst_registration.gst_people import router as gst_people_config_router
 from app.gst_registration.gst_documents import router as gst_documents_router
 from app.gst_registration.registration_config import router as registration_config_router
 from app.gst_registration.gst_registration_config import router as gst_registration_config_router
-from app.company_registration.company_registration import router as company_registration_router
-from app.company_registration.company_people import router as company_people_router
-from app.company_registration.company_document import router as company_documents_router
 
 
 
@@ -91,8 +87,6 @@ if login_router:
     app.include_router(login_router)
 if forgot_password_router:
     app.include_router(forgot_password_router)
-
-
 if customer_router:
     app.include_router(customer_router)
 if gst_registration_router:
@@ -109,12 +103,6 @@ if gst_people_config_router:
     app.include_router(gst_people_config_router)
 if gst_documents_router:
     app.include_router(gst_documents_router)
-if company_registration_router:
-    app.include_router(company_registration_router)
-if company_people_router:
-    app.include_router(company_people_router)
-if company_documents_router:
-    app.include_router(company_documents_router)
 
 
 

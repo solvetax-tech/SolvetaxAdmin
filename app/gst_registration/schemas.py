@@ -1,7 +1,8 @@
 from pydantic import BaseModel, EmailStr, validator
 from .validators import validate_mobile, validate_gstin
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
+
 
 class GSTRegistrationIn(BaseModel):
     customer_id: int
@@ -27,8 +28,18 @@ class GSTRegistrationIn(BaseModel):
     def mobile_validator(cls, v):
         return validate_mobile(v)
 
+    @validator('pan')
+    def pan_validator(cls, v):
+        from app.gst_registration.validators import validate_pan
+        return validate_pan(v)
 
-from datetime import datetime, date
+    @validator('aadhaar', pre=True, always=True)
+    def aadhaar_validator(cls, v):
+        from app.gst_registration.validators import validate_aadhaar
+        if v is not None:
+            return validate_aadhaar(v)
+        return v
+
 
 class GSTRegistrationEditIn(BaseModel):
     gstin: Optional[str] = None
@@ -103,6 +114,21 @@ class RegistrationPersonIn(BaseModel):
             return validate_mobile(v)
         return v
 
+    @validator('pan')
+    def pan_validator(cls, v):
+        from app.gst_registration.validators import validate_pan
+        if v is not None:
+            return validate_pan(v)
+        return v
+
+    @validator('aadhaar')
+    def aadhaar_validator(cls, v):
+        # Basic Aadhaar validation: 12 digit numeric string
+        if v is not None:
+            if not (v.isdigit() and len(v) == 12):
+                raise ValueError('Aadhaar must be exactly 12 digits')
+        return v
+
 class RegistrationPersonEditIn(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = None
@@ -116,6 +142,20 @@ class RegistrationPersonEditIn(BaseModel):
     def mobile_validator(cls, v):
         if v is not None:
             return validate_mobile(v)
+        return v
+
+    @validator('pan')
+    def pan_validator(cls, v):
+        from app.gst_registration.validators import validate_pan
+        if v is not None:
+            return validate_pan(v)
+        return v
+
+    @validator('aadhaar')
+    def aadhaar_validator(cls, v):
+        from app.gst_registration.validators import validate_aadhaar
+        if v is not None:
+            return validate_aadhaar(v)
         return v
 
 class RegistrationPersonOut(BaseModel):
@@ -178,3 +218,12 @@ class RegistrationDocumentOut(BaseModel):
     uploaded_at: Optional[datetime] = None
     mobile: Optional[str] = None
 
+    @validator('gstin')
+    def gstin_validator(cls, v):
+        return validate_gstin(v)
+
+    @validator('mobile')
+    def mobile_validator(cls, v):
+        if v is not None:
+            return validate_mobile(v)
+        return v

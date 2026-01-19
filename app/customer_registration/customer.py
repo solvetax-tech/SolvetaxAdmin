@@ -29,6 +29,8 @@ router = APIRouter(
 
 @router.post("", response_model=CustomerOut)
 async def create_customer(payload: CustomerIn):
+    request_id = str(uuid.uuid4())
+    logger.info("[request_id=%s] Creating customer with email=***, mobile=***", request_id)
     pool = await get_db_pool()
     now = datetime.utcnow()
     # Check for existing active customer with same email or mobile
@@ -39,7 +41,6 @@ async def create_customer(payload: CustomerIn):
     """
     existing = await pool.fetchrow(check_sql, payload.email, payload.mobile)
     if existing:
-        request_id = str(uuid.uuid4())
         logger.warning("[request_id=%s] Active customer already exists with customer_id=%s, email=***, mobile=***", request_id, existing['customer_id'] if existing else 'N/A')
         raise HTTPException(status_code=409, detail="Active customer already exists with this email or mobile number.")
     try:
@@ -67,42 +68,126 @@ async def create_customer(payload: CustomerIn):
         )
 
         if not row:
-            logger.error("Customer creation failed for name: %s", payload.full_name)
+            logger.error("[request_id=%s] Customer creation failed for name: %s", request_id, payload.full_name)
             raise HTTPException(status_code=500, detail="Customer creation failed")
 
-        logger.info("Customer created: id=%s, name=%s", row["customer_id"], row["full_name"])
+        logger.info("[request_id=%s] Customer created: id=%s, name=%s", request_id, row["customer_id"], row["full_name"])
         return {**dict(row), "customer_id": row["customer_id"], "message": "Customer created successfully."}
     except Exception as e:
-        logger.exception("Exception during customer creation: %s", str(e))
+        logger.exception("[request_id=%s] Exception during customer creation: %s", request_id, str(e))
         raise
 
 
-# -------------------------------------------------------------------
-# LIST CUSTOMERS (PAGINATION + ACTIVE ONLY)
-# -------------------------------------------------------------------
 
 @router.get("", response_model=List[CustomerOut])
 async def list_customers(
+    customer_id: Optional[int] = None,
+    full_name: Optional[str] = None,
+    email: Optional[str] = None,
+    mobile: Optional[str] = None,
+    business_type: Optional[str] = None,
+    state: Optional[str] = None,
+    city: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    include_inactive: bool = Query(False),
+    from_date: Optional[datetime] = Query(
+        None, description="Start date (ISO 8601 format)"
+    ),
+    to_date: Optional[datetime] = Query(
+        None, description="End date (ISO 8601 format)"
+    ),
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    include_inactive: bool = Query(False)
+    offset: int = Query(0, ge=0)
 ):
+    request_id = str(uuid.uuid4())
+    logger.info(
+        "[request_id=%s] Listing customers customer_id=%s mobile=%s",
+        request_id, customer_id, "***" if mobile else None
+    )
+
     pool = await get_db_pool()
-    where_clause = "" if include_inactive else "WHERE is_active = TRUE"
+    conditions, values = [], []
+
+    if customer_id:
+        conditions.append(f"customer_id = ${len(values)+1}")
+        values.append(customer_id)
+
+    if full_name:
+        conditions.append(f"full_name ILIKE ${len(values)+1}")
+        values.append(f"%{full_name}%")
+
+    if email:
+        conditions.append(f"email ILIKE ${len(values)+1}")
+        values.append(f"%{email}%")
+
+    if mobile:
+        conditions.append(f"mobile = ${len(values)+1}")
+        values.append(mobile)
+
+    if business_type:
+        conditions.append(f"business_type = ${len(values)+1}")
+        values.append(business_type)
+
+    if state:
+        conditions.append(f"state = ${len(values)+1}")
+        values.append(state)
+
+    if city:
+        conditions.append(f"city = ${len(values)+1}")
+        values.append(city)
+
+    if is_active is not None:
+        conditions.append(f"is_active = ${len(values)+1}")
+        values.append(is_active)
+
+    if not include_inactive:
+        conditions.append(f"is_active = TRUE")
+
+    if from_date:
+        conditions.append(f"created_at >= ${len(values)+1}")
+        values.append(from_date)
+
+    if to_date:
+        conditions.append(f"created_at <= ${len(values)+1}")
+        values.append(to_date)
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
     sql = f"""
         SELECT *
           FROM {DB_SCHEMA}.customers
           {where_clause}
          ORDER BY created_at DESC
-         LIMIT $1 OFFSET $2
+         LIMIT ${len(values)+1} OFFSET ${len(values)+2}
     """
+
     try:
-        rows = await pool.fetch(sql, limit, offset)
-        logger.info("Listed customers: count=%d", len(rows))
-        return [{**dict(row), "customer_id": row["customer_id"], "message": "Customer listed successfully."} for row in rows]
+        values.extend([limit, offset])
+        rows = await pool.fetch(sql, *values)
+
+        logger.info(
+            "[request_id=%s] Customers filtered count=%d",
+            request_id, len(rows)
+        )
+
+        return [
+            {
+                **dict(row),
+                "customer_id": int(row["customer_id"]),
+                "message": "Customers listed successfully."
+            }
+            for row in rows
+        ]
+
     except Exception as e:
-        logger.exception("Exception during listing customers: %s", str(e))
-        raise
+        logger.exception(
+            "[request_id=%s] Exception during customer filtering: %s",
+            request_id, str(e)
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Exception during customer filtering"
+        )
 
 
 # -------------------------------------------------------------------
