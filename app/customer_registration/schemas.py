@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, validator
-from .validators import validate_mobile, validate_gstin
+from .validators import validate_mobile, validate_gstin, validate_pan, validate_aadhaar, validate_email
 from typing import Optional
 from datetime import datetime
 
@@ -18,6 +18,9 @@ class CustomerIn(BaseModel):
     @validator('mobile')
     def mobile_validator(cls, v):
         return validate_mobile(v)
+    @validator('email')
+    def email_validator(cls, v):
+        return validate_email(v)
 
 
 class CustomerEditIn(BaseModel):
@@ -35,6 +38,9 @@ class CustomerEditIn(BaseModel):
     @validator('mobile')
     def mobile_validator(cls, v):
         return validate_mobile(v)
+    @validator('email')
+    def email_validator(cls, v):
+        return validate_email(v)
 
 
 class CustomerOut(BaseModel):

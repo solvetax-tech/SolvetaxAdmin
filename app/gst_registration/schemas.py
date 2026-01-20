@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, validator
-from .validators import validate_mobile, validate_gstin
 from typing import Optional
 from datetime import datetime, date
+from app.utils import validate_pan, validate_aadhaar , validate_mobile, validate_gstin
 
 
 class GSTRegistrationIn(BaseModel):
@@ -30,15 +30,7 @@ class GSTRegistrationIn(BaseModel):
 
     @validator('pan')
     def pan_validator(cls, v):
-        from app.gst_registration.validators import validate_pan
-        return validate_pan(v)
-
-    @validator('aadhaar', pre=True, always=True)
-    def aadhaar_validator(cls, v):
-        from app.gst_registration.validators import validate_aadhaar
-        if v is not None:
-            return validate_aadhaar(v)
-        return v
+        return validate_pan(v)   
 
 
 class GSTRegistrationEditIn(BaseModel):
@@ -67,6 +59,10 @@ class GSTRegistrationEditIn(BaseModel):
     @validator('mobile')
     def mobile_validator(cls, v):
         return validate_mobile(v)
+     
+    @validator('pan')
+    def pan_validator(cls, v):
+        return validate_pan(v)
 
 
 class GSTRegistrationOut(BaseModel):
@@ -106,7 +102,9 @@ class RegistrationPersonIn(BaseModel):
 
     @validator('gstin')
     def gstin_validator(cls, v):
-        return validate_gstin(v)
+        if v is not None:
+            return validate_gstin(v)
+        
     
     @validator('mobile')
     def mobile_validator(cls, v):
@@ -116,7 +114,7 @@ class RegistrationPersonIn(BaseModel):
 
     @validator('pan')
     def pan_validator(cls, v):
-        from app.gst_registration.validators import validate_pan
+        from app.utils import validate_pan
         if v is not None:
             return validate_pan(v)
         return v

@@ -75,6 +75,58 @@ def passwords_match(password1: str, password2: str) -> bool:
     """
     return password1 == password2
 
+
+
+def validate_mobile(v):
+    if v is not None and (not v.isdigit() or len(v) != 10):
+        raise ValueError('Mobile number must be exactly 10 digits')
+    return v
+
+def validate_gstin(v):
+    if v is not None and (len(v) != 15 or not v.isalnum()):
+        raise ValueError('GSTIN must be exactly 15 alphanumeric characters')
+    return v
+
+def validate_pan(v):
+    if v is not None:
+        pattern = re.compile("^[A-Z]{5}[0-9]{4}[A-Z]$")
+        if not pattern.match(v):
+            raise ValueError('PAN must be 10 characters: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F)')
+    return v
+
+def validate_aadhaar(v):
+    if v is not None:
+        if not (v.isdigit() and len(v) == 12):
+            raise ValueError('Aadhaar must be exactly 12 digits')
+    return v
+
+async def check_duplicate_mobile_pan_aadhaar_for_gstin(pool, gstin: str, mobile: str = None, pan: str = None, aadhaar: str = None, exclude_id: str = None):
+    conditions = ["gstin = $1"]
+    values = [gstin]
+
+    if mobile:
+        conditions.append("mobile = ${}".format(len(values) + 1))
+        values.append(mobile)
+    if pan:
+        conditions.append("pan = ${}".format(len(values) + 1))
+        values.append(pan)
+    if aadhaar:
+        conditions.append("aadhaar = ${}".format(len(values) + 1))
+        values.append(aadhaar)
+
+    if exclude_id:
+        conditions.append("id != ${}".format(len(values) + 1))
+        values.append(exclude_id)
+
+    where_clause = " AND ".join(conditions)
+
+    sql = f"SELECT 1 FROM {DB_SCHEMA}.gst_registration WHERE {where_clause} LIMIT 1"
+
+    exists = await pool.fetchval(sql, *values)
+    return bool(exists)
+
+
+
 async def get_user_permissions(emp_id, conn):
     """
     Fetch all permissions for a user based on their roles (direct and via groups).

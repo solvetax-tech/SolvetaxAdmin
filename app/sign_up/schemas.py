@@ -17,9 +17,9 @@ class SignupRequest(BaseModel):
     @validator("phone_number")
     def validate_phone(cls, v):
         if v is not None:
-            # E.164 format: +[country][number], e.g., +1234567890
-            if not re.fullmatch(r"\+[1-9]\d{1,14}", v):
-                raise ValueError("Invalid E.164 phone number format")
+            # Validate phone number has exactly 10 digits
+            if not re.fullmatch(r"\d{10}", v):
+                raise ValueError("Phone number must be exactly 10 digits")
         return v
 
 class SignupResponse(BaseModel):

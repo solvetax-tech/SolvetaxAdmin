@@ -7,13 +7,13 @@ from typing import Optional, List
 import uuid
 from datetime import datetime
 from app.gst_registration.schemas import GSTRegistrationIn, GSTRegistrationOut, GSTRegistrationEditIn
-from app.utils import get_db_pool, DB_SCHEMA
+from app.utils import get_db_pool, DB_SCHEMA, check_duplicate_mobile_pan_aadhaar_for_gstin
+
 
 router = APIRouter(
     prefix="/api/v1/gst-registrations",
     tags=["GST Registration"]
 )
-
 # -------------------------------------------------------------------
 # CREATE GST REGISTRATION (RM INITIATES)
 # -------------------------------------------------------------------
@@ -27,13 +27,22 @@ async def create_gst_registration(payload: GSTRegistrationIn):
     # Check if customer_id and mobile exist in customers table
     check_sql = f"""
         SELECT customer_id FROM {DB_SCHEMA}.customers
-        WHERE customer_id = $1 AND mobile = $2
+        WHERE customer_id = $1 AND mobile = $2 AND is_active = TRUE
         LIMIT 1
     """
+
     customer_row = await pool.fetchrow(check_sql, payload.customer_id, payload.mobile)
     if not customer_row:
         logger.warning("Customer not found for customer_id=%s and mobile=%s. Register customer first.", payload.customer_id, payload.mobile)
         raise HTTPException(status_code=400, detail="Customer not found with given customer_id and mobile. Please register the customer first.")
+    
+        # Validate no duplicate mobile, pan or aadhaar for the same GSTIN
+    duplicate_exists = await check_duplicate_mobile_pan_aadhaar_for_gstin(
+        pool, payload.gstin, payload.mobile, payload.pan, None
+    )
+    if duplicate_exists:
+        logger.warning("Duplicate mobile or PAN or Aadhaar detected for GSTIN during update")
+        raise HTTPException(status_code=409, detail="Duplicate mobile or PAN or Aadhaar found for the same GSTIN")
 
     sql = f"""
         INSERT INTO {DB_SCHEMA}.gst_registration
@@ -311,6 +320,7 @@ async def edit_gst_registration(gstin: str, payload: GSTRegistrationEditIn):
     request_id = str(uuid.uuid4())
     logger.info("[request_id=%s] Editing GST registration: gstin=%s", request_id, gstin)
     pool = await get_db_pool()
+
     fields, values = [], []
     if payload.gstin is not None:
         fields.append("gstin=$%d" % (len(values)+1))
@@ -386,6 +396,7 @@ async def edit_gst_registration_by_mobile(mobile: str, payload: GSTRegistrationE
     request_id = str(uuid.uuid4())
     logger.info("[request_id=%s] Editing GST registration: mobile=***", request_id)
     pool = await get_db_pool()
+
     fields, values = [], []
     if payload.gstin is not None:
         fields.append("gstin=$%d" % (len(values)+1))

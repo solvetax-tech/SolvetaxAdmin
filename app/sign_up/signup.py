@@ -71,12 +71,8 @@ async def signup(
             )
         # Hash password
         password_hash = hash_password(payload.password)
-        # Ensure phone number is in E.164 format with +91 default if missing
+        # Use phone number as-is without checking or adding +91 prefix
         phone_number = str(payload.phone_number) if getattr(payload, "phone_number", None) is not None else None
-        if phone_number and not phone_number.startswith("+"):
-            import re
-            if re.fullmatch(r"\d{10}", phone_number):
-                phone_number = "+91" + phone_number
 
         user_data = {
             "username": payload.username,

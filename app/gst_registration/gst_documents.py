@@ -37,10 +37,7 @@ logger.setLevel(logging.INFO)
 @router.post("", response_model=RegistrationDocumentOut)
 async def create_registration_document(payload: RegistrationDocumentIn):
     request_id = str(uuid.uuid4())
-    logger.info(
-        "[request_id=%s] Creating registration document gstin=%s type=%s",
-        request_id, payload.gstin, payload.document_type
-    )
+    logger.info("[request_id=%s] Creating registration document gstin=%s type=%s", request_id, payload.gstin, payload.document_type)
 
     pool = await get_db_pool()
 
@@ -363,54 +360,6 @@ async def edit_registration_document_by_mobile(
         }
         for r in rows
     ]
-
-@router.get("/validate")
-async def validate_registration_document(
-    gstin: str,
-    document_type: Optional[str] = None,
-    person_id: Optional[int] = None,
-    mobile: Optional[str] = None
-):
-    request_id = str(uuid.uuid4())
-    logger.info(
-        "[request_id=%s] Validating registration document gstin=%s document_type=%s",
-        request_id, gstin, document_type
-    )
-
-    pool = await get_db_pool()
-    checks = {}
-
-    # Same document type already exists for GST
-    if document_type:
-        checks["document_type_exists_for_gstin"] = bool(
-            await pool.fetchval(
-                f"""
-                SELECT 1
-                  FROM {DB_SCHEMA}.registration_documents
-                 WHERE gstin=$1
-                   AND document_type=$2
-                """,
-                gstin, document_type
-            )
-        )
-
-    # Mobile already linked to document
-    if mobile:
-        checks["mobile_exists"] = bool(
-            await pool.fetchval(
-                f"""
-                SELECT 1
-                  FROM {DB_SCHEMA}.registration_documents
-                 WHERE mobile=$1
-                """,
-                mobile
-            )
-        )
-
-    return checks
-
-
-
 # -------------------------------------------------------------------
 # LOGGER SAFETY (MATCH OTHER FILES)
 # -------------------------------------------------------------------
