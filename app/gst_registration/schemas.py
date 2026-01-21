@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, validator
 from typing import Optional
 from datetime import datetime, date
-from app.utils import validate_pan, validate_aadhaar , validate_mobile, validate_gstin
+from app.utils import validate_pan, validate_aadhaar , validate_mobile, validate_gstin, validate_email
 
 
 class GSTRegistrationIn(BaseModel):
@@ -15,10 +15,14 @@ class GSTRegistrationIn(BaseModel):
     state: Optional[str] = None
     turnover_details: Optional[str] = None  # LESS_THAN_2CR / LESS_THAN_5CR / MORE_THAN_5CR
     created_by: Optional[int] = None
+    rm_id: Optional[int] = None
     gstin: Optional[str] = None
     is_filing_needed: Optional[bool] = True
     mobile: Optional[str] = None
     is_active: Optional[bool] = True
+    email: Optional[EmailStr] = None
+    secondary_email: Optional[EmailStr] = None
+    
 
     @validator('gstin')
     def gstin_validator(cls, v):
@@ -31,6 +35,14 @@ class GSTRegistrationIn(BaseModel):
     @validator('pan')
     def pan_validator(cls, v):
         return validate_pan(v)   
+    
+    @validator('email')
+    def email_validator(cls, v):
+        return validate_email(v)
+
+    @validator('secondary_email')
+    def secondary_email_validator(cls, v):
+        return validate_email(v)
 
 
 class GSTRegistrationEditIn(BaseModel):
@@ -51,6 +63,9 @@ class GSTRegistrationEditIn(BaseModel):
     is_filing_needed: Optional[bool] = True
     mobile: Optional[str] = None
     is_active: Optional[bool] = None
+    email: Optional[EmailStr] = None
+    secondary_email: Optional[EmailStr] = None
+    rm_id: Optional[int] = None
 
     @validator('gstin')
     def gstin_validator(cls, v):
@@ -63,14 +78,22 @@ class GSTRegistrationEditIn(BaseModel):
     @validator('pan')
     def pan_validator(cls, v):
         return validate_pan(v)
-
+    @validator('email')
+    def email_validator(cls, v):
+        return validate_email(v)
+    @validator('secondary_email')
+    def secondary_email_validator(cls, v):
+        return validate_email(v)
+    
 
 class GSTRegistrationOut(BaseModel):
     id: int
     customer_id: int
-    gstin: Optional[str]
+    gstin: Optional[str] = None
     username: str
     is_active: bool
+    email: Optional[EmailStr] = None
+    secondary_email: Optional[EmailStr] = None
     pan: str
     registration_type: Optional[str]
     ownership_category: Optional[str]
@@ -87,6 +110,7 @@ class GSTRegistrationOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     message: Optional[str] = None
+    rm_id: Optional[int] = None
 
 # Pydantic Models for RegistrationPerson
 class RegistrationPersonIn(BaseModel):
@@ -215,13 +239,3 @@ class RegistrationDocumentOut(BaseModel):
     verified_at: Optional[datetime] = None
     uploaded_at: Optional[datetime] = None
     mobile: Optional[str] = None
-
-    @validator('gstin')
-    def gstin_validator(cls, v):
-        return validate_gstin(v)
-
-    @validator('mobile')
-    def mobile_validator(cls, v):
-        if v is not None:
-            return validate_mobile(v)
-        return v

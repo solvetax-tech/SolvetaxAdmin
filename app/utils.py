@@ -83,7 +83,7 @@ def validate_mobile(v):
     return v
 
 def validate_gstin(v):
-    if v is not None and (len(v) != 15 or not v.isalnum()):
+    if v is not None and (not v.isdigit() or len(v) != 15):
         raise ValueError('GSTIN must be exactly 15 alphanumeric characters')
     return v
 
@@ -98,6 +98,13 @@ def validate_aadhaar(v):
     if v is not None:
         if not (v.isdigit() and len(v) == 12):
             raise ValueError('Aadhaar must be exactly 12 digits')
+    return v
+
+def validate_email(v):
+    if v is not None:
+        email_regex = r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)"
+        if not re.match(email_regex, v):
+            raise ValueError('Invalid email address')
     return v
 
 async def check_duplicate_mobile_pan_aadhaar_for_gstin(pool, gstin: str, mobile: str = None, pan: str = None, aadhaar: str = None, exclude_id: str = None):

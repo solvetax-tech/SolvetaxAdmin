@@ -14,6 +14,7 @@ class CustomerIn(BaseModel):
     business_type: Optional[str] = None
     state: Optional[str] = None
     city: Optional[str] = None
+    remark: Optional[str] = None
 
     @validator('mobile')
     def mobile_validator(cls, v):
@@ -33,6 +34,7 @@ class CustomerEditIn(BaseModel):
     business_type: Optional[str] = None
     state: Optional[str] = None
     city: Optional[str] = None
+    remark: Optional[str] = None
     is_active: Optional[bool] = None
 
     @validator('mobile')
@@ -54,6 +56,7 @@ class CustomerOut(BaseModel):
     business_type: Optional[str]
     state: Optional[str]
     city: Optional[str]
+    remark: Optional[str]
     is_active: bool
     created_at: datetime
     updated_at: datetime

@@ -95,8 +95,8 @@ async def create_customer(payload: CustomerIn):
         sql = f"""
             INSERT INTO {DB_SCHEMA}.customers
             (full_name, email, mobile, business_name, business_description,
-             business_image_url, business_type, state, city, created_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             business_image_url, business_type, state, city, remark, created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
             RETURNING *
         """
 
@@ -111,6 +111,7 @@ async def create_customer(payload: CustomerIn):
             payload.business_type,
             payload.state,
             payload.city,
+            payload.remark,
             now,
             now
         )
@@ -281,61 +282,6 @@ async def get_customer(customer_id: int):
     except Exception as e:
         logger.exception("Exception during get_customer: %s", str(e))
         raise
-
-
-# -------------------------------------------------------------------
-# FILTER BY CREATED DATE (WITH PAGINATION)
-# -------------------------------------------------------------------
-
-@router.get("/filter/by-created-date", response_model=List[CustomerOut], dependencies=[Depends(get_current_user)])
-async def get_customers_by_created_date(
-    from_date: Optional[datetime] = Query(
-        None,
-        description="Start date (ISO 8601 format: YYYY-MM-DDTHH:MM:SS)"
-    ),
-    to_date: Optional[datetime] = Query(
-        None,
-        description="End date (ISO 8601 format: YYYY-MM-DDTHH:MM:SS)"
-    ),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-):
-    """
-    Validations and checks performed before filtering customers by created date:
-    - User authentication is required (via token).
-    - Requires at least one of from_date or to_date parameters.
-    - Only active customers (is_active = TRUE) are included.
-    - Supports pagination with limit and offset.
-    """
-    pool = await get_db_pool()
-    conditions, values = ["is_active = TRUE"], []
-    if from_date:
-        conditions.append(f"created_at >= ${len(values)+1}")
-        values.append(from_date)
-    if to_date:
-        conditions.append(f"created_at <= ${len(values)+1}")
-        values.append(to_date)
-    if len(conditions) == 1:
-        logger.warning("from_date or to_date required for filter by created date")
-        raise HTTPException(status_code=400, detail="from_date or to_date required")
-    where_clause = " AND ".join(conditions)
-    sql = f"""
-        SELECT *
-          FROM {DB_SCHEMA}.customers
-         WHERE {where_clause}
-         ORDER BY created_at DESC
-         LIMIT ${len(values)+1} OFFSET ${len(values)+2}
-    """
-    try:
-        values.extend([limit, offset])
-        rows = await pool.fetch(sql, *values)
-        logger.info("Filtered customers by created date: count=%d", len(rows))
-        return [{**dict(row), "customer_id": row["customer_id"], "message": "Customer filtered by created date successfully."} for row in rows]
-    except Exception as e:
-        logger.exception("Exception during filter by created date: %s", str(e))
-        raise
-
-
 # -------------------------------------------------------------------
 # EDIT CUSTOMER (DATASOURCE-STYLE, PRODUCTION SAFE)
 # -------------------------------------------------------------------
@@ -430,6 +376,10 @@ async def edit_customer(customer_id: int, payload: CustomerEditIn):
         fields.append("city=$%d" % (len(values)+1))
         values.append(payload.city)
 
+    if payload.remark is not None:
+        fields.append("remark=$%d" % (len(values)+1))
+        values.append(payload.remark)
+
     if payload.is_active is not None:
         fields.append("is_active=$%d" % (len(values)+1))
         values.append(payload.is_active)
@@ -456,122 +406,4 @@ async def edit_customer(customer_id: int, payload: CustomerEditIn):
         return {**dict(row), "customer_id": row["customer_id"], "message": "Customer updated successfully."}
     except Exception as e:
         logger.exception("Exception during edit_customer: %s", str(e))
-        raise
-
-
-# -------------------------------------------------------------------
-# EDIT CUSTOMER BY MOBILE (DATASOURCE-STYLE, PRODUCTION SAFE)
-# -------------------------------------------------------------------
-
-
-@router.post("/mobile/{mobile}/edit", response_model=CustomerOut, dependencies=[Depends(get_current_user)])
-async def edit_customer_by_mobile(mobile: str, payload: CustomerEditIn):
-    """
-    Validations and checks performed before editing a customer by mobile:
-    - User authentication is required (via token).
-    - If full_name is provided, it must be non-empty.
-    - Email, if provided, is validated for format and checked for uniqueness among active customers excluding current.
-    - Mobile, if updated, is validated for format and checked for uniqueness among active customers excluding current mobile.
-    - URL format validation for business_image_url if provided.
-    - At least one field must be provided for update.
-    - Raises appropriate HTTPException on invalid data or conflicts.
-    """
-    pool = await get_db_pool()
-    fields, values = [], []
-
-    # Fetch current customer id by mobile for uniqueness exclusion
-    current_customer = await pool.fetchrow(f"""
-        SELECT customer_id FROM {DB_SCHEMA}.customers WHERE mobile=$1 AND is_active=TRUE LIMIT 1
-    """, mobile)
-    current_customer_id = current_customer["customer_id"] if current_customer else None
-
-    if current_customer_id is None:
-        raise HTTPException(status_code=404, detail="Customer not found")
-
-    # Validate and collect update fields with strict validation
-    if payload.full_name is not None:
-        fields.append("full_name=$%d" % (len(values) + 1))
-        values.append(payload.full_name)
-
-    if payload.email is not None:
-        if not validate_email(payload.email):
-            logger.warning("Invalid email format during update by mobile: %s", payload.email)
-            raise HTTPException(status_code=400, detail="Invalid email format")
-
-        # Check email uniqueness excluding current customer id
-        existing_email = await pool.fetchrow(f"""
-            SELECT customer_id FROM {DB_SCHEMA}.customers
-            WHERE TRIM(email) = TRIM($1) AND is_active=TRUE AND customer_id != $2
-            LIMIT 1
-        """, payload.email, current_customer_id)
-        if existing_email:
-            raise HTTPException(status_code=409, detail="Email already in use by another active customer")
-        fields.append("email=$%d" % (len(values) + 1))
-        values.append(payload.email)
-
-    if payload.mobile is not None:
-        if not validate_mobile(payload.mobile):
-            logger.warning("Invalid mobile format during update by mobile: %s", payload.mobile)
-            raise HTTPException(status_code=400, detail="Invalid mobile number format")
-
-        # Check mobile uniqueness excluding current customer id
-        existing_mobile = await pool.fetchrow(f"""
-            SELECT customer_id FROM {DB_SCHEMA}.customers
-            WHERE TRIM(mobile) = TRIM($1) AND is_active=TRUE AND customer_id != $2
-            LIMIT 1
-        """, payload.mobile, current_customer_id)
-        if existing_mobile:
-            raise HTTPException(status_code=409, detail="Mobile number already in use by another active customer")
-        fields.append("mobile=$%d" % (len(values) + 1))
-        values.append(payload.mobile)
-
-    if payload.business_image_url is not None:
-        try:
-            validate_url(payload.business_image_url)
-        except ValueError as e:
-            logger.warning("Invalid business_image_url format during update by mobile: %s", str(e))
-            raise HTTPException(status_code=400, detail="Invalid business_image_url format")
-        fields.append("business_image_url=$%d" % (len(values) + 1))
-        values.append(payload.business_image_url)
-
-    if payload.business_type is not None:
-        fields.append("business_type=$%d" % (len(values) + 1))
-        values.append(payload.business_type)
-
-    if payload.state is not None:
-        fields.append("state=$%d" % (len(values) + 1))
-        values.append(payload.state)
-
-    if payload.city is not None:
-        fields.append("city=$%d" % (len(values) + 1))
-        values.append(payload.city)
-
-    if payload.is_active is not None:
-        fields.append("is_active=$%d" % (len(values) + 1))
-        values.append(payload.is_active)
-
-    if not fields:
-        logger.warning("No fields to update for mobile=%s", mobile)
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    fields.append("updated_at=NOW()")
-    sql = f"""
-        UPDATE {DB_SCHEMA}.customers
-        SET {', '.join(fields)}
-        WHERE mobile=$%d
-        RETURNING *
-    """ % (len(values) + 1)
-    values.append(mobile)
-
-    try:
-        row = await pool.fetchrow(sql, *values)
-        if not row:
-            logger.warning("Customer not found for update: mobile=%s", mobile)
-            raise HTTPException(status_code=404, detail="Customer not found")
-        request_id = str(uuid.uuid4())
-        # Logging more context to avoid confusion of IDs and values
-        logger.info("[request_id=%s] Customer updated by mobile: customer_id=%s, mobile=***, email=***", request_id, row["customer_id"] if row else "N/A")
-        return {**dict(row), "customer_id": row["customer_id"], "message": "Customer updated successfully."}
-    except Exception as e:
-        logger.exception("Exception during edit_customer_by_mobile: %s", str(e))
         raise

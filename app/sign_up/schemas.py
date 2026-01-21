@@ -12,7 +12,7 @@ class SignupRequest(BaseModel):
     phone_number: Optional[str] = Field(
         None, description="Optional phone number in E.164 format (e.g., +1234567890)"
     )
-    role: Optional[str] = Field("customer", description="User role (default: customer)")
+    role: Optional[str] = Field("SE", description="User role (default: SE)")
 
     @validator("phone_number")
     def validate_phone(cls, v):
