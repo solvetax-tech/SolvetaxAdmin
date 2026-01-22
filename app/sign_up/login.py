@@ -1,7 +1,7 @@
 from fastapi import APIRouter, status, HTTPException, Request, Body
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
-from app.utils import get_db_pool, DB_SCHEMA, hash_password
+from app.utils import get_db_pool, DB_SCHEMA, hash_password, get_user_permissions
 from dotenv import load_dotenv
 import os
 import jwt
@@ -10,6 +10,7 @@ import uuid
 import logging
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+
 
 # Load environment variables from project root .env
 load_dotenv()
@@ -79,7 +80,9 @@ async def login(
             now = now_aware.replace(tzinfo=None)
             exp = (now_aware + timedelta(minutes=JWT_EXPIRE_MINUTES)).replace(tzinfo=None)
             device = {"type": "browser", "os": "linux"}  # Mocked device info
-            permissions = {}
+            # Fetch permissions from DB and build permissions dict
+            permissions = await get_user_permissions(employee["emp_id"], conn)
+
             jwt_payload = {
                 "sub": str(employee["emp_id"]),
                 "iat": int(now_aware.timestamp()),

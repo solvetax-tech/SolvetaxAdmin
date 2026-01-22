@@ -48,10 +48,15 @@ CREATE TABLE solvetax.customers (
 	business_type varchar(50) NULL,
 	state varchar(100) NULL,
 	city varchar(100) NULL,
+	remark text NULL,
+	rm_id int8 NULL,
+	op_id int8 NULL,
 	is_active bool DEFAULT true NULL,
 	created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
-	CONSTRAINT customers_pkey PRIMARY KEY (customer_id)
+	CONSTRAINT customers_pkey PRIMARY KEY (customer_id),
+	CONSTRAINT customers_rm_id_fkey FOREIGN KEY (rm_id) REFERENCES solvetax.employees(emp_id),
+	CONSTRAINT customers_op_id_fkey FOREIGN KEY (op_id) REFERENCES solvetax.employees(emp_id)
 );
 
 
@@ -103,20 +108,23 @@ CREATE TABLE solvetax.gst_registration (
 	is_rcm_applicable bool DEFAULT false NULL,
 	turnover_details varchar(50) DEFAULT 'LESS_THAN_2CR'::character varying NULL,
 	created_by int8 NULL,
+	rm_id int8 NULL,
 	created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
 	is_filing_needed bool DEFAULT true NULL,
+	is_active bool DEFAULT true NULL,
 	mobile varchar(20) NULL,
+	email varchar(150) NULL,
+	secondary_email varchar(150) NULL,
 	CONSTRAINT gst_registration_gstin_key UNIQUE (gstin),
 	CONSTRAINT gst_registration_pkey PRIMARY KEY (id),
-	CONSTRAINT gst_registration_username_key UNIQUE (username)
+	CONSTRAINT gst_registration_username_key UNIQUE (username),
+	CONSTRAINT gst_registration_created_by_fkey FOREIGN KEY (created_by) REFERENCES solvetax.employees(emp_id),
+	CONSTRAINT gst_registration_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES solvetax.customers(customer_id),
+	CONSTRAINT gst_registration_rm_id_fkey FOREIGN KEY (rm_id) REFERENCES solvetax.employees(emp_id)
 );
 
 
--- solvetax.gst_registration foreign keys
-
-ALTER TABLE solvetax.gst_registration ADD CONSTRAINT gst_registration_created_by_fkey FOREIGN KEY (created_by) REFERENCES solvetax.employees(emp_id);
-ALTER TABLE solvetax.gst_registration ADD CONSTRAINT gst_registration_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES solvetax.customers(customer_id);
 
 
 -- solvetax.gst_registration_config definition
@@ -173,6 +181,7 @@ ALTER TABLE solvetax.password_reset_otps ADD CONSTRAINT password_reset_otps_emp_
 
 -- DROP TABLE solvetax.session_audit_log;
 
+
 CREATE TABLE solvetax.session_audit_log (
 	id bigserial NOT NULL,
 	emp_id int8 NOT NULL,
@@ -181,13 +190,12 @@ CREATE TABLE solvetax.session_audit_log (
 	action_time timestamp DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	action_details text NULL,
 	ip_address varchar(50) NULL,
-	CONSTRAINT session_audit_log_pkey PRIMARY KEY (id)
+	CONSTRAINT session_audit_log_pkey PRIMARY KEY (id),
+	CONSTRAINT session_audit_log_emp_id_fkey FOREIGN KEY (emp_id) REFERENCES solvetax.employees(emp_id)
 );
 
 
--- solvetax.session_audit_log foreign keys
 
-ALTER TABLE solvetax.session_audit_log ADD CONSTRAINT session_audit_log_emp_id_fkey FOREIGN KEY (emp_id) REFERENCES solvetax.employees(emp_id);
 
 
 -- solvetax.session_token definition
@@ -195,6 +203,7 @@ ALTER TABLE solvetax.session_audit_log ADD CONSTRAINT session_audit_log_emp_id_f
 -- Drop table
 
 -- DROP TABLE solvetax.session_token;
+
 
 CREATE TABLE solvetax.session_token (
 	id bigserial NOT NULL,
@@ -205,13 +214,10 @@ CREATE TABLE solvetax.session_token (
 	expires_at timestamp NULL,
 	device_info text NULL,
 	ip_address varchar(50) NULL,
-	CONSTRAINT session_token_pkey PRIMARY KEY (id)
+	CONSTRAINT session_token_pkey PRIMARY KEY (id),
+	CONSTRAINT session_token_emp_id_fkey FOREIGN KEY (emp_id) REFERENCES solvetax.employees(emp_id)
 );
 
-
--- solvetax.session_token foreign keys
-
-ALTER TABLE solvetax.session_token ADD CONSTRAINT session_token_emp_id_fkey FOREIGN KEY (emp_id) REFERENCES solvetax.employees(emp_id);
 
 
 CREATE TABLE solvetax.registration_config (
@@ -286,6 +292,7 @@ INSERT INTO solvetax.registration_config (ownership_category, config_type, value
 
 -- DROP TABLE solvetax.registration_persons;
 
+
 CREATE TABLE solvetax.registration_persons (
 	person_id bigserial NOT NULL,
 	customer_id int8 NULL,
@@ -297,20 +304,17 @@ CREATE TABLE solvetax.registration_persons (
 	email varchar(150) NULL,
 	mobile varchar(20) NULL,
 	is_primary_customer bool DEFAULT false NULL,
-	CONSTRAINT registration_persons_pkey PRIMARY KEY (person_id)
+	CONSTRAINT registration_persons_pkey PRIMARY KEY (person_id),
+	CONSTRAINT registration_persons_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES solvetax.customers(customer_id) ON DELETE CASCADE,
+	CONSTRAINT registration_persons_gstin_fkey FOREIGN KEY (gstin) REFERENCES solvetax.gst_registration(gstin) ON DELETE CASCADE
 );
-
-
--- solvetax.registration_persons foreign keys
-
-ALTER TABLE solvetax.registration_persons ADD CONSTRAINT registration_persons_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES solvetax.customers(customer_id) ON DELETE CASCADE;
-ALTER TABLE solvetax.registration_persons ADD CONSTRAINT registration_persons_gstin_fkey FOREIGN KEY (gstin) REFERENCES solvetax.gst_registration(gstin) ON DELETE CASCADE;
 
 -- solvetax.registration_documents definition
 
 -- Drop table
 
 -- DROP TABLE solvetax.registration_documents;
+
 
 CREATE TABLE solvetax.registration_documents (
 	document_id bigserial NOT NULL,
@@ -323,17 +327,12 @@ CREATE TABLE solvetax.registration_documents (
 	verified_by int8 NULL,
 	verified_at timestamp NULL,
 	uploaded_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
-	mobile varchar(10) NULL,
-	CONSTRAINT registration_documents_pkey PRIMARY KEY (document_id)
+	mobile varchar(20) NULL,
+	CONSTRAINT registration_documents_pkey PRIMARY KEY (document_id),
+	CONSTRAINT registration_documents_verified_by_fkey FOREIGN KEY (verified_by) REFERENCES solvetax.employees(emp_id),
+	CONSTRAINT registration_documents_gstin_fkey FOREIGN KEY (gstin) REFERENCES solvetax.gst_registration(gstin) ON DELETE CASCADE,
+	CONSTRAINT registration_documents_person_id_fkey FOREIGN KEY (person_id) REFERENCES solvetax.registration_persons(person_id)
 );
-
-
--- solvetax.registration_documents foreign keys
-
-ALTER TABLE solvetax.registration_documents ADD CONSTRAINT registration_documents_gstin_fkey FOREIGN KEY (gstin) REFERENCES solvetax.gst_registration(gstin) ON DELETE CASCADE;
-ALTER TABLE solvetax.registration_documents ADD CONSTRAINT registration_documents_person_id_fkey FOREIGN KEY (person_id) REFERENCES solvetax.registration_persons(person_id);
-ALTER TABLE solvetax.registration_documents ADD CONSTRAINT registration_documents_verified_by_fkey FOREIGN KEY (verified_by) REFERENCES solvetax.employees(emp_id);
-
 
 
 CREATE TABLE solvetax.company_registration (
