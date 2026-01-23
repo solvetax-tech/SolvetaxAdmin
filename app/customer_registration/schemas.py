@@ -39,7 +39,6 @@ class CustomerEditIn(BaseModel):
     remark: Optional[str] = None
     rm_id: Optional[int] = None
     op_id: Optional[int] = None
-
     is_active: Optional[bool] = None
 
     @validator('mobile')

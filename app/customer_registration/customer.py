@@ -95,8 +95,8 @@ async def create_customer(payload: CustomerIn):
         sql = f"""
             INSERT INTO {DB_SCHEMA}.customers
             (full_name, email, mobile, business_name, business_description,
-             business_image_url, business_type, state, city, remark, created_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+             business_image_url, business_type, state, city, remark, rm_id, op_id, created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             RETURNING *
         """
 
@@ -112,6 +112,8 @@ async def create_customer(payload: CustomerIn):
             payload.state,
             payload.city,
             payload.remark,
+            payload.rm_id,
+            payload.op_id,
             now,
             now
         )
@@ -140,6 +142,8 @@ async def list_customers(
     business_type: Optional[str] = None,
     state: Optional[str] = None,
     city: Optional[str] = None,
+    rm_id: Optional[int] = None,
+    op_id: Optional[int] = None,
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
     from_date: Optional[datetime] = Query(
@@ -199,6 +203,14 @@ async def list_customers(
     if city:
         conditions.append(f"city = ${len(values)+1}")
         values.append(city)
+
+    if rm_id:
+        conditions.append(f"rm_id = ${len(values)+1}")
+        values.append(rm_id)
+
+    if op_id:
+        conditions.append(f"op_id = ${len(values)+1}")
+        values.append(op_id)
 
     if is_active is not None:
         conditions.append(f"is_active = ${len(values)+1}")
@@ -383,6 +395,14 @@ async def edit_customer(customer_id: int, payload: CustomerEditIn):
     if payload.is_active is not None:
         fields.append("is_active=$%d" % (len(values)+1))
         values.append(payload.is_active)
+
+    if payload.rm_id is not None:
+        fields.append("rm_id=$%d" % (len(values)+1))
+        values.append(payload.rm_id)
+
+    if payload.op_id is not None:
+        fields.append("op_id=$%d" % (len(values)+1))
+        values.append(payload.op_id)
 
     if not fields:
         logger.warning("No fields to update for customer_id=%s", customer_id)
