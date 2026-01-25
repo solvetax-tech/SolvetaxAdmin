@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status, HTTPException, Request, Body
+from fastapi import APIRouter, status, HTTPException, Request, Body, Depends
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from app.utils import get_db_pool, DB_SCHEMA, hash_password, get_user_permissions
@@ -10,14 +10,15 @@ import uuid
 import logging
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from app.security.rbac import require_permission
 
 
 # Load environment variables from project root .env
 load_dotenv()
-
 JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))
+
 
 router = APIRouter(prefix="/app/v1", tags=["Login"])
 
@@ -45,6 +46,7 @@ Both email and password are required.
 })
 async def login(
     request: Request,
+    dependencies=[Depends(require_permission("EMPLOYEE", "READ"))],
     payload: LoginRequest = Body(
         ..., 
         example={
@@ -150,7 +152,8 @@ class LogoutRequest(BaseModel):
 async def logout(
     request: Request,
     payload: LogoutRequest = Body(..., example={"session_token": "example-session-token"})
-):
+,dependencies=[Depends(require_permission("EMPLOYEE", "READ"))]):
+                       
     """
     POST /api/v1/logout
 

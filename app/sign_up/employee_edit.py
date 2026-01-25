@@ -1,15 +1,19 @@
 import logging
 import uuid
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends , Request
 from pydantic import EmailStr, constr, validator
 from typing import Optional, List
 import re
 from datetime import datetime
+from app.security.rbac import require_permission
 from app.utils import get_db_pool, DB_SCHEMA
 from app.sign_up.schemas import EmployeeEditIn, EmployeeOut
 from app.customer_registration.validators import validate_email, validate_mobile, validate_url
 from fastapi.security import OAuth2PasswordBearer
 from app.token_validator import validate_token
+from app.security.rbac import require_permission
+from app.security.team_scope import require_team_access
+
 
 logger = logging.getLogger("employee")
 if not logger.hasHandlers():
@@ -32,8 +36,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=401, detail=f"Invalid authentication credentials: {reason}")
     return {"token": token}
 
-@router.post("/{emp_id}/edit", response_model=EmployeeOut, dependencies=[Depends(get_current_user)])
-async def edit_employee(emp_id: int, payload: EmployeeEditIn):
+@router.post("/{emp_id}/edit", response_model=EmployeeOut, dependencies=[Depends(require_permission("USER_ACCESS", "WRITE"))])
+async def edit_employee(emp_id: int, payload: EmployeeEditIn, request: Request):
+    # ✅ Team-scope validation
+    await require_team_access(emp_id, request)
     pool = await get_db_pool()
     fields, values = [], []
 
@@ -163,7 +169,7 @@ async def edit_employee(emp_id: int, payload: EmployeeEditIn):
         raise HTTPException(status_code=500, detail="An unexpected error occurred during employee update")
 
 
-@router.get("/filter", response_model=List[EmployeeOut], dependencies=[Depends(get_current_user)])
+@router.get("/filter", response_model=List[EmployeeOut], dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
 async def filter_employees(
     emp_id: Optional[int] = Query(None, alias="emp_id"),
     full_name: Optional[str] = Query(None),
@@ -181,6 +187,7 @@ async def filter_employees(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0)
 ):
+    
     pool = await get_db_pool()
     conditions = []
     values = []

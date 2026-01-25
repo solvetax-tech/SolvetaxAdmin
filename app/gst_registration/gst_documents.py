@@ -1,8 +1,10 @@
 import logging
 import uuid
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
 from datetime import datetime
+from app.security.rbac import require_permission
+from app.security.team_scope import require_team_access
 
 from app.gst_registration.schemas import (
     RegistrationDocumentIn,
@@ -34,7 +36,7 @@ logger.setLevel(logging.INFO)
 # CREATE REGISTRATION DOCUMENT
 # -------------------------------------------------------------------
 
-@router.post("", response_model=RegistrationDocumentOut)
+@router.post("", response_model=RegistrationDocumentOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def create_registration_document(payload: RegistrationDocumentIn):
     request_id = str(uuid.uuid4())
     logger.info("[request_id=%s] Creating registration document gstin=%s type=%s", request_id, payload.gstin, payload.document_type)
@@ -105,7 +107,7 @@ async def create_registration_document(payload: RegistrationDocumentIn):
 # LIST REGISTRATION DOCUMENTS
 # -------------------------------------------------------------------
 
-@router.get("", response_model=List[RegistrationDocumentOut])
+@router.get("", response_model=List[RegistrationDocumentOut], dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
 async def list_registration_documents(
     gstin: Optional[str] = None,
     person_id: Optional[int] = None,
@@ -193,7 +195,7 @@ async def list_registration_documents(
         )
     
 
-@router.get("/{document_id}", response_model=RegistrationDocumentOut)
+@router.get("/{document_id}", response_model=RegistrationDocumentOut, dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
 async def get_registration_document(document_id: int):
     request_id = str(uuid.uuid4())
     logger.info(
@@ -230,7 +232,7 @@ async def get_registration_document(document_id: int):
 # EDIT REGISTRATION DOCUMENT BY ID (DYNAMIC)
 # -------------------------------------------------------------------
 
-@router.post("/{document_id}/edit", response_model=RegistrationDocumentOut)
+@router.post("/{document_id}/edit", response_model=RegistrationDocumentOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def edit_registration_document(
     document_id: int,
     payload: RegistrationDocumentEditIn
@@ -292,7 +294,7 @@ async def edit_registration_document(
 
 
 
-@router.post("/by-mobile/{mobile}/edit", response_model=List[RegistrationDocumentOut])
+@router.post("/by-mobile/{mobile}/edit", response_model=List[RegistrationDocumentOut], dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def edit_registration_document_by_mobile(
     mobile: str,
     payload: RegistrationDocumentEditIn

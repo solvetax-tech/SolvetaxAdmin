@@ -4,6 +4,11 @@ import uuid
 import re
 import asyncpg
 import ssl
+import logging
+import logging
+from datetime import datetime
+from typing import Dict, Any
+from asyncpg.exceptions import PostgresError
 from dotenv import load_dotenv
 
 # Load .env from project root
@@ -133,41 +138,61 @@ async def check_duplicate_mobile_pan_aadhaar_for_gstin(pool, gstin: str, mobile:
     return bool(exists)
 
 
+async def get_user_permissions(emp_id: int, conn, DB_SCHEMA="solvetax") -> Dict[str, Any]:
+    """
+    Fetch permissions from DB based on employee_roles only (no group_roles).
 
-async def get_user_permissions(emp_id, conn):
+    Returns format:
+    {
+      "platform": {
+         "EMPLOYEE": ["READ", "WRITE"],
+         "USER_ACCESS": ["READ"]
+      }
+    }
     """
-    Fetch all permissions for a user based on their roles (direct and via groups).
-    Returns a permissions dict suitable for JWT.
-    """
-    # DB_SCHEMA is now imported from module level
-    # 1. Get all role_ids for the employee (direct and via groups)
-    role_ids = set()
-    # Direct employee-role assignments
-    rows = await conn.fetch(f"""
-        SELECT role_id FROM {DB_SCHEMA}.t_us_user_role WHERE emp_id = $1
-    """, emp_id)
-    for row in rows:
-        role_ids.add(row["role_id"])
-    # Roles via group membership
-    rows = await conn.fetch(f"""
-        SELECT ra.role_id
-        FROM {DB_SCHEMA}.t_us_group_member gm
-        JOIN {DB_SCHEMA}.t_rl_role_assignment ra ON gm.group_id = ra.group_id
-        WHERE gm.emp_id = $1
-    """, emp_id)
-    for row in rows:
-        role_ids.add(row["role_id"])
-    if not role_ids:
+    try:
+        # ✅ 1) fetch role ids for this employee
+        rows = await conn.fetch(
+            f"""
+            SELECT role_id
+            FROM {DB_SCHEMA}.employee_roles
+            WHERE emp_id = $1 AND is_active = true
+            """,
+            emp_id,
+        )
+
+        role_ids = [r["role_id"] for r in rows]
+
+        if not role_ids:
+            logging.info(f"[permissions] No roles found for emp_id={emp_id}")
+            return {"platform": {}}
+
+        # ✅ 2) fetch feature permissions for those roles
+        rows = await conn.fetch(
+            f"""
+            SELECT f.feature_code, rf.permission_code
+            FROM {DB_SCHEMA}.role_features rf
+            JOIN {DB_SCHEMA}.features f ON rf.feature_id = f.id
+            WHERE rf.role_id = ANY($1::bigint[]) AND rf.is_active = true
+            """,
+            role_ids
+        )
+
+        permissions = {"platform": {}}
+
+        for row in rows:
+            feature = row["feature_code"]
+            perm = row["permission_code"]
+
+            permissions["platform"].setdefault(feature, set()).add(perm)
+
+        # ✅ convert set → list for JWT JSON
+        for feature in permissions["platform"]:
+            permissions["platform"][feature] = sorted(list(permissions["platform"][feature]))
+
+        logging.info(f"[permissions] emp_id={emp_id} permissions={permissions}")
+        return permissions
+
+    except Exception as e:
+        logging.error(f"[permissions] Error fetching permissions for emp_id={emp_id}: {e}")
         return {"platform": {}}
-    # 2. Get all features/permissions for these roles
-    rows = await conn.fetch(f"""
-        SELECT f.feature_code, rf.permission_code
-        FROM {DB_SCHEMA}.t_rl_role_feature rf
-        JOIN {DB_SCHEMA}.t_ft_feature f ON rf.feature_id = f.id
-        WHERE rf.role_id = ANY($1::int[])
-    """, list(role_ids))
-    # 3. Build permissions dict
-    permissions = {"platform": {}}
-    for row in rows:
-        permissions["platform"][row["feature_code"]] = row["permission_code"]
-    return permissions

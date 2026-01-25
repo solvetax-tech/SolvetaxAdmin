@@ -1,14 +1,15 @@
 import logging
 import uuid
 from fastapi import Request
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 import uuid
 from datetime import datetime
 from app.gst_registration.schemas import GSTRegistrationIn, GSTRegistrationOut, GSTRegistrationEditIn
 from app.utils import get_db_pool, DB_SCHEMA
-
+from app.security.rbac import require_permission
+from app.security.team_scope import require_team_access
 
 router = APIRouter(
     prefix="/api/v1/gst-registrations",
@@ -28,7 +29,7 @@ logger.setLevel(logging.INFO)
 # CREATE GST REGISTRATION (RM INITIATES)
 # -------------------------------------------------------------------
 
-@router.post("", response_model=GSTRegistrationOut)
+@router.post("", response_model=GSTRegistrationOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def create_gst_registration(payload: GSTRegistrationIn):
     request_id = str(uuid.uuid4())
     logger.info("[request_id=%s] Creating GST registration for customer_id=%s, username=%s, mobile=***, email=***", request_id, payload.customer_id, payload.username)
@@ -109,7 +110,7 @@ async def create_gst_registration(payload: GSTRegistrationIn):
     result["message"] = "GST registration created successfully."
     return result
 
-@router.get("", response_model=List[GSTRegistrationOut])
+@router.get("", response_model=List[GSTRegistrationOut], dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
 async def list_gst_registrations(
     customer_id: Optional[int] = None,
     gstin: Optional[str] = None,
@@ -229,7 +230,7 @@ async def list_gst_registrations(
 # GET GST REGISTRATION BY ID
 # -------------------------------------------------------------------
 
-@router.get("/{gstin}", response_model=GSTRegistrationOut)
+@router.get("/{gstin}", response_model=GSTRegistrationOut, dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
 async def get_gst_registration(gstin: str):
     logger.info("Fetching GST registration by gstin=%s", gstin)
     pool = await get_db_pool()
@@ -253,7 +254,7 @@ async def get_gst_registration(gstin: str):
 # EDIT GST REGISTRATION (PORTAL UPDATES)
 # -------------------------------------------------------------------
 
-@router.post("/{gstin}/edit", response_model=GSTRegistrationOut)
+@router.post("/{gstin}/edit", response_model=GSTRegistrationOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def edit_gst_registration(gstin: str, payload: GSTRegistrationEditIn):
     request_id = str(uuid.uuid4())
     logger.info("[request_id=%s] Editing GST registration: gstin=%s", request_id, gstin)

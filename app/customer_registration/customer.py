@@ -9,6 +9,7 @@ from app.customer_registration.schemas import CustomerIn, CustomerOut, CustomerE
 from app.customer_registration.validators import validate_email, validate_mobile, validate_url
 from app.utils import get_db_pool, DB_SCHEMA
 from fastapi.security import OAuth2PasswordBearer
+from app.security.rbac import require_permission
 
 # Configure logger
 logger = logging.getLogger("customer")
@@ -50,7 +51,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 # CREATE CUSTOMER (is_active DEFAULT = TRUE at DB level)
 # -------------------------------------------------------------------
 
-@router.post("", response_model=CustomerOut, dependencies=[Depends(get_current_user)])
+@router.post("", response_model=CustomerOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def create_customer(payload: CustomerIn):
     """
     Validations and checks performed before customer creation:
@@ -95,8 +96,8 @@ async def create_customer(payload: CustomerIn):
         sql = f"""
             INSERT INTO {DB_SCHEMA}.customers
             (full_name, email, mobile, business_name, business_description,
-             business_image_url, business_type, state, city, remark, rm_id, op_id, created_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+             business_image_url, business_type, state, city, remark, rm_id, op_id, referral_id, created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
             RETURNING *
         """
 
@@ -114,6 +115,7 @@ async def create_customer(payload: CustomerIn):
             payload.remark,
             payload.rm_id,
             payload.op_id,
+            payload.referral_id,
             now,
             now
         )
@@ -133,7 +135,7 @@ async def create_customer(payload: CustomerIn):
 # LIST CUSTOMERS (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
 
-@router.get("", response_model=List[CustomerOut], dependencies=[Depends(get_current_user)])
+@router.get("", response_model=List[CustomerOut], dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
 async def list_customers(
     customer_id: Optional[int] = None,
     full_name: Optional[str] = None,
@@ -176,39 +178,39 @@ async def list_customers(
     pool = await get_db_pool()
     conditions, values = [], []
 
-    if customer_id:
+    if customer_id is not None:
         conditions.append(f"customer_id = ${len(values)+1}")
         values.append(customer_id)
 
-    if full_name:
+    if full_name is not None:
         conditions.append(f"full_name ILIKE ${len(values)+1}")
         values.append(f"%{full_name}%")
 
-    if email:
+    if email is not None:
         conditions.append(f"email ILIKE ${len(values)+1}")
         values.append(f"%{email}%")
 
-    if mobile:
+    if mobile is not None:
         conditions.append(f"mobile = ${len(values)+1}")
         values.append(mobile)
 
-    if business_type:
+    if business_type is not None:
         conditions.append(f"business_type = ${len(values)+1}")
         values.append(business_type)
 
-    if state:
+    if state is not None:
         conditions.append(f"state = ${len(values)+1}")
         values.append(state)
 
-    if city:
+    if city is not None:
         conditions.append(f"city = ${len(values)+1}")
         values.append(city)
 
-    if rm_id:
+    if rm_id is not None:
         conditions.append(f"rm_id = ${len(values)+1}")
         values.append(rm_id)
 
-    if op_id:
+    if op_id is not None:
         conditions.append(f"op_id = ${len(values)+1}")
         values.append(op_id)
 
@@ -219,11 +221,11 @@ async def list_customers(
     if not include_inactive:
         conditions.append(f"is_active = TRUE")
 
-    if from_date:
+    if from_date is not None:
         conditions.append(f"created_at >= ${len(values)+1}")
         values.append(from_date)
 
-    if to_date:
+    if to_date is not None:
         conditions.append(f"created_at <= ${len(values)+1}")
         values.append(to_date)
 
@@ -270,7 +272,7 @@ async def list_customers(
 # GET CUSTOMER BY ID
 # -------------------------------------------------------------------
 
-@router.get("/{customer_id}", response_model=CustomerOut, dependencies=[Depends(get_current_user)])
+@router.get("/{customer_id}", response_model=CustomerOut, dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
 async def get_customer(customer_id: int):
     """
     Validations and checks performed before fetching a customer by ID:
@@ -298,7 +300,7 @@ async def get_customer(customer_id: int):
 # EDIT CUSTOMER (DATASOURCE-STYLE, PRODUCTION SAFE)
 # -------------------------------------------------------------------
 
-@router.post("/{customer_id}/edit", response_model=CustomerOut, dependencies=[Depends(get_current_user)])
+@router.post("/{customer_id}/edit", response_model=CustomerOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def edit_customer(customer_id: int, payload: CustomerEditIn):
     """
     Validations and checks performed before editing a customer by id:
@@ -320,13 +322,13 @@ async def edit_customer(customer_id: int, payload: CustomerEditIn):
     if payload.full_name is not None:
         if not payload.full_name.strip():
             raise HTTPException(status_code=400, detail="Full name cannot be empty")
-        fields.append("full_name=$%d" % (len(values)+1))
+        fields.append(f"full_name=$%d" % (len(values)+1))
         values.append(payload.full_name)
 
     # Validate and check email uniqueness if provided
     if payload.email is not None:
         if not validate_email(payload.email):
-            logger.warning("[request_id=%s] Invalid email format during update: %s", customer_id, payload.email)
+            logger.warning(f"[request_id=%s] Invalid email format during update: %s" % (customer_id, payload.email))
             raise HTTPException(status_code=400, detail="Invalid email format")
 
         # Check email uniqueness excluding current customer
@@ -337,13 +339,13 @@ async def edit_customer(customer_id: int, payload: CustomerEditIn):
         """, payload.email, customer_id)
         if existing_email:
             raise HTTPException(status_code=409, detail="Email already in use by another active customer")
-        fields.append("email=$%d" % (len(values)+1))
+        fields.append(f"email=$%d" % (len(values)+1))
         values.append(payload.email)
 
     # Validate and check mobile uniqueness if provided
     if payload.mobile is not None:
         if not validate_mobile(payload.mobile):
-            logger.warning("[request_id=%s] Invalid mobile format during update: %s", customer_id, payload.mobile)
+            logger.warning(f"[request_id=%s] Invalid mobile format during update: %s" % (customer_id, payload.mobile))
             raise HTTPException(status_code=400, detail="Invalid mobile number format")
 
         # Check that the provided mobile belongs to this customer or is unique
@@ -356,56 +358,60 @@ async def edit_customer(customer_id: int, payload: CustomerEditIn):
             logger.info(f"Existing mobile check: found customer_id={existing_mobile['customer_id']} for mobile={payload.mobile} updating customer_id={customer_id}")
         if existing_mobile:
             raise HTTPException(status_code=409, detail="Mobile number already in use by another active customer")
-        fields.append("mobile=$%d" % (len(values)+1))
+        fields.append(f"mobile=$%d" % (len(values)+1))
         values.append(payload.mobile)
 
     if payload.business_name is not None:
-        fields.append("business_name=$%d" % (len(values)+1))
+        fields.append(f"business_name=$%d" % (len(values)+1))
         values.append(payload.business_name)
 
     if payload.business_description is not None:
-        fields.append("business_description=$%d" % (len(values)+1))
+        fields.append(f"business_description=$%d" % (len(values)+1))
         values.append(payload.business_description)
 
     if payload.business_image_url is not None:
         try:
             validate_url(payload.business_image_url)
         except ValueError as e:
-            logger.warning("[request_id=%s] Invalid business_image_url format during update: %s", customer_id, str(e))
+            logger.warning(f"[request_id=%s] Invalid business_image_url format during update: %s" % (customer_id, str(e)))
             raise HTTPException(status_code=400, detail="Invalid business_image_url format")
-        fields.append("business_image_url=$%d" % (len(values)+1))
+        fields.append(f"business_image_url=$%d" % (len(values)+1))
         values.append(payload.business_image_url)
 
     if payload.business_type is not None:
-        fields.append("business_type=$%d" % (len(values)+1))
+        fields.append(f"business_type=$%d" % (len(values)+1))
         values.append(payload.business_type)
 
     if payload.state is not None:
-        fields.append("state=$%d" % (len(values)+1))
+        fields.append(f"state=$%d" % (len(values)+1))
         values.append(payload.state)
 
     if payload.city is not None:
-        fields.append("city=$%d" % (len(values)+1))
+        fields.append(f"city=$%d" % (len(values)+1))
         values.append(payload.city)
 
     if payload.remark is not None:
-        fields.append("remark=$%d" % (len(values)+1))
+        fields.append(f"remark=$%d" % (len(values)+1))
         values.append(payload.remark)
 
     if payload.is_active is not None:
-        fields.append("is_active=$%d" % (len(values)+1))
+        fields.append(f"is_active=$%d" % (len(values)+1))
         values.append(payload.is_active)
 
     if payload.rm_id is not None:
-        fields.append("rm_id=$%d" % (len(values)+1))
+        fields.append(f"rm_id=$%d" % (len(values)+1))
         values.append(payload.rm_id)
 
     if payload.op_id is not None:
-        fields.append("op_id=$%d" % (len(values)+1))
+        fields.append(f"op_id=$%d" % (len(values)+1))
         values.append(payload.op_id)
 
+    if payload.referral_id is not None:
+        fields.append(f"referral_id=$%d" % (len(values)+1))
+        values.append(payload.referral_id)
+
     if not fields:
-        logger.warning("No fields to update for customer_id=%s", customer_id)
+        logger.warning(f"No fields to update for customer_id=%s" % customer_id)
         raise HTTPException(status_code=400, detail="No fields to update")
 
     fields.append("updated_at=NOW()")
@@ -416,14 +422,15 @@ async def edit_customer(customer_id: int, payload: CustomerEditIn):
         RETURNING *
     """ % (len(values)+1)
     values.append(customer_id)
+
     try:
         row = await pool.fetchrow(sql, *values)
         if not row:
-            logger.warning("Customer not found for update: id=%s", customer_id)
+            logger.warning(f"Customer not found for update: id=%s" % customer_id)
             raise HTTPException(status_code=404, detail="Customer not found")
         request_id = str(uuid.uuid4())
-        logger.info("[request_id=%s] Customer updated: customer_id=%s, mobile=***, email=***", request_id, customer_id)
+        logger.info(f"[request_id=%s] Customer updated: customer_id=%s, mobile=***, email=***" % (request_id, customer_id))
         return {**dict(row), "customer_id": row["customer_id"], "message": "Customer updated successfully."}
     except Exception as e:
-        logger.exception("Exception during edit_customer: %s", str(e))
+        logger.exception(f"Exception during edit_customer: %s" % str(e))
         raise

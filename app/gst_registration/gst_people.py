@@ -1,8 +1,11 @@
 import logging
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query , Depends
 from typing import Optional, List
+from app.security.rbac import require_permission
+from app.security.team_scope import require_team_access
+
 
 from app.gst_registration.schemas import (
     RegistrationPersonIn,
@@ -27,7 +30,7 @@ logger.setLevel(logging.INFO)
 # CREATE REGISTRATION PERSON
 # -------------------------------------------------------------------
 
-@router.post("", response_model=RegistrationPersonOut)
+@router.post("", response_model=RegistrationPersonOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def create_registration_person(payload: RegistrationPersonIn):
     request_id = str(uuid.uuid4())
     logger.info("[request_id=%s] Creating registration person gstin=%s role=%s", request_id, payload.gstin, payload.role)
@@ -83,7 +86,7 @@ async def create_registration_person(payload: RegistrationPersonIn):
 # LIST REGISTRATION PERSONS
 # -------------------------------------------------------------------
 
-@router.get("", response_model=List[RegistrationPersonOut])
+@router.get("", response_model=List[RegistrationPersonOut], dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
 async def list_registration_persons(
     gstin: Optional[str] = None,
     customer_id: Optional[int] = None,
@@ -135,7 +138,7 @@ async def list_registration_persons(
 # EDIT REGISTRATION PERSON (ALL UPDATES GUARDED)
 # -------------------------------------------------------------------
 
-@router.post("/{person_id}/edit", response_model=RegistrationPersonOut)
+@router.post("/{person_id}/edit", response_model=RegistrationPersonOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def edit_registration_person(person_id: int, payload: RegistrationPersonEditIn):
     request_id = str(uuid.uuid4())
     logger.info("[request_id=%s] Editing registration person person_id=%s", request_id, person_id)
@@ -181,7 +184,7 @@ async def edit_registration_person(person_id: int, payload: RegistrationPersonEd
 # EDIT REGISTRATION PERSON BY GSTIN (DYNAMIC)
 # -------------------------------------------------------------------
 
-@router.post("/by-gstin/{gstin}/edit", response_model=List[RegistrationPersonOut])
+@router.post("/by-gstin/{gstin}/edit", response_model=List[RegistrationPersonOut], dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def edit_registration_person_by_gstin(
     gstin: str,
     payload: RegistrationPersonEditIn
@@ -230,7 +233,7 @@ async def edit_registration_person_by_gstin(
 # EDIT REGISTRATION PERSON BY MOBILE (DYNAMIC)
 # -------------------------------------------------------------------
 
-@router.post("/by-mobile/{mobile}/edit", response_model=List[RegistrationPersonOut])
+@router.post("/by-mobile/{mobile}/edit", response_model=List[RegistrationPersonOut], dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
 async def edit_registration_person_by_mobile(
     mobile: str,
     payload: RegistrationPersonEditIn
