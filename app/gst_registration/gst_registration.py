@@ -139,23 +139,23 @@ async def list_gst_registrations(
     pool = await get_db_pool()
     conditions, values = [], []
 
-    if customer_id:
+    if customer_id is not None:
         conditions.append(f"customer_id = ${len(values)+1}")
         values.append(customer_id)
 
-    if gstin:
+    if gstin is not None:
         conditions.append(f"gstin = ${len(values)+1}")
         values.append(gstin)
 
-    if mobile:
+    if mobile is not None:
         conditions.append(f"mobile = ${len(values)+1}")
         values.append(mobile)
 
-    if email:
+    if email is not None:
         conditions.append(f"email = ${len(values)+1}")
         values.append(email)
 
-    if secondary_email:
+    if secondary_email is not None:
         conditions.append(f"secondary_email = ${len(values)+1}")
         values.append(secondary_email)
 
@@ -163,11 +163,11 @@ async def list_gst_registrations(
         conditions.append(f"rm_id = ${len(values)+1}")
         values.append(rm_id)
 
-    if business_type:
+    if business_type is not None:
         conditions.append(f"business_type = ${len(values)+1}")
         values.append(business_type)
 
-    if registration_status:
+    if registration_status is not None:
         conditions.append(f"registration_status = ${len(values)+1}")
         values.append(registration_status)
 
@@ -175,11 +175,11 @@ async def list_gst_registrations(
         conditions.append(f"is_active = ${len(values)+1}")
         values.append(is_active)
 
-    if from_date:
+    if from_date is not None:
         conditions.append(f"created_at >= ${len(values)+1}")
         values.append(from_date)
 
-    if to_date:
+    if to_date is not None:
         conditions.append(f"created_at <= ${len(values)+1}")
         values.append(to_date)
 
