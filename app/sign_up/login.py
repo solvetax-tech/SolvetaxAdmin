@@ -1,5 +1,5 @@
 from fastapi import APIRouter, status, HTTPException, Request, Body, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from fastapi.responses import JSONResponse
 from app.utils import get_db_pool, DB_SCHEMA, hash_password, get_user_permissions
 from dotenv import load_dotenv
@@ -8,17 +8,14 @@ import jwt
 from datetime import datetime, timedelta, timezone
 import uuid
 import logging
-from pydantic import BaseModel, EmailStr
 from typing import Optional
 from app.security.rbac import require_permission
-
 
 # Load environment variables from project root .env
 load_dotenv()
 JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))
-
 
 router = APIRouter(prefix="/app/v1", tags=["Login"])
 
@@ -38,15 +35,17 @@ Request JSON body:
 Both email and password are required.
 """
 
-@router.post("/login", responses={
-    200: {"description": "JWT token issued."},
-    400: {"description": "Validation failed"},
-    401: {"description": "Invalid credentials or MFA not verified"},
-    503: {"description": "Service temporarily unavailable. Please try again later."},
-})
+@router.post(
+    "/login",
+    responses={
+        200: {"description": "JWT token issued."},
+        400: {"description": "Validation failed"},
+        401: {"description": "Invalid credentials or MFA not verified"},
+        503: {"description": "Service temporarily unavailable. Please try again later."},
+    }
+)
 async def login(
     request: Request,
-    dependencies=[Depends(require_permission("EMPLOYEE", "READ"))],
     payload: LoginRequest = Body(
         ..., 
         example={
@@ -60,7 +59,7 @@ async def login(
     email = payload.email
     if not password or not email:
         logging.warning(f"Missing credentials: password={password}, email={email}")
-        return JSONResponse(status_code=400, content={"error": "Validation failed", "fields": {"credentials": "Provide both email and password"}})
+        raise HTTPException(status_code=400, detail="Validation failed: Provide both email and password")
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         # Allow multiple sessions: do not deactivate previous sessions
@@ -70,12 +69,12 @@ async def login(
         logging.info(f"Employee lookup result: {employee}")
         if not employee:
             logging.warning("Employee not found or invalid credentials.")
-            return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
+            raise HTTPException(status_code=401, detail="Invalid email credentials")
         # 2. Check password
         logging.info("Checking password hash...")
         if employee["password_hash"] != hash_password(password):
             logging.warning("Password hash does not match.")
-            return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
+            raise HTTPException(status_code=401, detail="Invalid password credentials")
         # 3. Issue JWT with device and permissions
         try:
             now_aware = datetime.now(timezone.utc)
@@ -97,7 +96,7 @@ async def login(
             logging.info(f"JWT created successfully.")
         except Exception as e:
             logging.error(f"Error creating JWT: {e}")
-            return JSONResponse(status_code=503, content={"error": "Service temporarily unavailable. Please try again later."})
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again later.")
         # 4. Store JWT token as session_token in the database
         session_token = token
         expires_at = now_aware + timedelta(minutes=JWT_EXPIRE_MINUTES)
@@ -148,12 +147,12 @@ class LogoutRequest(BaseModel):
         401: {"description": "Unauthorized."},
         503: {"description": "Service temporarily unavailable."},
     },
+    dependencies=[Depends(require_permission("EMPLOYEE", "READ"))]
 )
 async def logout(
     request: Request,
     payload: LogoutRequest = Body(..., example={"session_token": "example-session-token"})
-,dependencies=[Depends(require_permission("EMPLOYEE", "READ"))]):
-                       
+):
     """
     POST /api/v1/logout
 
@@ -162,10 +161,10 @@ async def logout(
         - JSON body: { "session_token": "..." } (from login response 'session_token' field)
 
     Example curl:
-        curl -X POST \
-            -H "Authorization: Bearer <JWT token>" \
-            -H "Content-Type: application/json" \
-            -d '{"session_token": "<session_token>"}' \
+        curl -X POST \\
+            -H "Authorization: Bearer <JWT token>" \\
+            -H "Content-Type: application/json" \\
+            -d '{"session_token": "<session_token>"}' \\
             http://localhost:8000/app/v1/logout
 
     Example request body:
@@ -186,7 +185,7 @@ async def logout(
             # Get emp_id from JWT token in Authorization header
             auth_header = request.headers.get("Authorization")
             if not auth_header or not auth_header.startswith("Bearer "):
-                return JSONResponse(status_code=401, content={"error": "Missing or invalid Authorization header."})
+                raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
             jwt_token = auth_header.split(" ", 1)[1]
             payload = jwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
             emp_id = int(payload["sub"])
@@ -217,13 +216,13 @@ async def logout(
                     emp_id, session_token, "LOGOUT", "Session logout successful", ip_address
                 )
                 logging.info(f"Session revoked successfully for session_token={session_token}")
-                return JSONResponse(status_code=200, content={
+                return {
                     "message": "Session is revoked",
                     "session_token": session_token
-                })
+                }
             else:
                 logging.info(f"Session already inactive or invalid session_token={session_token}")
-                return JSONResponse(status_code=400, content={"error": "Session token is already inactive or does not exist."})
+                raise HTTPException(status_code=400, detail="Session token is already inactive or does not exist.")
         except Exception as e:
             logging.error(f"Error revoking session: {e}")
-            return JSONResponse(status_code=503, content={"error": "Service temporarily unavailable."})
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable.")

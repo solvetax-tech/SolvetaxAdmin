@@ -4,7 +4,6 @@ import re
 from datetime import datetime
 
 class SignupRequest(BaseModel):
-    emp_id: Optional[int] = Field(None, description="Employee ID (auto-generated)")
     username: Annotated[str, constr(strip_whitespace=True, min_length=1, max_length=100)] = Field(..., description="Desired username")
     email: EmailStr = Field(..., description="User's email address")
     password: Annotated[str, constr(min_length=8)] = Field(..., description="User's password (must be strong)")

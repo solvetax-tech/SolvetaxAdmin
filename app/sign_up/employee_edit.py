@@ -1,11 +1,9 @@
 import logging
-import uuid
 from fastapi import APIRouter, HTTPException, Query, Depends , Request
-from pydantic import EmailStr, constr, validator
+from pydantic import constr, validator
+import asyncpg
 from typing import Optional, List
-import re
 from datetime import datetime
-from app.security.rbac import require_permission
 from app.utils import get_db_pool, DB_SCHEMA
 from app.sign_up.schemas import EmployeeEditIn, EmployeeOut
 from app.customer_registration.validators import validate_email, validate_mobile, validate_url
@@ -30,143 +28,123 @@ router = APIRouter(
     tags=["Employees"]
 )
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    valid, reason = await validate_token(token)
-    if not valid:
-        raise HTTPException(status_code=401, detail=f"Invalid authentication credentials: {reason}")
-    return {"token": token}
-
 @router.post("/{emp_id}/edit", response_model=EmployeeOut, dependencies=[Depends(require_permission("USER_ACCESS", "WRITE"))])
-async def edit_employee(emp_id: int, payload: EmployeeEditIn, request: Request):
-    # ✅ Team-scope validation
-    await require_team_access(emp_id, request)
+async def edit_employee(emp_id: int, payload: EmployeeEditIn):
     pool = await get_db_pool()
     fields, values = [], []
 
-    if payload.username is not None:
-        fields.append("username=$%d" % (len(values)+1))
-        values.append(payload.username)
+    # Normalize and trim email and phone_number inputs if provided
+    email_norm = payload.email.strip().lower() if payload.email is not None else None
+    phone_number_norm = payload.phone_number.strip() if payload.phone_number is not None else None
 
-    if payload.email is not None:
+    async with pool.acquire() as conn:
+        if payload.username is not None:
+            fields.append("username=$%d" % (len(values)+1))
+            values.append(payload.username)
+
+        if email_norm is not None:
+            try:
+                if not validate_email(email_norm):
+                    logger.warning("Invalid email format during update: %s", email_norm)
+                    raise HTTPException(status_code=400, detail="Invalid email format")
+            except ValueError as e:
+                logger.warning("Validation error validating email: %s", str(e))
+                raise HTTPException(status_code=400, detail=str(e))
+            # Check uniqueness excluding current employee
+            existing_email = await conn.fetchval(
+                f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE lower(trim(email))=$1 AND emp_id<>$2 LIMIT 1",
+                email_norm, emp_id
+            )
+            if existing_email:
+                raise HTTPException(status_code=400, detail="Email already in use by another employee")
+            fields.append("email=$%d" % (len(values)+1))
+            values.append(email_norm)
+
+        if payload.first_name is not None:
+            fields.append("first_name=$%d" % (len(values)+1))
+            values.append(payload.first_name)
+
+        if payload.last_name is not None:
+            fields.append("last_name=$%d" % (len(values)+1))
+            values.append(payload.last_name)
+
+        if phone_number_norm is not None:
+            try:
+                if not validate_mobile(phone_number_norm):
+                    logger.warning("Invalid mobile format during update: %s", phone_number_norm)
+                    raise HTTPException(status_code=400, detail="Invalid mobile number format")
+            except ValueError as e:
+                logger.warning("Validation error validating mobile number: %s", str(e))
+                raise HTTPException(status_code=400, detail=str(e))
+            # Check uniqueness excluding current employee and only active employees
+            existing_phone = await conn.fetchval(
+                f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE trim(phone_number)=$1 AND emp_id<>$2 AND is_active=TRUE LIMIT 1",
+                phone_number_norm, emp_id
+            )
+            if existing_phone:
+                raise HTTPException(status_code=400, detail="Phone number already in use by another employee")
+            fields.append("phone_number=$%d" % (len(values)+1))
+            values.append(phone_number_norm)
+
+        if payload.role is not None:
+            fields.append("role=$%d" % (len(values)+1))
+            values.append(payload.role)
+
+        if payload.is_active is not None:
+            fields.append("is_active=$%d" % (len(values)+1))
+            values.append(payload.is_active)
+
+        if payload.employee_image_url is not None:
+            try:
+                validate_url(payload.employee_image_url)
+            except ValueError as e:
+                logger.warning("Invalid employee_image_url format during update: %s", str(e))
+                raise HTTPException(status_code=400, detail="Invalid employee_image_url format")
+            fields.append("employee_image_url=$%d" % (len(values)+1))
+            values.append(payload.employee_image_url)
+
+        if not fields:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        fields.append("updated_at=NOW()")
+        sql = f"""
+            UPDATE {DB_SCHEMA}.employees
+            SET {', '.join(fields)}
+            WHERE emp_id=$%d
+            RETURNING *
+        """ % (len(values)+1)
+        values.append(emp_id)
+
         try:
-            if not validate_email(payload.email):
-                logger.warning("Invalid email format during update: %s", payload.email)
-                raise HTTPException(status_code=400, detail="Invalid email format")
-        except ValueError as e:
-            logger.warning("Validation error validating email: %s", str(e))
-            raise HTTPException(status_code=400, detail=str(e))
-        # Check uniqueness excluding current employee
-        existing_email = await pool.fetchval(
-            f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE email=$1 AND emp_id<>$2 LIMIT 1",
-            payload.email, emp_id
-        )
-        if existing_email:
-            raise HTTPException(status_code=400, detail="Email already in use by another employee")
-        fields.append("email=$%d" % (len(values)+1))
-        values.append(payload.email)
+            async with conn.transaction():
+                row = await conn.fetchrow(sql, *values)
+                if not row:
+                    raise HTTPException(status_code=404, detail="Employee not found")
 
-    if payload.first_name is not None:
-        fields.append("first_name=$%d" % (len(values)+1))
-        values.append(payload.first_name)
-
-    if payload.last_name is not None:
-        fields.append("last_name=$%d" % (len(values)+1))
-        values.append(payload.last_name)
-
-    if payload.phone_number is not None:
-        try:
-            if not validate_mobile(payload.phone_number):
-                logger.warning("Invalid mobile format during update: %s", payload.phone_number)
-                raise HTTPException(status_code=400, detail="Invalid mobile number format")
-        except ValueError as e:
-            logger.warning("Validation error validating mobile number: %s", str(e))
-            raise HTTPException(status_code=400, detail=str(e))
-        # Check uniqueness excluding current employee
-        existing_phone = await pool.fetchval(
-            f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE phone_number=$1 AND emp_id<>$2 LIMIT 1",
-            payload.phone_number, emp_id
-        )
-        if existing_phone:
-            raise HTTPException(status_code=400, detail="Phone number already in use by another employee")
-        fields.append("phone_number=$%d" % (len(values)+1))
-        values.append(payload.phone_number)
-
-    if payload.role is not None:
-        fields.append("role=$%d" % (len(values)+1))
-        values.append(payload.role)
-
-    if payload.is_active is not None:
-        fields.append("is_active=$%d" % (len(values)+1))
-        values.append(payload.is_active)
-
-    if payload.employee_image_url is not None:
-        try:
-            validate_url(payload.employee_image_url)
-        except ValueError as e:
-            logger.warning("Invalid employee_image_url format during update: %s", str(e))
-            raise HTTPException(status_code=400, detail="Invalid employee_image_url format")
-        fields.append("employee_image_url=$%d" % (len(values)+1))
-        values.append(payload.employee_image_url)
-
-    if not fields:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    fields.append("updated_at=NOW()")
-    sql = f"""
-        UPDATE {DB_SCHEMA}.employees
-        SET {', '.join(fields)}
-        WHERE emp_id=$%d
-        RETURNING *
-    """ % (len(values)+1)
-    values.append(emp_id)
-
-    try:
-        row = await pool.fetchrow(sql, *values)
-        if not row:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-        return {
-            **dict(row),
-            "emp_id": row["emp_id"],
-            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-            "message": "Employee updated successfully."
-        }
-    except Exception as e:
-        logger.exception("Exception during edit_employee: %s", str(e))
-        error_str = str(e).lower()
-        if "undefinedcolumnerror" in error_str or "column" in error_str:
-            detail_msg = "Database column error: " + str(e)
-            raise HTTPException(status_code=400, detail=detail_msg)
-        if "not found" in error_str:
-            raise HTTPException(status_code=404, detail="Employee not found")
-    fields.append("updated_at=NOW()")
-    sql = f"""
-        UPDATE {DB_SCHEMA}.employees
-        SET {', '.join(fields)}
-        WHERE emp_id=$%d
-        RETURNING *
-    """ % (len(values)+1)
-    values.append(emp_id)
-
-    try:
-        row = await pool.fetchrow(sql, *values)
-        if not row:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-        return {**dict(row), "emp_id": row["emp_id"], "message": "Employee updated successfully."}
-
-    except Exception as e:
-        logger.exception("Exception during edit_employee: %s", str(e))
-        error_str = str(e).lower()
-        if "undefinedcolumnerror" in error_str or "column" in error_str:
-            detail_msg = "Database column error: " + str(e)
-            raise HTTPException(status_code=400, detail=detail_msg)
-        if "not found" in error_str:
-            raise HTTPException(status_code=404, detail="Employee not found")
-        if "email already in use" in error_str or "phone number already in use" in error_str:
-            raise HTTPException(status_code=400, detail=str(e))
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during employee update")
+                return {
+                    **dict(row),
+                    "emp_id": row["emp_id"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                    "message": "Employee updated successfully."
+                }
+        except asyncpg.exceptions.UniqueViolationError as e:
+            logger.warning(f"Unique violation during edit_employee: {str(e)}")
+            raise HTTPException(status_code=409, detail="Duplicate field value violates unique constraint")
+        except asyncpg.exceptions.ForeignKeyViolationError as e:
+            logger.warning(f"Foreign key violation during edit_employee: {str(e)}")
+            raise HTTPException(status_code=400, detail="Invalid foreign key reference")
+        except Exception as e:
+            logger.exception("Exception during edit_employee: %s", str(e))
+            error_str = str(e).lower()
+            if "undefinedcolumnerror" in error_str or "column" in error_str:
+                detail_msg = "Database column error: " + str(e)
+                raise HTTPException(status_code=400, detail=detail_msg)
+            if "not found" in error_str:
+                raise HTTPException(status_code=404, detail="Employee not found")
+            if "email already in use" in error_str or "phone number already in use" in error_str:
+                raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=500, detail="An unexpected error occurred during employee update")
 
 
 @router.get("/filter", response_model=List[EmployeeOut], dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
@@ -191,65 +169,65 @@ async def filter_employees(
     pool = await get_db_pool()
     conditions = []
     values = []
+    async with pool.acquire() as conn:
+        if emp_id is not None:
+            conditions.append(f"emp_id = ${len(values)+1}")
+            values.append(emp_id)
 
-    if emp_id is not None:
-        conditions.append(f"emp_id = ${len(values)+1}")
-        values.append(emp_id)
+        if full_name is not None:
+            conditions.append(f"(first_name || ' ' || last_name) ILIKE ${len(values)+1}")
+            values.append(f"%{full_name}%")
 
-    if full_name is not None:
-        conditions.append(f"(first_name || ' ' || last_name) ILIKE ${len(values)+1}")
-        values.append(f"%{full_name}%")
+        if email is not None:
+            conditions.append(f"email ILIKE ${len(values)+1}")
+            values.append(f"%{email}%")
 
-    if email is not None:
-        conditions.append(f"email ILIKE ${len(values)+1}")
-        values.append(f"%{email}%")
+        if phone_number is not None:
+            conditions.append(f"phone_number = ${len(values)+1}")
+            values.append(phone_number)
 
-    if phone_number is not None:
-        conditions.append(f"phone_number = ${len(values)+1}")
-        values.append(phone_number)
+        if role is not None:
+            conditions.append(f"role = ${len(values)+1}")
+            values.append(role)
 
-    if role is not None:
-        conditions.append(f"role = ${len(values)+1}")
-        values.append(role)
+        if is_active is not None:
+            conditions.append(f"is_active = ${len(values)+1}")
+            values.append(is_active)
 
-    if is_active is not None:
-        conditions.append(f"is_active = ${len(values)+1}")
-        values.append(is_active)
+        if not include_inactive and is_active is None:
+            conditions.append("is_active = TRUE")
 
-    if not include_inactive and is_active is None:
-        conditions.append("is_active = TRUE")
+        if from_date is not None:
+            conditions.append(f"created_at >= ${len(values)+1}")
+            values.append(from_date)
 
-    if from_date is not None:
-        conditions.append(f"created_at >= ${len(values)+1}")
-        values.append(from_date)
+        if to_date is not None:
+            conditions.append(f"created_at <= ${len(values)+1}")
+            values.append(to_date)
 
-    if to_date is not None:
-        conditions.append(f"created_at <= ${len(values)+1}")
-        values.append(to_date)
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        sql = f"""
+            SELECT *
+              FROM {DB_SCHEMA}.employees
+              {where_clause}
+             ORDER BY created_at DESC
+             LIMIT ${len(values)+1} OFFSET ${len(values)+2}
+        """
+        values.extend([limit, offset])
 
-    sql = f"""
-        SELECT *
-          FROM {DB_SCHEMA}.employees
-          {where_clause}
-         ORDER BY created_at DESC
-         LIMIT ${len(values)+1} OFFSET ${len(values)+2}
-    """
-    values.extend([limit, offset])
-
-    try:
-        rows = await pool.fetch(sql, *values)
-        return [
-            {
-                **dict(row),
-                "emp_id": row["emp_id"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                "message": "Employee filtered successfully."
-            }
-            for row in rows
-        ]
-    except Exception as e:
-        logger.exception("Exception during employee filtering: %s", str(e))
-        raise
+        try:
+            rows = await conn.fetch(sql, *values)
+            return [
+                {
+                    **dict(row),
+                    "emp_id": row["emp_id"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                    "message": "Employee filtered successfully."
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.exception("Exception during employee filtering: %s", str(e))
+            raise
