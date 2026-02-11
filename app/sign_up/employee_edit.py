@@ -4,9 +4,8 @@ from pydantic import constr, validator
 import asyncpg
 from typing import Optional, List
 from datetime import datetime
-from app.utils import get_db_pool, DB_SCHEMA
+from app.utils import get_db_pool, DB_SCHEMA, validate_email, validate_mobile, validate_url
 from app.sign_up.schemas import EmployeeEditIn, EmployeeOut
-from app.customer_registration.validators import validate_email, validate_mobile, validate_url
 from fastapi.security import OAuth2PasswordBearer
 from app.token_validator import validate_token
 from app.security.rbac import require_permission
@@ -43,13 +42,6 @@ async def edit_employee(emp_id: int, payload: EmployeeEditIn):
             values.append(payload.username)
 
         if email_norm is not None:
-            try:
-                if not validate_email(email_norm):
-                    logger.warning("Invalid email format during update: %s", email_norm)
-                    raise HTTPException(status_code=400, detail="Invalid email format")
-            except ValueError as e:
-                logger.warning("Validation error validating email: %s", str(e))
-                raise HTTPException(status_code=400, detail=str(e))
             # Check uniqueness excluding current employee
             existing_email = await conn.fetchval(
                 f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE lower(trim(email))=$1 AND emp_id<>$2 LIMIT 1",
@@ -69,13 +61,6 @@ async def edit_employee(emp_id: int, payload: EmployeeEditIn):
             values.append(payload.last_name)
 
         if phone_number_norm is not None:
-            try:
-                if not validate_mobile(phone_number_norm):
-                    logger.warning("Invalid mobile format during update: %s", phone_number_norm)
-                    raise HTTPException(status_code=400, detail="Invalid mobile number format")
-            except ValueError as e:
-                logger.warning("Validation error validating mobile number: %s", str(e))
-                raise HTTPException(status_code=400, detail=str(e))
             # Check uniqueness excluding current employee and only active employees
             existing_phone = await conn.fetchval(
                 f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE trim(phone_number)=$1 AND emp_id<>$2 AND is_active=TRUE LIMIT 1",
@@ -95,11 +80,6 @@ async def edit_employee(emp_id: int, payload: EmployeeEditIn):
             values.append(payload.is_active)
 
         if payload.employee_image_url is not None:
-            try:
-                validate_url(payload.employee_image_url)
-            except ValueError as e:
-                logger.warning("Invalid employee_image_url format during update: %s", str(e))
-                raise HTTPException(status_code=400, detail="Invalid employee_image_url format")
             fields.append("employee_image_url=$%d" % (len(values)+1))
             values.append(payload.employee_image_url)
 
@@ -230,4 +210,86 @@ async def filter_employees(
             ]
         except Exception as e:
             logger.exception("Exception during employee filtering: %s", str(e))
-            raise
+            raise HTTPException(status_code=500, detail="An unexpected error occurred during employee filtering")
+
+@router.get(
+    "/active-rm",
+    response_model=List[EmployeeOut],
+    dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))],
+    summary="Get list of active Relationship Managers"
+)
+async def get_active_rms():
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        sql = f"""
+            SELECT *
+              FROM {DB_SCHEMA}.employees
+             WHERE is_active = TRUE AND role = 'RM'
+             ORDER BY created_at DESC
+        """
+        rows = await conn.fetch(sql)
+        return [
+            {
+                **dict(row),
+                "emp_id": row["emp_id"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "message": "Active Relationship Managers retrieved successfully."
+            }
+            for row in rows
+        ]
+
+@router.get(
+    "/active-op",
+    response_model=List[EmployeeOut],
+    dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))],
+    summary="Get list of active Operations personnel"
+)
+async def get_active_ops():
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        sql = f"""
+            SELECT *
+              FROM {DB_SCHEMA}.employees
+             WHERE is_active = TRUE AND role = 'OP'
+             ORDER BY created_at DESC
+        """
+        rows = await conn.fetch(sql)
+        return [
+            {
+                **dict(row),
+                "emp_id": row["emp_id"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "message": "Active Operations personnel retrieved successfully."
+            }
+            for row in rows
+        ]
+
+@router.get(
+    "/active-managers",
+    response_model=List[EmployeeOut],
+    dependencies=[Depends(require_permission("EMPLOYEE", "READ"))],
+    summary="Get list of active managers with roles ADMIN, SALES_MANAGER, or OP_MANAGER"
+)
+async def get_active_managers():
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        sql = f"""
+            SELECT *
+              FROM {DB_SCHEMA}.employees
+             WHERE is_active = TRUE 
+               AND role IN ('ADMIN', 'SALES_MANAGER', 'OP_MANAGER')
+             ORDER BY created_at DESC
+        """
+        rows = await conn.fetch(sql)
+        return [
+            {
+                **dict(row),
+                "emp_id": row["emp_id"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "message": "Active managers retrieved successfully."
+            }
+            for row in rows
+        ]

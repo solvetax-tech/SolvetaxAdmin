@@ -1,15 +1,13 @@
 from fastapi import APIRouter, status, HTTPException, Request, Body, Depends
 from pydantic import BaseModel, EmailStr
-from fastapi.responses import JSONResponse
 from app.utils import get_db_pool, DB_SCHEMA, hash_password, get_user_permissions
 from dotenv import load_dotenv
 import os
 import jwt
 from datetime import datetime, timedelta, timezone
-import uuid
 import logging
-from typing import Optional
 from app.security.rbac import require_permission
+import time
 
 # Load environment variables from project root .env
 load_dotenv()
@@ -25,34 +23,19 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
-"""
-POST /api/v1/login
-Request JSON body:
-{
-  "email": "alice@example.com",
-  "password": "SuperSecretPass!2024"
-}
-Both email and password are required.
-"""
-
 @router.post(
     "/login",
     responses={
         200: {"description": "JWT token issued."},
         400: {"description": "Validation failed"},
         401: {"description": "Invalid credentials or MFA not verified"},
+        429: {"description": "Too many requests - rate limited"},
         503: {"description": "Service temporarily unavailable. Please try again later."},
     }
 )
 async def login(
     request: Request,
-    payload: LoginRequest = Body(
-        ..., 
-        example={
-            "email": "bhanuvenkatsrikakulapu8@gmail.com",
-            "password": "Nagaraju454@"
-        }
-    )
+    payload: LoginRequest = Body(..., example={"email": "bhanuvenkatsrikakulapu8@gmail.com","password": "Nagaraju454@"})
 ):
     logging.info(f"Received login request: {payload}")
     password = payload.password
@@ -60,9 +43,31 @@ async def login(
     if not password or not email:
         logging.warning(f"Missing credentials: password={password}, email={email}")
         raise HTTPException(status_code=400, detail="Validation failed: Provide both email and password")
+    
+    # Simple in-memory rate limiting by IP and email (demonstration only - replace with Redis or other durable store for production)
+    ip_address = request.client.host
+    identifier = f"{ip_address}:{email}"
+    now = int(time.time())
+    window = 60  # 60 seconds rate limit window
+    max_requests = 5  # Max 5 login attempts per window
+    
+    # Initialize simple in-memory rate limiting storage on the app state once
+    if not hasattr(request.app.state, "rate_limit_store"):
+        request.app.state.rate_limit_store = {}
+
+    rate_limit_store = request.app.state.rate_limit_store
+    request_times = rate_limit_store.get(identifier, [])
+    # Remove requests outside current window
+    request_times = [t for t in request_times if t > now - window]
+    if len(request_times) >= max_requests:
+        logging.warning(f"Rate limit exceeded for {identifier}")
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
+    # Record current request
+    request_times.append(now)
+    rate_limit_store[identifier] = request_times
+
     pool = await get_db_pool()
     async with pool.acquire() as conn:
-        # Allow multiple sessions: do not deactivate previous sessions
         # 1. Lookup employee by email only
         logging.info(f"Looking up employee by email: {email}")
         employee = await conn.fetchrow(f"SELECT * FROM {DB_SCHEMA}.employees WHERE email = $1", email)
@@ -78,12 +83,8 @@ async def login(
         # 3. Issue JWT with device and permissions
         try:
             now_aware = datetime.now(timezone.utc)
-            now = now_aware.replace(tzinfo=None)
-            exp = (now_aware + timedelta(minutes=JWT_EXPIRE_MINUTES)).replace(tzinfo=None)
             device = {"type": "browser", "os": "linux"}  # Mocked device info
-            # Fetch permissions from DB and build permissions dict
             permissions = await get_user_permissions(employee["emp_id"], conn)
-
             jwt_payload = {
                 "sub": str(employee["emp_id"]),
                 "iat": int(now_aware.timestamp()),
@@ -97,7 +98,6 @@ async def login(
         except Exception as e:
             logging.error(f"Error creating JWT: {e}")
             raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again later.")
-        # 4. Store JWT token as session_token in the database
         session_token = token
         expires_at = now_aware + timedelta(minutes=JWT_EXPIRE_MINUTES)
         if expires_at.tzinfo is not None:
@@ -113,30 +113,11 @@ async def login(
             employee["emp_id"], session_token, expires_at, device_info, ip_address
         )
         logging.info(f"Session created for emp_id={employee['emp_id']} with token={session_token}, device_info={device_info}, ip_address={ip_address}")
-        # Always use direct key access for asyncpg Record
-        employee_profile = {
-            "emp_id": employee["emp_id"],
-            "username": employee["username"],
-            "email": employee["email"],
-            "first_name": employee["first_name"],
-            "last_name": employee["last_name"],
-            "phone_number": employee["phone_number"],
-            "is_active": employee["is_active"],
-            "role": employee["role"],
-            "created_at": employee["created_at"],
-            "updated_at": employee["updated_at"],
-        }
-        # 'token' is the Bearer JWT for Authorization header
-        # 'session_token' is the JWT token for logout body
-        return {
-            "token": f"Bearer {token}",  # Use this as the Authorization header value
-            "session_token": session_token,  # Use this in the logout request body
-            "expires_at": exp.isoformat(),
-            "profile": employee_profile
-        }
+
+        return {"session_token": session_token}
 
 class LogoutRequest(BaseModel):
-    session_token: str  # This should be the JWT token
+    session_token: str
 
 @router.post(
     "/logout",
@@ -153,36 +134,11 @@ async def logout(
     request: Request,
     payload: LogoutRequest = Body(..., example={"session_token": "example-session-token"})
 ):
-    """
-    POST /api/v1/logout
-
-    Requires:
-        - Authorization header: Bearer <JWT token> (from login response 'token' field)
-        - JSON body: { "session_token": "..." } (from login response 'session_token' field)
-
-    Example curl:
-        curl -X POST \\
-            -H "Authorization: Bearer <JWT token>" \\
-            -H "Content-Type: application/json" \\
-            -d '{"session_token": "<session_token>"}' \\
-            http://localhost:8000/app/v1/logout
-
-    Example request body:
-    {
-        "session_token": "example-session-token"
-    }
-
-    Example response:
-    {
-        "message": "Session revoked successfully."
-    }
-    """
     session_token = payload.session_token
     logging.info(f"Received logout request for session_token={session_token}")
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         try:
-            # Get emp_id from JWT token in Authorization header
             auth_header = request.headers.get("Authorization")
             if not auth_header or not auth_header.startswith("Bearer "):
                 raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
@@ -195,7 +151,6 @@ async def logout(
             else:
                 ip_address = "Unknown"
 
-            # Deactivate the session if it matches
             logging.info(f"LOGOUT DEBUG: emp_id={emp_id}, session_token={session_token}")
             result = await conn.execute(
                 f"""
@@ -206,7 +161,6 @@ async def logout(
                 emp_id, session_token
             )
             logging.info(f"LOGOUT DEBUG: update result={result}")
-            # Only log audit if session was actually deactivated
             if result == "UPDATE 1":
                 await conn.execute(
                     f"""

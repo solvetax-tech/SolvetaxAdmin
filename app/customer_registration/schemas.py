@@ -1,54 +1,38 @@
-from pydantic import BaseModel, EmailStr, validator
-from .validators import validate_mobile, validate_gstin, validate_pan, validate_aadhaar, validate_email
-from typing import Optional
+from pydantic import BaseModel, EmailStr, validator, Field, constr
+from typing import Optional, Annotated
 from datetime import datetime
-
+import re
 
 class CustomerIn(BaseModel):
-    full_name: str
-    email: Optional[EmailStr] = None
-    mobile: str
-    business_name: Optional[str] = None
-    business_description: Optional[str] = None
-    business_image_url: Optional[str] = None
-    business_type: Optional[str] = None
-    state: Optional[str] = None
-    city: Optional[str] = None
-    remark: Optional[str] = None
-    rm_id: Optional[int] = None
-    op_id: Optional[int] = None
-    referral_id: Optional[int] = None
-
-    @validator('mobile')
-    def mobile_validator(cls, v):
-        return validate_mobile(v)
-    @validator('email')
-    def email_validator(cls, v):
-        return validate_email(v)
-
+    full_name: str = Field(..., description="Customer full name")
+    email: Optional[EmailStr] = Field(None, description="Customer email address")
+    mobile: Annotated[str, Field(pattern=r'^\d{10}$')] = Field(None, description="Phone number must be exactly 10 digits")
+    business_name: Optional[str] = Field(None, description="Business name")
+    business_description: Optional[str] = Field(None, description="Business description")
+    business_image_url: Optional[str] = Field(None, description="Business image URL")
+    business_type: Optional[str] = Field(None, description="Business type")
+    state: Optional[str] = Field(None, description="State")
+    city: Optional[str] = Field(None, description="City")
+    remark: Optional[str] = Field(None, description="Remark")
+    rm_id: Optional[int] = Field(None, description="RM ID")
+    op_id: Optional[int] = Field(None, description="OP ID")
+    referral_id: Optional[int] = Field(None, description="Referral ID")
 
 class CustomerEditIn(BaseModel):
-    full_name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    mobile: Optional[str] = None
-    business_name: Optional[str] = None
-    business_description: Optional[str] = None
-    business_image_url: Optional[str] = None
-    business_type: Optional[str] = None
-    state: Optional[str] = None
-    city: Optional[str] = None
-    remark: Optional[str] = None
-    rm_id: Optional[int] = None
-    op_id: Optional[int] = None
-    referral_id: Optional[int] = None
-    is_active: Optional[bool] = None
-
-    @validator('mobile')
-    def mobile_validator(cls, v):
-        return validate_mobile(v)
-    @validator('email')
-    def email_validator(cls, v):
-        return validate_email(v)
+    full_name: Optional[str] = Field(None, description="Customer full name")
+    email: Optional[EmailStr] = Field(None, description="Customer email address")
+    mobile: Annotated[str, Field(pattern=r'^\d{10}$')] = Field(None, description="Phone number must be exactly 10 digits")
+    business_name: Optional[str] = Field(None, description="Business name")
+    business_description: Optional[str] = Field(None, description="Business description")
+    business_image_url: Optional[str] = Field(None, description="Business image URL")
+    business_type: Optional[str] = Field(None, description="Business type")
+    state: Optional[str] = Field(None, description="State")
+    city: Optional[str] = Field(None, description="City")
+    remark: Optional[str] = Field(None, description="Remark")
+    rm_id: Optional[int] = Field(None, description="RM ID")
+    op_id: Optional[int] = Field(None, description="OP ID")
+    referral_id: Optional[int] = Field(None, description="Referral ID")
+    is_active: Optional[bool] = Field(None, description="Is user active")
 
 
 class CustomerOut(BaseModel):

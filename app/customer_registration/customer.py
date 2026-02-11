@@ -6,8 +6,7 @@ from pydantic import constr, validator
 from typing import Optional, List
 from datetime import datetime
 from app.customer_registration.schemas import CustomerIn, CustomerOut, CustomerEditIn
-from app.customer_registration.validators import validate_email, validate_mobile, validate_url
-from app.utils import get_db_pool, DB_SCHEMA
+from app.utils import get_db_pool, DB_SCHEMA, validate_email, validate_mobile, validate_url
 from app.security.rbac import require_permission
 
 # Configure logger
@@ -51,7 +50,6 @@ async def create_customer(payload: CustomerIn):
     email = payload.email.strip().lower() if payload.email else None
     mobile = payload.mobile.strip() if payload.mobile else None
     business_name = payload.business_name.strip() if payload.business_name else None
-
     masked_email = mask_sensitive_data(email)
     masked_mobile = mask_sensitive_data(mobile)
 

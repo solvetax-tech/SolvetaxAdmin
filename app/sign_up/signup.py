@@ -3,7 +3,6 @@ from fastapi import APIRouter, status, HTTPException, Depends
 from app.sign_up.schemas import SignupRequest, SignupResponse, ErrorResponse
 from app.utils import get_db_pool, hash_password, is_password_strong, DB_SCHEMA
 from app.security.rbac import require_permission
-
 from dotenv import load_dotenv
 import os
 import asyncpg
@@ -47,6 +46,7 @@ async def create_user(conn, user_data):
     )
     return row["emp_id"] if row else None
 
+
 @router.post(
     "/signup",
     status_code=status.HTTP_201_CREATED,
@@ -84,19 +84,27 @@ async def signup(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"error": f"Invalid role code: {role_code}"}
             )
-
-            # Validate manager_emp_id if provided - now checking is_active too
-            if payload.manager_emp_id is not None:
-                manager_exists = await conn.fetchval(
-                    f"SELECT EXISTS (SELECT 1 FROM {DB_SCHEMA}.employees WHERE emp_id = $1 AND is_active = TRUE)",
-                    payload.manager_emp_id
+        # Check if manager_emp_id is provided, if so validate emp_id exists, is_active, and role is ADMIN or SALES_MANAGER or OP_MANAGER
+        if payload.manager_emp_id is not None:
+            manager_valid = await conn.fetchval(
+                f"""
+                SELECT EXISTS (
+                    SELECT 1 FROM {DB_SCHEMA}.employees e
+                    JOIN {DB_SCHEMA}.employee_roles er ON e.emp_id = er.emp_id
+                    JOIN {DB_SCHEMA}.roles r ON er.role_id = r.id
+                    WHERE e.emp_id = $1
+                    AND e.is_active = TRUE
+                    AND r.role_code IN ('ADMIN', 'SALES_MANAGER', 'OP_MANAGER')
                 )
-                if not manager_exists:
-                    logging.warning(f"[signup] Invalid or inactive manager_emp_id: {payload.manager_emp_id}")
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={"error": "Invalid or inactive manager_emp_id"}
-                    )
+                """,
+                payload.manager_emp_id
+            )
+            if not manager_valid:
+                logging.warning(f"[signup] Invalid, inactive, or unauthorized role for manager_emp_id: {payload.manager_emp_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"error": "Invalid or unauthorized manager_emp_id"}
+                )
 
         # Hash password
         password_hash = hash_password(payload.password)
@@ -140,12 +148,9 @@ async def signup(
                 await assign_role_to_employee(conn, created_id, role_id)
         except asyncpg.exceptions.UniqueViolationError as e:
             logging.error(f"[signup] Duplicate key error: {e}")
-            # Distinguish which unique constraint failed: email or username
             constraint = getattr(e, "constraint_name", None)
-            # Fallback to parsing message if attribute missing:
             if not constraint:
                 import re
-                # Typical error: 'duplicate key value violates unique constraint "employees_email_key"'
                 m = re.search(r'constraint \"(.+?)\"', str(e))
                 if m:
                     constraint = m.group(1)

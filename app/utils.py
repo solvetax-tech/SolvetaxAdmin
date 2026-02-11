@@ -112,6 +112,20 @@ def validate_email(v):
             raise ValueError('Invalid email address')
     return v
 
+def validate_url(v):
+    if v is not None:
+        url_regex = re.compile(
+            r'^(https?://)?'  # http:// or https://
+            r'(([A-Za-z0-9-]+\.)+[A-Za-z]{2,6})'  # domain...
+            r'(:\d+)?'  # optional port
+            r'(/[-A-Za-z0-9@:%._\+~#=]*)*'  # path
+            r'(\?[;&A-Za-z0-9%_.,=+-]*)?'  # query string
+            r'(#[A-Za-z0-9_-]*)?$'  # fragment locator
+        )
+        if not url_regex.match(v):
+            raise ValueError('Invalid URL')
+    return v
+
 async def check_duplicate_mobile_pan_aadhaar_for_gstin(pool, gstin: str, mobile: str = None, pan: str = None, aadhaar: str = None, exclude_id: str = None):
     conditions = ["gstin = $1"]
     values = [gstin]
