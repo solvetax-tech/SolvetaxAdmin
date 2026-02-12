@@ -1,189 +1,289 @@
 import logging
+import uuid
 from fastapi import APIRouter, HTTPException, Query, Depends , Request
 from pydantic import constr, validator
 import asyncpg
 from typing import Optional, List
 from datetime import datetime
-from app.utils import get_db_pool, DB_SCHEMA, validate_email, validate_mobile, validate_url
+from app.utils import get_db_pool, DB_SCHEMA
 from app.sign_up.schemas import EmployeeEditIn, EmployeeOut
-from fastapi.security import OAuth2PasswordBearer
-from app.token_validator import validate_token
 from app.security.rbac import require_permission
-from app.security.team_scope import require_team_access
+from app.logger import logger
+from app.utils import generate_uuid
 
 
-logger = logging.getLogger("employee")
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 router = APIRouter(
     prefix="/api/v1/employees",
     tags=["Employees"]
 )
+# -------------------------------------------------------------------
+# EDIT EMPLOYEE (DYNAMIC UPDATE - PRODUCTION SAFE)
+# -------------------------------------------------------------------
 
-@router.post("/{emp_id}/edit", response_model=EmployeeOut, dependencies=[Depends(require_permission("USER_ACCESS", "WRITE"))])
-async def edit_employee(emp_id: int, payload: EmployeeEditIn):
-    pool = await get_db_pool()
-    fields, values = [], []
-
-    # Normalize and trim email and phone_number inputs if provided
-    email_norm = payload.email.strip().lower() if payload.email is not None else None
-    phone_number_norm = payload.phone_number.strip() if payload.phone_number is not None else None
-
-    async with pool.acquire() as conn:
-        if payload.username is not None:
-            fields.append("username=$%d" % (len(values)+1))
-            values.append(payload.username)
-
-        if email_norm is not None:
-            # Check uniqueness excluding current employee
-            existing_email = await conn.fetchval(
-                f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE lower(trim(email))=$1 AND emp_id<>$2 LIMIT 1",
-                email_norm, emp_id
-            )
-            if existing_email:
-                raise HTTPException(status_code=400, detail="Email already in use by another employee")
-            fields.append("email=$%d" % (len(values)+1))
-            values.append(email_norm)
-
-        if payload.first_name is not None:
-            fields.append("first_name=$%d" % (len(values)+1))
-            values.append(payload.first_name)
-
-        if payload.last_name is not None:
-            fields.append("last_name=$%d" % (len(values)+1))
-            values.append(payload.last_name)
-
-        if phone_number_norm is not None:
-            # Check uniqueness excluding current employee and only active employees
-            existing_phone = await conn.fetchval(
-                f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE trim(phone_number)=$1 AND emp_id<>$2 AND is_active=TRUE LIMIT 1",
-                phone_number_norm, emp_id
-            )
-            if existing_phone:
-                raise HTTPException(status_code=400, detail="Phone number already in use by another employee")
-            fields.append("phone_number=$%d" % (len(values)+1))
-            values.append(phone_number_norm)
-
-        if payload.role is not None:
-            fields.append("role=$%d" % (len(values)+1))
-            values.append(payload.role)
-
-        if payload.is_active is not None:
-            fields.append("is_active=$%d" % (len(values)+1))
-            values.append(payload.is_active)
-
-        if payload.employee_image_url is not None:
-            fields.append("employee_image_url=$%d" % (len(values)+1))
-            values.append(payload.employee_image_url)
-
-        if not fields:
-            raise HTTPException(status_code=400, detail="No fields to update")
-
-        fields.append("updated_at=NOW()")
-        sql = f"""
-            UPDATE {DB_SCHEMA}.employees
-            SET {', '.join(fields)}
-            WHERE emp_id=$%d
-            RETURNING *
-        """ % (len(values)+1)
-        values.append(emp_id)
-
-        try:
-            async with conn.transaction():
-                row = await conn.fetchrow(sql, *values)
-                if not row:
-                    raise HTTPException(status_code=404, detail="Employee not found")
-
-                return {
-                    **dict(row),
-                    "emp_id": row["emp_id"],
-                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                    "message": "Employee updated successfully."
-                }
-        except asyncpg.exceptions.UniqueViolationError as e:
-            logger.warning(f"Unique violation during edit_employee: {str(e)}")
-            raise HTTPException(status_code=409, detail="Duplicate field value violates unique constraint")
-        except asyncpg.exceptions.ForeignKeyViolationError as e:
-            logger.warning(f"Foreign key violation during edit_employee: {str(e)}")
-            raise HTTPException(status_code=400, detail="Invalid foreign key reference")
-        except Exception as e:
-            logger.exception("Exception during edit_employee: %s", str(e))
-            error_str = str(e).lower()
-            if "undefinedcolumnerror" in error_str or "column" in error_str:
-                detail_msg = "Database column error: " + str(e)
-                raise HTTPException(status_code=400, detail=detail_msg)
-            if "not found" in error_str:
-                raise HTTPException(status_code=404, detail="Employee not found")
-            if "email already in use" in error_str or "phone number already in use" in error_str:
-                raise HTTPException(status_code=400, detail=str(e))
-            raise HTTPException(status_code=500, detail="An unexpected error occurred during employee update")
-
-
-@router.get("/filter", response_model=List[EmployeeOut], dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
-async def filter_employees(
-    emp_id: Optional[int] = Query(None, alias="emp_id"),
-    full_name: Optional[str] = Query(None),
-    email: Optional[str] = Query(None),
-    phone_number: Optional[str] = Query(None, alias="phone_number"),
-    role: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(None),
-    include_inactive: bool = Query(False, alias="include_inactive"),
-    from_date: Optional[datetime] = Query(
-        None, description="Start date (ISO 8601 format)"
-    ),
-    to_date: Optional[datetime] = Query(
-        None, description="End date (ISO 8601 format)"
-    ),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+@router.post(
+    "/{emp_id}/emp_dyn/edit",
+    response_model=EmployeeOut,
+    summary="Edit Employee",
+)
+async def edit_employee(
+    emp_id: int,
+    payload: EmployeeEditIn,
+    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
-    
+    """
+    Edit Employee API (Dynamic Update)
+
+    Validation Responsibility Split:
+    --------------------------------
+    1️⃣ Schema-Level Validation (EmployeeEditIn):
+       - Email format validation
+       - Phone regex validation
+       - HttpUrl validation
+       - Field constraints (length, required types)
+
+    2️⃣ Database-Level Validation:
+       - UNIQUE(email, phone_number)
+       - FOREIGN KEY(manager_emp_id)
+       - NOT NULL constraints
+    """
+
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": current_emp_id},
+    )
+
+    log.info("Incoming edit employee request emp_id=%s", emp_id)
+
+    # Extract only provided fields
+    update_data = payload.model_dump(exclude_unset=True)
+
+    if not update_data:
+        log.warning("No fields provided for update")
+        raise HTTPException(
+            status_code=400,
+            detail="At least one field must be provided for update.",
+        )
+
     pool = await get_db_pool()
-    conditions = []
-    values = []
+
     async with pool.acquire() as conn:
-        if emp_id is not None:
-            conditions.append(f"emp_id = ${len(values)+1}")
+        try:
+            fields = []
+            values = []
+            param_index = 1
+
+            # --------------------------------------------
+            # Normalize critical fields
+            # --------------------------------------------
+
+            if "email" in update_data and update_data["email"]:
+                update_data["email"] = update_data["email"].strip().lower()
+
+            if "phone_number" in update_data and update_data["phone_number"]:
+                update_data["phone_number"] = update_data["phone_number"].strip()
+
+            if "employee_image_url" in update_data:
+                # Convert empty string → None
+                val = update_data["employee_image_url"]
+                if isinstance(val, str) and not val.strip():
+                    update_data["employee_image_url"] = None
+
+            # --------------------------------------------
+            # Build dynamic SET clause safely
+            # --------------------------------------------
+
+            for key, value in update_data.items():
+                fields.append(f"{key} = ${param_index}")
+                values.append(value)
+                param_index += 1
+
+            # Always update timestamp
+            fields.append("updated_at = NOW()")
+
+            sql = f"""
+                UPDATE {DB_SCHEMA}.employees
+                SET {', '.join(fields)}
+                WHERE emp_id = ${param_index}
+                RETURNING *
+            """
+
             values.append(emp_id)
 
-        if full_name is not None:
-            conditions.append(f"(first_name || ' ' || last_name) ILIKE ${len(values)+1}")
-            values.append(f"%{full_name}%")
+            async with conn.transaction():
+                row = await conn.fetchrow(sql, *values)
 
-        if email is not None:
-            conditions.append(f"email ILIKE ${len(values)+1}")
-            values.append(f"%{email}%")
+            if not row:
+                log.warning("Employee not found for update")
+                raise HTTPException(
+                    status_code=404,
+                    detail="Employee not found.",
+                )
 
-        if phone_number is not None:
-            conditions.append(f"phone_number = ${len(values)+1}")
-            values.append(phone_number)
+            log.info("Employee updated successfully emp_id=%s", emp_id)
 
-        if role is not None:
-            conditions.append(f"role = ${len(values)+1}")
+            # Strict schema validation
+            response = EmployeeOut.model_validate(row)
+
+            return response.model_copy(
+                update={"message": "Employee updated successfully."}
+            )
+
+        # --------------------------------------------------
+        # DB VALIDATIONS
+        # --------------------------------------------------
+
+        except asyncpg.exceptions.UniqueViolationError:
+            log.warning("Duplicate value violates unique constraint")
+            raise HTTPException(
+                status_code=409,
+                detail="Duplicate field value violates unique constraint.",
+            )
+
+        except asyncpg.exceptions.ForeignKeyViolationError:
+            log.warning("Invalid foreign key reference (manager_emp_id)")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid foreign key reference.",
+            )
+
+        except asyncpg.PostgresError:
+            log.error("Database error during employee update")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error.",
+            )
+
+        except Exception:
+            log.exception("Unexpected error during employee update")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
+# -------------------------------------------------------------------
+# FILTER EMPLOYEES (DYNAMIC FILTER + PAGINATION)
+# -------------------------------------------------------------------
+
+@router.get(
+    "/filter",
+    response_model=List[EmployeeOut],
+    summary="Filter Employees",
+)
+async def filter_employees(
+    emp_id: Optional[int] = None,
+    full_name: Optional[str] = None,
+    email: Optional[str] = None,
+    phone_number: Optional[str] = None,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    include_inactive: bool = Query(False),
+    from_date: Optional[datetime] = None,
+    to_date: Optional[datetime] = None,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    Filter Employees API
+
+    Validation Responsibility Split:
+    --------------------------------
+    1️⃣ FastAPI:
+        - Type validation
+        - Pagination limits
+
+    2️⃣ Schema (EmployeeOut):
+        - Strict response validation
+
+    3️⃣ Database:
+        - Integrity constraints
+    """
+
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": current_emp_id},
+    )
+
+    log.info("Incoming employee filter request limit=%s offset=%s", limit, offset)
+
+    # --------------------------------------------------
+    # Date Sanity Validation
+    # --------------------------------------------------
+
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(
+            status_code=400,
+            detail="from_date cannot be greater than to_date.",
+        )
+
+    try:
+        pool = await get_db_pool()
+
+        conditions = []
+        values = []
+        param_index = 1
+
+        # --------------------------------------------------
+        # Business Filters
+        # --------------------------------------------------
+
+        if emp_id is not None:
+            conditions.append(f"emp_id = ${param_index}")
+            values.append(emp_id)
+            param_index += 1
+
+        if full_name and full_name.strip():
+            conditions.append(
+                f"(first_name || ' ' || last_name) ILIKE ${param_index}"
+            )
+            values.append(f"%{full_name.strip()}%")
+            param_index += 1
+
+        if email and email.strip():
+            conditions.append(f"email ILIKE ${param_index}")
+            values.append(f"%{email.strip()}%")
+            param_index += 1
+
+        if phone_number and phone_number.strip():
+            conditions.append(f"phone_number = ${param_index}")
+            values.append(phone_number.strip())
+            param_index += 1
+
+        if role:
+            conditions.append(f"role = ${param_index}")
             values.append(role)
+            param_index += 1
+
+        # --------------------------------------------------
+        # Status Filtering
+        # --------------------------------------------------
 
         if is_active is not None:
-            conditions.append(f"is_active = ${len(values)+1}")
+            conditions.append(f"is_active = ${param_index}")
             values.append(is_active)
-
-        if not include_inactive and is_active is None:
+            param_index += 1
+        elif not include_inactive:
             conditions.append("is_active = TRUE")
 
-        if from_date is not None:
-            conditions.append(f"created_at >= ${len(values)+1}")
-            values.append(from_date)
+        # --------------------------------------------------
+        # Date Filtering
+        # --------------------------------------------------
 
-        if to_date is not None:
-            conditions.append(f"created_at <= ${len(values)+1}")
+        if from_date:
+            conditions.append(f"created_at >= ${param_index}")
+            values.append(from_date)
+            param_index += 1
+
+        if to_date:
+            conditions.append(f"created_at <= ${param_index}")
             values.append(to_date)
+            param_index += 1
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -192,104 +292,214 @@ async def filter_employees(
               FROM {DB_SCHEMA}.employees
               {where_clause}
              ORDER BY created_at DESC
-             LIMIT ${len(values)+1} OFFSET ${len(values)+2}
+             LIMIT ${param_index} OFFSET ${param_index + 1}
         """
+
         values.extend([limit, offset])
 
-        try:
+        async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *values)
-            return [
-                {
-                    **dict(row),
-                    "emp_id": row["emp_id"],
-                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                    "message": "Employee filtered successfully."
-                }
-                for row in rows
-            ]
-        except Exception as e:
-            logger.exception("Exception during employee filtering: %s", str(e))
-            raise HTTPException(status_code=500, detail="An unexpected error occurred during employee filtering")
+
+        log.info("Employees filtered successfully count=%s", len(rows))
+
+        return [
+            EmployeeOut.model_validate(row).model_copy(
+                update={"message": "Employees filtered successfully."}
+            )
+            for row in rows
+        ]
+
+    # --------------------------------------------------
+    # DB VALIDATIONS
+    # --------------------------------------------------
+
+    except asyncpg.PostgresError:
+        log.exception("Database error during employee filtering")
+        raise HTTPException(
+            status_code=500,
+            detail="Database error.",
+        )
+
+    except Exception:
+        log.exception("Unexpected error during employee filtering")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+        )
+
+# -------------------------------------------------------------------
+# GET ACTIVE RELATIONSHIP MANAGERS
+# -------------------------------------------------------------------
 
 @router.get(
     "/active-rm",
     response_model=List[EmployeeOut],
-    dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))],
-    summary="Get list of active Relationship Managers"
+    summary="Get list of active Relationship Managers",
 )
-async def get_active_rms():
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.employees
-             WHERE is_active = TRUE AND role = 'RM'
-             ORDER BY created_at DESC
-        """
-        rows = await conn.fetch(sql)
+async def get_active_rms(
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    request_id = str(uuid.uuid4())
+    current_emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": current_emp_id},
+    )
+
+    log.info("Fetching active Relationship Managers")
+
+    sql = f"""
+        SELECT *
+          FROM {DB_SCHEMA}.employees
+         WHERE is_active = TRUE
+           AND role = 'RM'
+         ORDER BY created_at DESC
+    """
+
+    try:
+        pool = await get_db_pool()
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql)
+
+        log.info("Active RMs retrieved count=%s", len(rows))
+
         return [
-            {
-                **dict(row),
-                "emp_id": row["emp_id"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                "message": "Active Relationship Managers retrieved successfully."
-            }
+            EmployeeOut.model_validate(row).model_copy(
+                update={"message": "Active Relationship Managers retrieved successfully."}
+            )
             for row in rows
         ]
+
+    except asyncpg.PostgresError:
+        log.exception("Database error while fetching active RMs")
+        raise HTTPException(
+            status_code=500,
+            detail="Database error.",
+        )
+
+    except Exception:
+        log.exception("Unexpected error while fetching active RMs")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+        )
+
+# -------------------------------------------------------------------
+# GET ACTIVE OPERATIONS PERSONNEL
+# -------------------------------------------------------------------
 
 @router.get(
     "/active-op",
     response_model=List[EmployeeOut],
-    dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))],
-    summary="Get list of active Operations personnel"
+    summary="Get list of active Operations personnel",
 )
-async def get_active_ops():
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.employees
-             WHERE is_active = TRUE AND role = 'OP'
-             ORDER BY created_at DESC
-        """
-        rows = await conn.fetch(sql)
+async def get_active_ops(
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    request_id = str(uuid.uuid4())
+    current_emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": current_emp_id},
+    )
+
+    log.info("Fetching active Operations personnel")
+
+    sql = f"""
+        SELECT *
+          FROM {DB_SCHEMA}.employees
+         WHERE is_active = TRUE
+           AND role = 'OP'
+         ORDER BY created_at DESC
+    """
+
+    try:
+        pool = await get_db_pool()
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql)
+
+        log.info("Active OPs retrieved count=%s", len(rows))
+
         return [
-            {
-                **dict(row),
-                "emp_id": row["emp_id"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                "message": "Active Operations personnel retrieved successfully."
-            }
+            EmployeeOut.model_validate(row).model_copy(
+                update={"message": "Active Operations personnel retrieved successfully."}
+            )
             for row in rows
         ]
+
+    except asyncpg.PostgresError:
+        log.exception("Database error while fetching active OPs")
+        raise HTTPException(
+            status_code=500,
+            detail="Database error.",
+        )
+
+    except Exception:
+        log.exception("Unexpected error while fetching active OPs")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+        )
+
+# -------------------------------------------------------------------
+# GET ACTIVE MANAGERS
+# -------------------------------------------------------------------
 
 @router.get(
     "/active-managers",
     response_model=List[EmployeeOut],
-    dependencies=[Depends(require_permission("EMPLOYEE", "READ"))],
-    summary="Get list of active managers with roles ADMIN, SALES_MANAGER, or OP_MANAGER"
+    summary="Get list of active managers (ADMIN, SALES_MANAGER, OP_MANAGER)",
 )
-async def get_active_managers():
-    pool = await get_db_pool()
-    async with pool.acquire() as conn:
-        sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.employees
-             WHERE is_active = TRUE 
-               AND role IN ('ADMIN', 'SALES_MANAGER', 'OP_MANAGER')
-             ORDER BY created_at DESC
-        """
-        rows = await conn.fetch(sql)
+async def get_active_managers(
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = str(uuid.uuid4())
+    current_emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": current_emp_id},
+    )
+
+    log.info("Fetching active managers")
+
+    sql = f"""
+        SELECT *
+          FROM {DB_SCHEMA}.employees
+         WHERE is_active = TRUE
+           AND role IN ('ADMIN', 'SALES_MANAGER', 'OP_MANAGER')
+         ORDER BY created_at DESC
+    """
+
+    try:
+        pool = await get_db_pool()
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql)
+
+        log.info("Active managers retrieved count=%s", len(rows))
+
         return [
-            {
-                **dict(row),
-                "emp_id": row["emp_id"],
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                "message": "Active managers retrieved successfully."
-            }
+            EmployeeOut.model_validate(row).model_copy(
+                update={"message": "Active managers retrieved successfully."}
+            )
             for row in rows
         ]
+
+    except asyncpg.PostgresError:
+        log.exception("Database error while fetching active managers")
+        raise HTTPException(
+            status_code=500,
+            detail="Database error.",
+        )
+
+    except Exception:
+        log.exception("Unexpected error while fetching active managers")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+        )

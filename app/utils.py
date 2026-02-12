@@ -10,6 +10,8 @@ from datetime import datetime
 from typing import Dict, Any
 from asyncpg.exceptions import PostgresError
 from dotenv import load_dotenv
+from typing import Optional
+
 
 # Load .env from project root
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -74,6 +76,38 @@ async def get_db_pool():
     return get_db_pool.pool
 
 
+def mask_sensitive_data(data: Optional[str]) -> str:
+    if not data:
+        return ""
+
+    data = data.strip()
+
+    # Email masking
+    if "@" in data:
+        try:
+            name, domain = data.split("@", 1)
+            if len(name) <= 2:
+                masked_name = "*" * len(name)
+            else:
+                masked_name = name[:2] + "*" * (len(name) - 2)
+            return f"{masked_name}@{domain}"
+        except Exception:
+            return "***"
+
+    # Mobile / numeric masking
+    if data.isdigit():
+        if len(data) <= 4:
+            return "*" * len(data)
+        return data[:2] + "*" * (len(data) - 4) + data[-2:]
+
+    # Generic masking
+    if len(data) <= 4:
+        return "*" * len(data)
+
+    return data[:2] + "*" * (len(data) - 4) + data[-2:]
+
+
+
 def passwords_match(password1: str, password2: str) -> bool:
     """
     Returns True if both passwords are exactly the same, False otherwise.
@@ -130,17 +164,17 @@ async def check_duplicate_mobile_pan_aadhaar_for_gstin(pool, gstin: str, mobile:
     conditions = ["gstin = $1"]
     values = [gstin]
 
-    if mobile:
+    if mobile is not None:
         conditions.append("mobile = ${}".format(len(values) + 1))
         values.append(mobile)
-    if pan:
+    if pan is not None:
         conditions.append("pan = ${}".format(len(values) + 1))
         values.append(pan)
-    if aadhaar:
+    if aadhaar is not None:
         conditions.append("aadhaar = ${}".format(len(values) + 1))
         values.append(aadhaar)
 
-    if exclude_id:
+    if exclude_id is not None:
         conditions.append("id != ${}".format(len(values) + 1))
         values.append(exclude_id)
 

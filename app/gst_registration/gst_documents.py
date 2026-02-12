@@ -1,113 +1,121 @@
-import logging
 import uuid
+import asyncpg
+import logging
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
-from datetime import datetime
-from app.security.rbac import require_permission
-from app.security.team_scope import require_team_access
 
+from app.security.rbac import require_permission
 from app.gst_registration.schemas import (
     RegistrationDocumentIn,
     RegistrationDocumentEditIn,
-    RegistrationDocumentOut
+    RegistrationDocumentOut,
 )
 from app.utils import get_db_pool, DB_SCHEMA
+from app.logger import logger
+
 
 router = APIRouter(
     prefix="/api/v1/gst-documents",
-    tags=["GST Registration Documents"]
+    tags=["GST Registration Documents"],
 )
-
-# -------------------------------------------------------------------
-# LOGGER
-# -------------------------------------------------------------------
-
-logger = logging.getLogger("gst_documents")
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-logger.setLevel(logging.INFO)
 
 # -------------------------------------------------------------------
 # CREATE REGISTRATION DOCUMENT
 # -------------------------------------------------------------------
 
-@router.post("", response_model=RegistrationDocumentOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
-async def create_registration_document(payload: RegistrationDocumentIn):
+@router.post(
+    "",
+    response_model=RegistrationDocumentOut,
+    summary="Create Registration Document",
+)
+async def create_registration_document(
+    payload: RegistrationDocumentIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
     request_id = str(uuid.uuid4())
-    logger.info("[request_id=%s] Creating registration document gstin=%s type=%s", request_id, payload.gstin, payload.document_type)
+    emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id},
+    )
+
+    log.info("Creating registration document gstin=%s type=%s",
+             payload.gstin, payload.document_type)
 
     pool = await get_db_pool()
 
-    # Validate GSTIN
-    gst_row = await pool.fetchrow(
-        f"SELECT gstin FROM {DB_SCHEMA}.gst_registration WHERE gstin=$1",
-        payload.gstin
-    )
-    if not gst_row:
-        logger.warning(
-            "[request_id=%s] GSTIN not found: %s",
-            request_id, payload.gstin
-        )
-        raise HTTPException(status_code=400, detail="GSTIN not found")
-
-    # Validate person_id if provided
-    if payload.person_id:
-        person_row = await pool.fetchrow(
-            f"SELECT person_id FROM {DB_SCHEMA}.registration_persons WHERE person_id=$1",
-            payload.person_id
-        )
-        if not person_row:
-            logger.warning(
-                "[request_id=%s] Person not found: %s",
-                request_id, payload.person_id
+    async with pool.acquire() as conn:
+        try:
+            # Validate GSTIN exists
+            gst_exists = await conn.fetchval(
+                f"SELECT 1 FROM {DB_SCHEMA}.gst_registration WHERE gstin=$1",
+                payload.gstin,
             )
-            raise HTTPException(status_code=400, detail="Registration person not found")
+            if not gst_exists:
+                raise HTTPException(status_code=400, detail="GSTIN not found.")
 
-    sql = f"""
-        INSERT INTO {DB_SCHEMA}.registration_documents
-        (gstin, person_id, document_type, document_url, ownership_category, mobile)
-        VALUES ($1,$2,$3,$4,$5,$6)
-        RETURNING *
-    """
+            # Validate person_id (if provided)
+            if payload.person_id:
+                person_exists = await conn.fetchval(
+                    f"""
+                    SELECT 1 FROM {DB_SCHEMA}.registration_persons
+                    WHERE person_id=$1
+                    """,
+                    payload.person_id,
+                )
+                if not person_exists:
+                    raise HTTPException(status_code=400, detail="Registration person not found.")
 
-    try:
-        row = await pool.fetchrow(
-            sql,
-            payload.gstin,
-            payload.person_id,
-            payload.document_type,
-            payload.document_url,
-            payload.ownership_category,
-            payload.mobile
-        )
-    except Exception as e:
-        logger.exception(
-            "[request_id=%s] Registration document create failed: %s",
-            request_id, str(e)
-        )
-        raise HTTPException(status_code=500, detail="Registration document creation failed")
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.registration_documents
+                    (gstin, person_id, document_type, document_url,
+                     ownership_category, mobile, uploaded_at)
+                    VALUES ($1,$2,$3,$4,$5,$6,NOW())
+                    RETURNING *
+                    """,
+                    payload.gstin,
+                    payload.person_id,
+                    payload.document_type,
+                    payload.document_url,
+                    payload.ownership_category,
+                    payload.mobile,
+                )
 
-    result = dict(row)
-    result["document_id"] = int(result["document_id"])
-    result["message"] = "Registration document created successfully."
+            response = RegistrationDocumentOut.model_validate(row)
 
-    logger.info(
-        "[request_id=%s] Registration document created document_id=%s gstin=%s",
-        request_id, result["document_id"], payload.gstin
-    )
+            log.info("Registration document created document_id=%s",
+                     row["document_id"])
 
-    return result
+            return response.model_copy(
+                update={"message": "Registration document created successfully."}
+            )
+
+        except asyncpg.exceptions.UniqueViolationError:
+            log.warning("Duplicate registration document")
+            raise HTTPException(status_code=409, detail="Duplicate registration document.")
+
+        except asyncpg.PostgresError:
+            log.exception("Database error during document creation")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+        except Exception:
+            log.exception("Unexpected error during document creation")
+            raise HTTPException(status_code=500, detail="Internal server error.")
+
 
 # -------------------------------------------------------------------
-# LIST REGISTRATION DOCUMENTS
+# LIST REGISTRATION DOCUMENTS (DYNAMIC FILTER)
 # -------------------------------------------------------------------
 
-@router.get("", response_model=List[RegistrationDocumentOut], dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
+@router.get(
+    "",
+    response_model=List[RegistrationDocumentOut],
+    summary="List Registration Documents",
+)
 async def list_registration_documents(
     gstin: Optional[str] = None,
     person_id: Optional[int] = None,
@@ -117,44 +125,60 @@ async def list_registration_documents(
     from_date: Optional[datetime] = Query(None),
     to_date: Optional[datetime] = Query(None),
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     request_id = str(uuid.uuid4())
-    logger.info(
-        "[request_id=%s] Listing registration documents gstin=%s person_id=%s",
-        request_id, gstin, person_id
+    emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id},
     )
 
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(status_code=400, detail="from_date cannot be greater than to_date.")
+
     pool = await get_db_pool()
-    conditions, values = [], []
+
+    conditions = []
+    values = []
+    param_index = 1
 
     if gstin:
-        conditions.append(f"gstin = ${len(values)+1}")
+        conditions.append(f"gstin = ${param_index}")
         values.append(gstin)
+        param_index += 1
 
     if person_id:
-        conditions.append(f"person_id = ${len(values)+1}")
+        conditions.append(f"person_id = ${param_index}")
         values.append(person_id)
+        param_index += 1
 
     if document_type:
-        conditions.append(f"document_type = ${len(values)+1}")
+        conditions.append(f"document_type = ${param_index}")
         values.append(document_type)
+        param_index += 1
 
     if verified is not None:
-        conditions.append(f"verified = ${len(values)+1}")
+        conditions.append(f"verified = ${param_index}")
         values.append(verified)
+        param_index += 1
 
     if mobile:
-        conditions.append(f"mobile = ${len(values)+1}")
+        conditions.append(f"mobile = ${param_index}")
         values.append(mobile)
+        param_index += 1
 
     if from_date:
-        conditions.append(f"uploaded_at >= ${len(values)+1}")
+        conditions.append(f"uploaded_at >= ${param_index}")
         values.append(from_date)
+        param_index += 1
 
     if to_date:
-        conditions.append(f"uploaded_at <= ${len(values)+1}")
+        conditions.append(f"uploaded_at <= ${param_index}")
         values.append(to_date)
+        param_index += 1
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -163,213 +187,96 @@ async def list_registration_documents(
           FROM {DB_SCHEMA}.registration_documents
           {where_clause}
          ORDER BY uploaded_at DESC
-         LIMIT ${len(values)+1} OFFSET ${len(values)+2}
+         LIMIT ${param_index} OFFSET ${param_index + 1}
     """
 
-    try:
-        values.extend([limit, offset])
-        rows = await pool.fetch(sql, *values)
+    values.extend([limit, offset])
 
-        logger.info(
-            "[request_id=%s] Registration documents listed count=%d",
-            request_id, len(rows)
-        )
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, *values)
+
+        log.info("Registration documents listed count=%s", len(rows))
 
         return [
-            {
-                **dict(r),
-                "document_id": int(r["document_id"]),
-                "message": "Registration documents listed successfully."
-            }
-            for r in rows
+            RegistrationDocumentOut.model_validate(row).model_copy(
+                update={"message": "Registration documents listed successfully."}
+            )
+            for row in rows
         ]
 
-    except Exception as e:
-        logger.exception(
-            "[request_id=%s] Exception during document listing: %s",
-            request_id, str(e)
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Exception during registration document listing"
-        )
-    
+    except asyncpg.PostgresError:
+        log.exception("Database error during listing")
+        raise HTTPException(status_code=500, detail="Database error.")
 
-@router.get("/{document_id}", response_model=RegistrationDocumentOut, dependencies=[Depends(require_permission("EMPLOYEE", "READ"))])
-async def get_registration_document(document_id: int):
-    request_id = str(uuid.uuid4())
-    logger.info(
-        "[request_id=%s] Fetching registration document document_id=%s",
-        request_id, document_id
-    )
-
-    pool = await get_db_pool()
-    row = await pool.fetchrow(
-        f"""
-        SELECT *
-          FROM {DB_SCHEMA}.registration_documents
-         WHERE document_id=$1
-         LIMIT 1
-        """,
-        document_id
-    )
-
-    if not row:
-        logger.warning(
-            "[request_id=%s] Document not found document_id=%s",
-            request_id, document_id
-        )
-        raise HTTPException(status_code=404, detail="Registration document not found")
-
-    result = dict(row)
-    result["document_id"] = int(result["document_id"])
-    result["message"] = "Registration document fetched successfully."
-
-    return result
+    except Exception:
+        log.exception("Unexpected error during listing")
+        raise HTTPException(status_code=500, detail="Internal server error.")
 
 
 # -------------------------------------------------------------------
-# EDIT REGISTRATION DOCUMENT BY ID (DYNAMIC)
+# EDIT REGISTRATION DOCUMENT (DYNAMIC UPDATE)
 # -------------------------------------------------------------------
 
-@router.post("/{document_id}/edit", response_model=RegistrationDocumentOut, dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
+@router.post(
+    "/{document_id}/edit",
+    response_model=RegistrationDocumentOut,
+    summary="Edit Registration Document",
+)
 async def edit_registration_document(
     document_id: int,
-    payload: RegistrationDocumentEditIn
+    payload: RegistrationDocumentEditIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     request_id = str(uuid.uuid4())
-    logger.info(
-        "[request_id=%s] Editing registration document document_id=%s",
-        request_id, document_id
+    emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id},
     )
+
+    update_data = payload.model_dump(exclude_unset=True)
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update.")
 
     pool = await get_db_pool()
-    fields, values = [], []
 
-    for k, v in payload.dict(exclude_unset=True).items():
-        fields.append(f"{k}=${len(values)+1}")
-        values.append(v)
+    async with pool.acquire() as conn:
+        try:
+            fields = []
+            values = []
 
-    if not fields:
-        logger.warning(
-            "[request_id=%s] No fields to update document_id=%s",
-            request_id, document_id
-        )
-        raise HTTPException(status_code=400, detail="No fields to update")
+            for index, (key, value) in enumerate(update_data.items(), start=1):
+                fields.append(f"{key} = ${index}")
+                values.append(value)
 
-    sql = f"""
-        UPDATE {DB_SCHEMA}.registration_documents
-        SET {', '.join(fields)}
-        WHERE document_id=${len(values)+1}
-        RETURNING *
-    """
-    values.append(document_id)
+            sql = f"""
+                UPDATE {DB_SCHEMA}.registration_documents
+                SET {', '.join(fields)}, updated_at = NOW()
+                WHERE document_id = ${len(values) + 1}
+                RETURNING *
+            """
 
-    try:
-        row = await pool.fetchrow(sql, *values)
-    except Exception as e:
-        logger.exception(
-            "[request_id=%s] Update failed document_id=%s: %s",
-            request_id, document_id, str(e)
-        )
-        raise HTTPException(status_code=500, detail="Registration document update failed")
+            values.append(document_id)
 
-    if not row:
-        logger.warning(
-            "[request_id=%s] Document not found document_id=%s",
-            request_id, document_id
-        )
-        raise HTTPException(status_code=404, detail="Registration document not found")
+            async with conn.transaction():
+                row = await conn.fetchrow(sql, *values)
 
-    result = dict(row)
-    result["document_id"] = int(result["document_id"])
-    result["message"] = "Registration document updated successfully."
+            if not row:
+                raise HTTPException(status_code=404, detail="Registration document not found.")
 
-    logger.info(
-        "[request_id=%s] Registration document updated document_id=%s",
-        request_id, document_id
-    )
+            log.info("Registration document updated document_id=%s", document_id)
 
-    return result
+            return RegistrationDocumentOut.model_validate(row).model_copy(
+                update={"message": "Registration document updated successfully."}
+            )
 
+        except asyncpg.PostgresError:
+            log.exception("Database error during document update")
+            raise HTTPException(status_code=500, detail="Database error.")
 
-
-@router.post("/by-mobile/{mobile}/edit", response_model=List[RegistrationDocumentOut], dependencies=[Depends(require_permission("EMPLOYEE", "WRITE"))])
-async def edit_registration_document_by_mobile(
-    mobile: str,
-    payload: RegistrationDocumentEditIn
-):
-    request_id = str(uuid.uuid4())
-    logger.info(
-        "[request_id=%s] Editing registration document(s) mobile=***",
-        request_id
-    )
-
-    pool = await get_db_pool()
-    fields, values = [], []
-
-    for k, v in payload.dict(exclude_unset=True).items():
-        fields.append(f"{k}=${len(values)+1}")
-        values.append(v)
-
-    if not fields:
-        logger.warning(
-            "[request_id=%s] No fields to update mobile=***",
-            request_id
-        )
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    sql = f"""
-        UPDATE {DB_SCHEMA}.registration_documents
-        SET {', '.join(fields)}
-        WHERE mobile=${len(values)+1}
-        RETURNING *
-    """
-    values.append(mobile)
-
-    try:
-        rows = await pool.fetch(sql, *values)
-    except Exception as e:
-        logger.exception(
-            "[request_id=%s] Update failed mobile=***: %s",
-            request_id, str(e)
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Registration document update failed"
-        )
-
-    if not rows:
-        logger.warning(
-            "[request_id=%s] No documents found for mobile=***",
-            request_id
-        )
-        raise HTTPException(
-            status_code=404,
-            detail="Registration document not found"
-        )
-
-    logger.info(
-        "[request_id=%s] Registration documents updated count=%d mobile=***",
-        request_id, len(rows)
-    )
-
-    return [
-        {
-            **dict(r),
-            "document_id": int(r["document_id"]),
-            "message": "Registration document updated successfully."
-        }
-        for r in rows
-    ]
-# -------------------------------------------------------------------
-# LOGGER SAFETY (MATCH OTHER FILES)
-# -------------------------------------------------------------------
-
-logger = logging.getLogger("gst_documents")
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+        except Exception:
+            log.exception("Unexpected error during document update")
+            raise HTTPException(status_code=500, detail="Internal server error.")
