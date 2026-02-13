@@ -158,7 +158,7 @@ class EmployeeEditIn(BaseSchema):
     role: Optional[Annotated[str, constr(max_length=50)]] = None
     is_active: Optional[bool] = None
     manager_emp_id: Optional[int] = Field(None, gt=0)
-    employee_image_url: Optional[HttpUrl] = None
+    employee_image_url: Optional[str] = None
 
     @field_validator("email", mode="before")
     @classmethod

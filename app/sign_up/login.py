@@ -75,6 +75,12 @@ async def login(
         if not employee:
             logging.warning("Employee not found or invalid credentials.")
             raise HTTPException(status_code=401, detail="Invalid email credentials")
+        
+        # Check if employee is active
+        if not employee.get("is_active", False):
+            logging.warning("Employee account is inactive.")
+            raise HTTPException(status_code=401, detail="Employee account is inactive")
+
         # 2. Check password
         logging.info("Checking password hash...")
         if employee["password_hash"] != hash_password(password):

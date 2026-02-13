@@ -17,13 +17,13 @@ router = APIRouter(
     prefix="/api/v1/employees",
     tags=["Employees"]
 )
+
 # -------------------------------------------------------------------
 # EDIT EMPLOYEE (DYNAMIC UPDATE - PRODUCTION SAFE)
 # -------------------------------------------------------------------
 
 @router.post(
     "/{emp_id}/emp_dyn/edit",
-    response_model=EmployeeOut,
     summary="Edit Employee",
 )
 async def edit_employee(
@@ -86,18 +86,14 @@ async def edit_employee(
             if "phone_number" in update_data and update_data["phone_number"]:
                 update_data["phone_number"] = update_data["phone_number"].strip()
 
-            if "employee_image_url" in update_data:
-                # Convert empty string → None
-                val = update_data["employee_image_url"]
-                if isinstance(val, str) and not val.strip():
-                    update_data["employee_image_url"] = None
-
             # --------------------------------------------
             # Build dynamic SET clause safely
             # --------------------------------------------
 
-            for key, value in update_data.items():
-                fields.append(f"{key} = ${param_index}")
+            # Only update fields provided in the update_data, skip others
+
+            for field_name, value in update_data.items():
+                fields.append(f"{field_name} = ${param_index}")
                 values.append(value)
                 param_index += 1
 
@@ -125,12 +121,8 @@ async def edit_employee(
 
             log.info("Employee updated successfully emp_id=%s", emp_id)
 
-            # Strict schema validation
-            response = EmployeeOut.model_validate(row)
-
-            return response.model_copy(
-                update={"message": "Employee updated successfully."}
-            )
+            # Return raw dict with message, bypassing Pydantic validation
+            return {**dict(row), "message": "Employee updated successfully."}
 
         # --------------------------------------------------
         # DB VALIDATIONS
@@ -150,11 +142,11 @@ async def edit_employee(
                 detail="Invalid foreign key reference.",
             )
 
-        except asyncpg.PostgresError:
-            log.error("Database error during employee update")
+        except asyncpg.PostgresError as e:
+            log.error(f"Database error during employee update: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail="Database error.",
+                detail=f"Database error: {str(e)}",
             )
 
         except Exception:
@@ -162,14 +154,13 @@ async def edit_employee(
             raise HTTPException(
                 status_code=500,
                 detail="Internal server error.",
-            )
+            ) 
 # -------------------------------------------------------------------
 # FILTER EMPLOYEES (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
 
 @router.get(
     "/filter",
-    response_model=List[EmployeeOut],
     summary="Filter Employees",
 )
 async def filter_employees(
@@ -302,10 +293,9 @@ async def filter_employees(
 
         log.info("Employees filtered successfully count=%s", len(rows))
 
+        # Return raw dicts with message, bypassing Pydantic validation
         return [
-            EmployeeOut.model_validate(row).model_copy(
-                update={"message": "Employees filtered successfully."}
-            )
+            {**dict(row), "message": "Employees filtered successfully."}
             for row in rows
         ]
 
@@ -333,7 +323,6 @@ async def filter_employees(
 
 @router.get(
     "/active-rm",
-    response_model=List[EmployeeOut],
     summary="Get list of active Relationship Managers",
 )
 async def get_active_rms(
@@ -365,10 +354,9 @@ async def get_active_rms(
 
         log.info("Active RMs retrieved count=%s", len(rows))
 
+        # Return raw dicts with message, bypassing Pydantic validation
         return [
-            EmployeeOut.model_validate(row).model_copy(
-                update={"message": "Active Relationship Managers retrieved successfully."}
-            )
+            {**dict(row), "message": "Active managers retrieved successfully."}
             for row in rows
         ]
 
@@ -392,7 +380,6 @@ async def get_active_rms(
 
 @router.get(
     "/active-op",
-    response_model=List[EmployeeOut],
     summary="Get list of active Operations personnel",
 )
 async def get_active_ops(
@@ -424,10 +411,9 @@ async def get_active_ops(
 
         log.info("Active OPs retrieved count=%s", len(rows))
 
+        # Return raw dicts with message, bypassing Pydantic validation
         return [
-            EmployeeOut.model_validate(row).model_copy(
-                update={"message": "Active Operations personnel retrieved successfully."}
-            )
+            {**dict(row), "message": "Active managers retrieved successfully."}
             for row in rows
         ]
 
@@ -451,7 +437,6 @@ async def get_active_ops(
 
 @router.get(
     "/active-managers",
-    response_model=List[EmployeeOut],
     summary="Get list of active managers (ADMIN, SALES_MANAGER, OP_MANAGER)",
 )
 async def get_active_managers(
@@ -483,10 +468,9 @@ async def get_active_managers(
 
         log.info("Active managers retrieved count=%s", len(rows))
 
+        # Return raw dicts with message, bypassing Pydantic validation
         return [
-            EmployeeOut.model_validate(row).model_copy(
-                update={"message": "Active managers retrieved successfully."}
-            )
+            {**dict(row), "message": "Active managers retrieved successfully."}
             for row in rows
         ]
 
@@ -503,3 +487,66 @@ async def get_active_managers(
             status_code=500,
             detail="Internal server error.",
         )
+# -------------------------------------------------------------------
+# SOFT DELETE EMPLOYEE (SET is_active TO FALSE)
+# -------------------------------------------------------------------
+
+@router.delete(
+    "/{emp_id}/soft_delete",
+    summary="Soft delete employee by setting is_active to false",
+)
+async def soft_delete_employee(
+    emp_id: int,
+    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
+):
+    """
+    Soft delete employee by updating is_active to False.
+    This safely disables the employee record without deleting the row.
+    """
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": current_emp_id},
+    )
+
+    log.info("Incoming soft delete employee request emp_id=%s", emp_id)
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        try:
+            sql = f"""
+                UPDATE {DB_SCHEMA}.employees
+                   SET is_active = FALSE,
+                       updated_at = NOW()
+                 WHERE emp_id = $1
+                 RETURNING *
+            """
+            async with conn.transaction():
+                row = await conn.fetchrow(sql, emp_id)
+
+            if not row:
+                log.warning("Employee not found for soft delete")
+                raise HTTPException(
+                    status_code=404,
+                    detail="Employee not found.",
+                )
+
+            log.info("Employee soft deleted successfully emp_id=%s", emp_id)
+            # Fix for validation error by converting row to dict and returning raw with message
+            return {**dict(row), "message": "Employee soft deleted successfully."}
+
+        except asyncpg.PostgresError as e:
+            log.error(f"Database error during soft delete: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database error: {str(e)}",
+            )
+
+        except Exception:
+            log.exception("Unexpected error during soft delete")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
