@@ -27,7 +27,18 @@ PUBLIC_PATHS = [
     "/app/v1/forgot-password/verify",
 ]
 
-async def validate_token(token: str):
+def _get_client_ip(request: Request | None) -> str:
+    """Get client IP from request (same logic as login.py)."""
+    if request is None:
+        return "Unknown"
+    # Prefer X-Forwarded-For when behind a proxy (use first hop = client)
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "Unknown"
+
+
+async def validate_token(token: str, request: Request | None = None):
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         logging.info(f"DEBUG: jwt.decode returned type={type(payload)}, value={payload}")
@@ -84,18 +95,7 @@ async def validate_token(token: str):
                 logging.info(f"Session revoked for emp_id={emp_id}.")
                 return False, "Session revoked"
 
-            # Extract IP address from the request (must be passed as argument)
-            ip_address = None
-            try:
-                # Try to get from contextvar if available (middleware)
-                import contextvars
-                req = contextvars.ContextVar('request').get(None)
-                if req is not None:
-                    ip_address = req.headers.get("X-Forwarded-For", req.client.host if req.client else "Unknown")
-            except Exception:
-                pass
-            if ip_address is None:
-                ip_address = "Unknown"
+            ip_address = _get_client_ip(request)
 
             # Record session validation actions
             await conn.execute(
@@ -131,7 +131,7 @@ class TokenValidatorMiddleware(BaseHTTPMiddleware):
             logging.info(f"Request_ID={request_id} Token_ID=N/A Valid=Invalid Reason=Missing token")
             return JSONResponse(status_code=403, content={"detail": "Forbidden: Missing or invalid token"})
         token = auth.split(" ", 1)[1]
-        valid, reason = await validate_token(token)
+        valid, reason = await validate_token(token, request)
         token_id = "N/A"
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM], options={"verify_exp": False})

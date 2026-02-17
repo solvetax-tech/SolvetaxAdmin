@@ -2,14 +2,13 @@ from fastapi import APIRouter, status, HTTPException, Request, Body
 from fastapi.responses import JSONResponse
 from pydantic import Field
 from app.sign_up.schemas import ForgotPasswordRequest, ForgotPasswordVerify, ForgotPasswordResponse
-from app.utils import get_db_pool, hash_password, is_password_strong, passwords_match
+from app.utils import get_db_pool, hash_password, is_password_strong, passwords_match, generate_uuid
+from app.logger import logger
 from datetime import datetime, timedelta, timezone
 import random
 import logging
 
 router = APIRouter(prefix="/app/v1", tags=["ForgotPassword"])
-
-logging.basicConfig(level=logging.INFO)
 
 OTP_EXPIRY_MINUTES = 10
 
@@ -37,12 +36,15 @@ async def send_sms(phone_number: str, otp: str):
         from_=from_number,
         to=phone_number
     )
-    logging.info(f"Twilio SMS sent: SID={message.sid} to={phone_number}")
+    logger.info("Twilio SMS sent: SID=%s to=%s", message.sid, phone_number)
 
 @router.post("/forgot-password/request", response_model=ForgotPasswordResponse)
 async def forgot_password_request(
     payload: ForgotPasswordRequest = Body(...)
 ):
+    request_id = generate_uuid()
+    log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": "-"})
+
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         # 1. Find employee by email
@@ -50,6 +52,7 @@ async def forgot_password_request(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         emp_id = employee["emp_id"]
+        log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
         phone_number = employee["phone_number"]
         if not phone_number:
             raise HTTPException(status_code=400, detail="No phone number registered for this employee")
@@ -66,13 +69,16 @@ async def forgot_password_request(
         )
         # 4. Send OTP via SMS (stub)
         await send_sms(phone_number, otp)
-        logging.info(f"OTP {otp} generated for emp_id={emp_id}, expires at {expires_at}")
+        log.info("OTP generated for emp_id=%s, expires at %s", emp_id, expires_at)
         return ForgotPasswordResponse(message="OTP sent to your registered phone number.")
 
 @router.post("/forgot-password/verify", response_model=ForgotPasswordResponse)
 async def forgot_password_verify(
     payload: ForgotPasswordVerify = Body(...)
 ):
+    request_id = generate_uuid()
+    log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": "-"})
+
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         # 1. Find employee by email
@@ -80,6 +86,7 @@ async def forgot_password_verify(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
         emp_id = employee["emp_id"]
+        log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
         # 2. Find valid OTP
         otp_row = await conn.fetchrow(
             """
@@ -132,5 +139,5 @@ async def forgot_password_verify(
             "UPDATE solvetax.password_reset_otps SET is_used = true WHERE id = $1",
             otp_row["id"]
         )
-        logging.info(f"Password reset for emp_id={emp_id}")
+        log.info("Password reset for emp_id=%s", emp_id)
         return ForgotPasswordResponse(message="Password has been reset successfully.")

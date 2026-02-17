@@ -1,15 +1,13 @@
 import logging
-import uuid
-from fastapi import APIRouter, HTTPException, Query, Depends , Request
-from pydantic import constr, validator
+import re
 import asyncpg
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
 from datetime import datetime
-from app.utils import get_db_pool, DB_SCHEMA
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.sign_up.schemas import EmployeeEditIn, EmployeeOut
 from app.security.rbac import require_permission
 from app.logger import logger
-from app.utils import generate_uuid
 
 
 
@@ -25,6 +23,13 @@ router = APIRouter(
 @router.post(
     "/{emp_id}/emp_dyn/edit",
     summary="Edit Employee",
+    responses={
+        200: {"description": "Employee updated successfully."},
+        400: {"description": "Validation failed or invalid reference."},
+        404: {"description": "Employee not found."},
+        409: {"description": "Duplicate field value (email/username/phone)."},
+        500: {"description": "Database or internal error."},
+    },
 )
 async def edit_employee(
     emp_id: int,
@@ -49,7 +54,7 @@ async def edit_employee(
     """
 
     request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id")
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
@@ -68,7 +73,14 @@ async def edit_employee(
             detail="At least one field must be provided for update.",
         )
 
-    pool = await get_db_pool()
+    try:
+        pool = await get_db_pool()
+    except Exception as e:
+        log.exception("Database pool acquisition failed error=%s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
 
     async with pool.acquire() as conn:
         try:
@@ -121,40 +133,44 @@ async def edit_employee(
 
             log.info("Employee updated successfully emp_id=%s", emp_id)
 
-            # Return raw dict with message, bypassing Pydantic validation
             return {**dict(row), "message": "Employee updated successfully."}
 
-        # --------------------------------------------------
-        # DB VALIDATIONS
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.UniqueViolationError:
-            log.warning("Duplicate value violates unique constraint")
-            raise HTTPException(
-                status_code=409,
-                detail="Duplicate field value violates unique constraint.",
-            )
+        except asyncpg.exceptions.UniqueViolationError as e:
+            constraint = getattr(e, "constraint_name", None) or ""
+            if not constraint:
+                match = re.search(r'constraint ["\']?(.+?)["\']', str(e))
+                constraint = match.group(1) if match else ""
+            if constraint == "employees_email_key":
+                detail = "Email already exists."
+            elif constraint == "employees_username_key":
+                detail = "Username already exists."
+            elif "phone" in constraint.lower():
+                detail = "Phone number already exists."
+            else:
+                detail = "Duplicate field value violates unique constraint."
+            log.warning("Unique constraint violation emp_id=%s constraint=%s", emp_id, constraint)
+            raise HTTPException(status_code=409, detail=detail)
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning("Invalid foreign key reference (manager_emp_id)")
+            log.warning("Invalid foreign key reference (manager_emp_id) emp_id=%s", emp_id)
             raise HTTPException(
                 status_code=400,
                 detail="Invalid foreign key reference.",
             )
 
         except asyncpg.PostgresError as e:
-            log.error(f"Database error during employee update: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Database error: {str(e)}",
+            log.error(
+                "Database error during employee update emp_id=%s error=%s",
+                emp_id, e, exc_info=True,
             )
+            raise HTTPException(status_code=500, detail="Database error.")
+
+        except HTTPException:
+            raise
 
         except Exception:
-            log.exception("Unexpected error during employee update")
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error.",
-            ) 
+            log.exception("Unexpected error during employee update emp_id=%s", emp_id)
+            raise HTTPException(status_code=500, detail="Internal server error.") 
 # -------------------------------------------------------------------
 # FILTER EMPLOYEES (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
@@ -162,6 +178,11 @@ async def edit_employee(
 @router.get(
     "/filter",
     summary="Filter Employees",
+    responses={
+        200: {"description": "List of employees matching filters."},
+        400: {"description": "Validation failed (e.g. from_date > to_date)."},
+        500: {"description": "Database or internal error."},
+    },
 )
 async def filter_employees(
     emp_id: Optional[int] = None,
@@ -194,7 +215,7 @@ async def filter_employees(
     """
 
     request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id")
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
@@ -328,8 +349,8 @@ async def filter_employees(
 async def get_active_rms(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    request_id = str(uuid.uuid4())
-    current_emp_id = current_user.get("emp_id")
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
@@ -385,8 +406,8 @@ async def get_active_rms(
 async def get_active_ops(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    request_id = str(uuid.uuid4())
-    current_emp_id = current_user.get("emp_id")
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
@@ -442,8 +463,8 @@ async def get_active_ops(
 async def get_active_managers(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-    request_id = str(uuid.uuid4())
-    current_emp_id = current_user.get("emp_id")
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
@@ -494,6 +515,11 @@ async def get_active_managers(
 @router.delete(
     "/{emp_id}/soft_delete",
     summary="Soft delete employee by setting is_active to false",
+    responses={
+        200: {"description": "Employee soft deleted successfully."},
+        404: {"description": "Employee not found."},
+        500: {"description": "Database or internal error."},
+    },
 )
 async def soft_delete_employee(
     emp_id: int,
@@ -504,7 +530,7 @@ async def soft_delete_employee(
     This safely disables the employee record without deleting the row.
     """
     request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id")
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
@@ -513,7 +539,15 @@ async def soft_delete_employee(
 
     log.info("Incoming soft delete employee request emp_id=%s", emp_id)
 
-    pool = await get_db_pool()
+    try:
+        pool = await get_db_pool()
+    except Exception as e:
+        log.exception("Database pool acquisition failed error=%s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
     async with pool.acquire() as conn:
         try:
             sql = f"""
@@ -527,26 +561,25 @@ async def soft_delete_employee(
                 row = await conn.fetchrow(sql, emp_id)
 
             if not row:
-                log.warning("Employee not found for soft delete")
+                log.warning("Employee not found for soft delete emp_id=%s", emp_id)
                 raise HTTPException(
                     status_code=404,
                     detail="Employee not found.",
                 )
 
             log.info("Employee soft deleted successfully emp_id=%s", emp_id)
-            # Fix for validation error by converting row to dict and returning raw with message
             return {**dict(row), "message": "Employee soft deleted successfully."}
 
+        except HTTPException:
+            raise
+
         except asyncpg.PostgresError as e:
-            log.error(f"Database error during soft delete: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Database error: {str(e)}",
+            log.error(
+                "Database error during soft delete emp_id=%s error=%s",
+                emp_id, e, exc_info=True,
             )
+            raise HTTPException(status_code=500, detail="Database error.")
 
         except Exception:
-            log.exception("Unexpected error during soft delete")
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error.",
-            )
+            log.exception("Unexpected error during soft delete emp_id=%s", emp_id)
+            raise HTTPException(status_code=500, detail="Internal server error.")

@@ -9,7 +9,7 @@ from app.customer_registration.schemas import CustomerIn, CustomerEditIn, Custom
 from app.utils import get_db_pool, DB_SCHEMA
 from app.security.rbac import require_permission
 from app.logger import logger
-from app.utils import mask_sensitive_data
+from app.utils import mask_sensitive_data,generate_uuid
 
 router = APIRouter(
     prefix="/api/v1/customers",
@@ -29,7 +29,7 @@ async def create_customer(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     request_id = str(uuid.uuid4())
-    emp_id = current_user.get("emp_id")
+    emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
@@ -38,6 +38,7 @@ async def create_customer(
 
     now = datetime.utcnow()
 
+    # Create masked copy for logging only - using model_dump to avoid affecting payload
     masked_email = mask_sensitive_data(payload.email)
     masked_mobile = mask_sensitive_data(payload.mobile)
 
@@ -92,14 +93,9 @@ async def create_customer(
                 row["customer_id"],
             )
 
-            # Return full dict response directly instead of Pydantic validation
-            import json
-            allowed_fields = set(CustomerOut.model_fields.keys())
-            filtered_response = {key: value for key, value in row.items() if key in allowed_fields}
-            filtered_response["message"] = "Customer created successfully."
-            json_response = json.loads(json.dumps(filtered_response, default=str))
-
-            return json_response
+            response_data = dict(row)
+            response_data["message"] = "Customer created successfully."
+            return response_data
 
         except asyncpg.exceptions.UniqueViolationError:
             log.warning("Duplicate customer detected")
@@ -136,11 +132,10 @@ async def create_customer(
 
 from fastapi import Request
 @router.get(
-    "",
-    response_model=List[CustomerOut],
-    summary="List Customers",
+    "/customer_get/filter",
+    summary="Filter Customers",
 )
-async def list_customers(
+async def filter_customers(
     customer_id: Optional[int] = None,
     full_name: Optional[str] = None,
     email: Optional[str] = None,
@@ -158,18 +153,32 @@ async def list_customers(
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
+    """
+    Filter Customers API (RBAC REMOVED - Same as Employee Filter)
 
-    request_id = str(uuid.uuid4())
-    emp_id = current_user.get("emp_id")
+    Validation Responsibility Split:
+    --------------------------------
+    1️⃣ FastAPI:
+        - Type validation
+        - Pagination limits
+
+    2️⃣ Database:
+        - Filtering logic only (no RBAC restrictions)
+    """
+
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": emp_id},
+        {"request_id": request_id, "emp_id": current_emp_id},
     )
 
-    log.info("Incoming list customers request limit=%s offset=%s", limit, offset)
+    log.info("Incoming customer filter request limit=%s offset=%s", limit, offset)
 
-    # 🔹 Date sanity check
+    # --------------------------------------------------
+    # Date Sanity Validation (IDENTICAL to employee_get)
+    # --------------------------------------------------
     if from_date and to_date and from_date > to_date:
         raise HTTPException(
             status_code=400,
@@ -183,9 +192,9 @@ async def list_customers(
         values = []
         param_index = 1
 
-        # ------------------------------
-        # Business Filters
-        # ------------------------------
+        # --------------------------------------------------
+        # Business Filters (SAME PATTERN AS employee_get)
+        # --------------------------------------------------
 
         if customer_id is not None:
             conditions.append(f"customer_id = ${param_index}")
@@ -222,48 +231,19 @@ async def list_customers(
             values.append(city)
             param_index += 1
 
-        # ------------------------------
-        # Role-Based Security Filtering
-        # ------------------------------
+        if rm_id is not None:
+            conditions.append(f"rm_id = ${param_index}")
+            values.append(rm_id)
+            param_index += 1
 
-        roles = current_user.get("roles", [])
-        is_admin = "ADMIN" in roles
-        is_rm = "RM" in roles
-        is_op = "OP" in roles
+        if op_id is not None:
+            conditions.append(f"op_id = ${param_index}")
+            values.append(op_id)
+            param_index += 1
 
-        if not is_admin:
-            if is_rm and not is_op:
-                conditions.append(f"rm_id = ${param_index}")
-                values.append(emp_id)
-                param_index += 1
-
-            elif is_op and not is_rm:
-                conditions.append(f"op_id = ${param_index}")
-                values.append(emp_id)
-                param_index += 1
-
-            else:
-                conditions.append(
-                    f"(rm_id = ${param_index} OR op_id = ${param_index + 1})"
-                )
-                values.extend([emp_id, emp_id])
-                param_index += 2
-
-        else:
-            if rm_id is not None:
-                conditions.append(f"rm_id = ${param_index}")
-                values.append(rm_id)
-                param_index += 1
-
-            if op_id is not None:
-                conditions.append(f"op_id = ${param_index}")
-                values.append(op_id)
-                param_index += 1
-
-        # ------------------------------
-        # Status Filtering
-        # ------------------------------
-
+        # --------------------------------------------------
+        # Status Filtering (IDENTICAL to employee_get)
+        # --------------------------------------------------
         if is_active is not None:
             conditions.append(f"is_active = ${param_index}")
             values.append(is_active)
@@ -271,10 +251,9 @@ async def list_customers(
         elif not include_inactive:
             conditions.append("is_active = TRUE")
 
-        # ------------------------------
-        # Date Filtering
-        # ------------------------------
-
+        # --------------------------------------------------
+        # Date Filtering (IDENTICAL to employee_get)
+        # --------------------------------------------------
         if from_date:
             conditions.append(f"created_at >= ${param_index}")
             values.append(from_date)
@@ -285,6 +264,9 @@ async def list_customers(
             values.append(to_date)
             param_index += 1
 
+        # --------------------------------------------------
+        # WHERE Clause Builder (EXACT SAME AS employee_get)
+        # --------------------------------------------------
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         sql = f"""
@@ -300,36 +282,37 @@ async def list_customers(
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *values)
 
-        log.info("Customers listed successfully count=%s", len(rows))
+        log.info("Customers filtered successfully count=%s", len(rows))
 
         return [
-            CustomerOut.model_validate(row).model_copy(
-                update={"message": "Customers listed successfully."}
-            )
+            {**dict(row), "message": "Customers filtered successfully."}
             for row in rows
         ]
 
+    # --------------------------------------------------
+    # DB VALIDATIONS (IDENTICAL to employee_get)
+    # --------------------------------------------------
     except asyncpg.PostgresError:
-        log.exception("Database error during customer listing")
+        log.exception("Database error during customer filtering")
         raise HTTPException(
             status_code=500,
             detail="Database error.",
         )
 
     except Exception:
-        log.exception("Unexpected error during customer listing")
+        log.exception("Unexpected error during customer filtering")
         raise HTTPException(
             status_code=500,
             detail="Internal server error.",
         )
 
 
+
 # -------------------------------------------------------------------
 # GET CUSTOMER BY ID
 # -------------------------------------------------------------------
 @router.get(
-    "/{customer_id}/single_filter",
-    response_model=CustomerOut,
+    "/{customer_id}",
     summary="Get Customer",
 )
 async def get_customer(
@@ -337,26 +320,30 @@ async def get_customer(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
-    Get Customer by ID
+    Get Customer by ID (Production Standard)
 
     Validation Responsibility Split:
     --------------------------------
-    1. Authentication & Authorization handled via dependency.
-    2. customer_id type validation handled by FastAPI (int).
-    3. Existence validation handled by DB query.
+    1. Authentication & Authorization via dependency
+    2. Path param type validation handled by FastAPI
+    3. Existence validation handled by DB query
     """
 
-    request_id = str(uuid.uuid4())
-    emp_id = current_user.get("emp_id")
+    # --------------------------------------------------
+    # Request Context & Structured Logging (Aligned)
+    # --------------------------------------------------
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": emp_id},
+        {"request_id": request_id, "emp_id": current_emp_id},
     )
 
-    log.info("Incoming get customer request customer_id=%s", customer_id)
-
-    pool = await get_db_pool()
+    log.info(
+        "Incoming get customer request customer_id=%s",
+        customer_id,
+    )
 
     sql = f"""
         SELECT *
@@ -365,39 +352,75 @@ async def get_customer(
          LIMIT 1
     """
 
+    # --------------------------------------------------
+    # Database Pool Acquisition Safety
+    # --------------------------------------------------
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(sql, customer_id)
 
+        # --------------------------------------------------
+        # Not Found Handling (Consistent Style)
+        # --------------------------------------------------
         if not row:
-            log.warning("Customer not found")
+            log.warning(
+                "Customer not found customer_id=%s",
+                customer_id,
+            )
             raise HTTPException(
                 status_code=404,
                 detail="Customer not found.",
             )
 
-        log.info("Customer fetched successfully customer_id=%s", customer_id)
-
-        # Strict response validation
-        response = CustomerOut.model_validate(row)
-
-        return response.model_copy(
-            update={"message": "Customer fetched successfully."}
+        log.info(
+            "Customer fetched successfully customer_id=%s",
+            customer_id,
         )
 
-    # --------------------------------------------------
-    # DB VALIDATIONS
-    # --------------------------------------------------
+        # Return raw dict with message (same style as filter/list APIs)
+        return {
+            **dict(row),
+            "message": "Customer fetched successfully.",
+        }
 
-    except asyncpg.PostgresError:
-        log.error("Database error during get customer")
+    # --------------------------------------------------
+    # IMPORTANT: Re-raise HTTP Exceptions First
+    # --------------------------------------------------
+    except HTTPException:
+        raise
+
+    # --------------------------------------------------
+    # DATABASE ERROR HANDLING (Improved)
+    # --------------------------------------------------
+    except asyncpg.PostgresError as e:
+        log.error(
+            "Database error during get customer customer_id=%s error=%s",
+            customer_id,
+            str(e),
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=500,
             detail="Database error.",
         )
 
+    # --------------------------------------------------
+    # FALLBACK UNEXPECTED ERROR (WITH STACK TRACE)
+    # --------------------------------------------------
     except Exception:
-        log.exception("Unexpected error during get customer")
+        log.exception(
+            "Unexpected error during get customer customer_id=%s",
+            customer_id,
+        )
         raise HTTPException(
             status_code=500,
             detail="Internal server error.",
@@ -406,121 +429,452 @@ async def get_customer(
 # --------------------------------------------------------------
 # EDIT CUSTOMER (is_active EDITABLE)
 # --------------------------------------------------------------
+
 @router.post(
     "/{customer_id}/customer-dyn/edit",
-    response_model=CustomerOut,
-    summary="Edit Customer",
+    summary="Edit Customer (Dynamic Update - Production Ready)",
 )
 async def edit_customer(
     customer_id: int,
     payload: CustomerEditIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    request_id = str(uuid.uuid4())
-    emp_id = current_user.get("emp_id")
+    """
+    Production-Ready Dynamic Customer Update API
+
+    Features:
+    ---------
+    ✔ Dynamic field update (PATCH-like behavior)
+    ✔ Structured logging with request_id & emp_id
+    ✔ Field normalization (email, phone, urls)
+    ✔ Full DB exception coverage (asyncpg)
+    ✔ Safe SQL parameterization (SQL Injection safe)
+    ✔ Transaction handling
+    ✔ Detailed audit logs
+    ✔ Enterprise-grade error handling
+
+    Validation Responsibility:
+    --------------------------
+    1. Schema-Level (Pydantic - CustomerEditIn):
+       - Email format
+       - Phone validation
+       - HttpUrl validation
+       - Type & length constraints
+
+    2. Database-Level:
+       - UNIQUE constraints
+       - FOREIGN KEY constraints (rm_id, op_id, etc.)
+       - NOT NULL constraints
+       - Check constraints
+    """
+
+    # --------------------------------------------------
+    # Request Context & Structured Logging
+    # --------------------------------------------------
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": emp_id},
+        {
+            "request_id": request_id,
+            "emp_id": current_emp_id,
+            "api": "edit_customer",
+        },
     )
 
-    log.info("Incoming edit customer request customer_id=%s", customer_id)
+    log.info(
+        "Incoming edit customer request | customer_id=%s",
+        customer_id,
+    )
 
-    # Extract only provided fields (dynamic update)
-    update_data = payload.model_dump(exclude_unset=True)
+    # --------------------------------------------------
+    # Extract only provided fields (Dynamic Update)
+    # --------------------------------------------------
+    try:
+        update_data: Dict[str, Any] = payload.model_dump(exclude_unset=True)
+    except Exception as e:
+        log.exception(
+            "Failed to serialize payload | customer_id=%s | error=%s",
+            customer_id,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid request payload.",
+        )
 
     if not update_data:
-        log.warning("No fields provided for update")
+        log.warning(
+            "No fields provided for update | customer_id=%s",
+            customer_id,
+        )
         raise HTTPException(
             status_code=400,
             detail="At least one field must be provided for update.",
         )
 
-    pool = await get_db_pool()
+    # --------------------------------------------------
+    # Normalize Critical Fields (Production Standard)
+    # --------------------------------------------------
+    try:
+        if "email" in update_data and update_data["email"]:
+            update_data["email"] = update_data["email"].strip().lower()
+
+        if "phone_number" in update_data and update_data["phone_number"]:
+            update_data["phone_number"] = update_data["phone_number"].strip()
+
+        # Convert HttpUrl / URL fields to string for asyncpg compatibility
+        url_fields = ["business_image_url", "website_url"]
+        for field in url_fields:
+            if field in update_data and update_data[field]:
+                update_data[field] = str(update_data[field])
+
+    except Exception as e:
+        log.exception(
+            "Error during field normalization | customer_id=%s | payload=%s | error=%s",
+            customer_id,
+            update_data,
+            str(e),
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid field values provided.",
+        )
+
+    # --------------------------------------------------
+    # Database Operation
+    # --------------------------------------------------
+    try:
+        pool = await get_db_pool()
+    except Exception as e:
+        log.exception(
+            "Database pool acquisition failed | error=%s",
+            str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
 
     async with pool.acquire() as conn:
         try:
             fields = []
             values = []
+            param_index = 1
 
-            # --------------------------------------------------
-            # Build dynamic SET clause safely
-            # --------------------------------------------------
-            for index, (key, value) in enumerate(update_data.items(), start=1):
-                # Handle HttpUrl if present
-                if key == "business_image_url" and value:
-                    value = str(value)
-
-                fields.append(f"{key} = ${index}")
+            # --------------------------------------------
+            # Build Dynamic SET Clause (SQL Injection Safe)
+            # --------------------------------------------
+            for field_name, value in update_data.items():
+                fields.append(f"{field_name} = ${param_index}")
                 values.append(value)
+                param_index += 1
 
-            # Always update timestamp
+            # Always update timestamp for audit tracking
             fields.append("updated_at = NOW()")
 
             sql = f"""
                 UPDATE {DB_SCHEMA}.customers
                 SET {', '.join(fields)}
-                WHERE customer_id = ${len(values) + 1}
+                WHERE customer_id = ${param_index}
                 RETURNING *
             """
 
             values.append(customer_id)
 
+            log.debug(
+                "Executing customer update query | customer_id=%s | fields=%s",
+                customer_id,
+                list(update_data.keys()),
+            )
+
+            # Transaction ensures atomic update
             async with conn.transaction():
                 row = await conn.fetchrow(sql, *values)
 
+            # --------------------------------------------
+            # Not Found Handling
+            # --------------------------------------------
             if not row:
-                log.warning("Customer not found for update")
+                log.warning(
+                    "Customer not found for update | customer_id=%s",
+                    customer_id,
+                )
                 raise HTTPException(
                     status_code=404,
                     detail="Customer not found.",
                 )
 
             log.info(
-                "Customer updated successfully customer_id=%s",
+                "Customer updated successfully | customer_id=%s | updated_fields=%s",
                 customer_id,
+                list(update_data.keys()),
             )
 
-            # Filter response like create API
-            import json
-            allowed_fields = set(CustomerOut.model_fields.keys())
-            filtered_response = {
-                key: value for key, value in row.items()
-                if key in allowed_fields
+            # Return raw dict (Production best practice for dynamic APIs)
+            return {
+                **dict(row),
+                "message": "Customer updated successfully.",
+                "request_id": request_id,
             }
 
-            filtered_response["message"] = "Customer updated successfully."
-            json_response = json.loads(json.dumps(filtered_response, default=str))
-
-            return json_response
-
         # --------------------------------------------------
-        # DB VALIDATIONS
+        # DATABASE EXCEPTION HANDLING (FULL COVERAGE)
         # --------------------------------------------------
-
-        except asyncpg.exceptions.UniqueViolationError:
-            log.warning("Duplicate field value violates unique constraint")
+        except asyncpg.exceptions.UniqueViolationError as e:
+            log.warning(
+                "Unique constraint violation | customer_id=%s | payload=%s | error=%s",
+                customer_id,
+                update_data,
+                str(e),
+            )
             raise HTTPException(
                 status_code=409,
                 detail="Duplicate field value violates unique constraint.",
             )
 
-        except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning("Invalid foreign key reference (rm_id/op_id)")
+        except asyncpg.exceptions.ForeignKeyViolationError as e:
+            log.warning(
+                "Foreign key violation | customer_id=%s | payload=%s | error=%s",
+                customer_id,
+                update_data,
+                str(e),
+            )
             raise HTTPException(
                 status_code=400,
                 detail="Invalid foreign key reference.",
             )
 
-        except asyncpg.PostgresError:
-            log.exception("Database error during customer update")
+        except asyncpg.exceptions.CheckViolationError as e:
+            log.warning(
+                "Check constraint violation | customer_id=%s | payload=%s | error=%s",
+                customer_id,
+                update_data,
+                str(e),
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Check constraint validation failed.",
+            )
+
+        except asyncpg.exceptions.NotNullViolationError as e:
+            log.warning(
+                "NOT NULL constraint violation | customer_id=%s | payload=%s | error=%s",
+                customer_id,
+                update_data,
+                str(e),
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required field value.",
+            )
+
+        except asyncpg.exceptions.DataError as e:
+            log.error(
+                "Invalid data format error | customer_id=%s | payload=%s | error=%s",
+                customer_id,
+                update_data,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid data format provided.",
+            )
+
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Postgres database error during customer update | "
+                "customer_id=%s | payload=%s | error=%s",
+                customer_id,
+                update_data,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred.",
+            )
+
+        # --------------------------------------------------
+        # FALLBACK UNEXPECTED EXCEPTION (WITH STACK TRACE)
+        # --------------------------------------------------
+        except HTTPException:
+            # Re-raise FastAPI HTTP exceptions without modification
+            raise
+
+        except Exception as e:
+            log.exception(
+                "Unexpected error during customer update | "
+                "customer_id=%s | payload=%s | error=%s",
+                customer_id,
+                update_data,
+                str(e),
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
+
+
+
+# =========================================================
+#soft delete customer (is_active = false)
+# =========================================================
+
+
+@router.delete(
+    "/{customer_id}/soft_delete",
+    summary="Soft delete customer by setting is_active to false",
+)
+async def soft_delete_customer(
+    customer_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    """
+    Soft delete customer by updating is_active to False.
+    This safely disables the customer record without deleting the row.
+
+    Behavior:
+    ---------
+    - Does NOT remove the row from DB
+    - Sets is_active = FALSE
+    - Updates updated_at timestamp
+    - Maintains referential integrity (FK safe)
+    """
+
+    # --------------------------------------------------
+    # Request Context & Structured Logging (Same as employee API)
+    # --------------------------------------------------
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": current_emp_id},
+    )
+
+    log.info(
+        "Incoming soft delete customer request customer_id=%s",
+        customer_id,
+    )
+
+    # --------------------------------------------------
+    # Database Operation
+    # --------------------------------------------------
+    try:
+        pool = await get_db_pool()
+    except Exception as e:
+        log.exception(
+            "Database pool acquisition failed during customer soft delete | error=%s",
+            str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
+    async with pool.acquire() as conn:
+        try:
+            # --------------------------------------------------
+            # Soft Delete SQL (Aligned with employee soft delete)
+            # --------------------------------------------------
+            sql = f"""
+                UPDATE {DB_SCHEMA}.customers
+                   SET is_active = FALSE,
+                       updated_at = NOW()
+                 WHERE customer_id = $1
+                   AND is_active = TRUE
+                 RETURNING *
+            """
+
+            async with conn.transaction():
+                row = await conn.fetchrow(sql, customer_id)
+
+            # --------------------------------------------------
+            # Not Found / Already Deleted Handling
+            # --------------------------------------------------
+            if not row:
+                # Check if customer exists but already inactive
+                check_sql = f"""
+                    SELECT customer_id, is_active
+                      FROM {DB_SCHEMA}.customers
+                     WHERE customer_id = $1
+                """
+                existing = await conn.fetchrow(check_sql, customer_id)
+
+                if not existing:
+                    log.warning(
+                        "Customer not found for soft delete customer_id=%s",
+                        customer_id,
+                    )
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Customer not found.",
+                    )
+
+                if existing["is_active"] is False:
+                    log.warning(
+                        "Customer already soft deleted customer_id=%s",
+                        customer_id,
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Customer is already inactive.",
+                    )
+
+            log.info(
+                "Customer soft deleted successfully customer_id=%s",
+                customer_id,
+            )
+
+            # Return raw dict (same style as your employee API)
+            return {
+                **dict(row),
+                "message": "Customer soft deleted successfully.",
+                "request_id": request_id,
+            }
+
+        # --------------------------------------------------
+        # DATABASE EXCEPTION HANDLING (Production Grade)
+        # --------------------------------------------------
+        except asyncpg.exceptions.ForeignKeyViolationError as e:
+            log.error(
+                "Foreign key violation during customer soft delete | "
+                "customer_id=%s | error=%s",
+                customer_id,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Foreign key constraint violation.",
+            )
+
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during customer soft delete | "
+                "customer_id=%s | error=%s",
+                customer_id,
+                str(e),
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=500,
                 detail="Database error.",
             )
 
-        except Exception:
-            log.exception("Unexpected error during customer update")
+        except HTTPException:
+            raise
+
+        except Exception as e:
+            log.exception(
+                "Unexpected error during customer soft delete | "
+                "customer_id=%s | error=%s",
+                customer_id,
+                str(e),
+            )
             raise HTTPException(
                 status_code=500,
                 detail="Internal server error.",

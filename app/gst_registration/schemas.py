@@ -11,14 +11,14 @@ from datetime import datetime
 import html
 
 # =========================================================
-# Base Schema (Global Production Config)
+# Base Schema (Global Config - same as customer_registration)
 # =========================================================
 
 class BaseSchema(BaseModel):
     model_config = {
         "extra": "forbid",              # Reject unknown fields
         "str_strip_whitespace": True,   # Auto trim all strings
-        "validate_assignment": True,    # Re-validate on update
+        "validate_assignment": True,    # Validate on update
         "from_attributes": True,        # ORM safe
     }
 
@@ -55,7 +55,6 @@ class GSTRegistrationIn(BaseSchema):
     # ----------------------------
     # Normalize PAN & GSTIN
     # ----------------------------
-
     @field_validator("pan", "gstin", mode="before")
     @classmethod
     def uppercase_ids(cls, v):
@@ -64,9 +63,18 @@ class GSTRegistrationIn(BaseSchema):
         return v
 
     # ----------------------------
-    # Basic XSS Protection
+    # Normalize email (same as customer)
     # ----------------------------
+    @field_validator("email", "secondary_email", mode="before")
+    @classmethod
+    def normalize_email(cls, v):
+        if v:
+            return v.strip().lower()
+        return v
 
+    # ----------------------------
+    # Basic XSS sanitization (same as customer)
+    # ----------------------------
     @field_validator(
         "username",
         "ownership_category",
@@ -115,6 +123,30 @@ class GSTRegistrationEditIn(BaseSchema):
             return v.upper()
         return v
 
+    @field_validator("email", "secondary_email", mode="before")
+    @classmethod
+    def normalize_email(cls, v):
+        if v:
+            return v.strip().lower()
+        return v
+
+    @field_validator(
+        "suspension_reason",
+        "cancellation_reason",
+        "ownership_category",
+        "business_type",
+        "state",
+        "turnover_details",
+        "registration_type",
+        "registration_status",
+        mode="before",
+    )
+    @classmethod
+    def sanitize_strings(cls, v):
+        if isinstance(v, str):
+            return html.escape(v.strip())
+        return v
+
 
 # =========================================================
 # GST Registration - Response
@@ -150,7 +182,6 @@ class GSTRegistrationOut(BaseSchema):
 # =========================================================
 # Registration Person
 # =========================================================
-
 class RegistrationPersonIn(BaseSchema):
     customer_id: Optional[int] = Field(None, gt=0)
     gstin: Annotated[str, Field(pattern=r"^[0-9A-Z]{15}$")]
@@ -162,8 +193,32 @@ class RegistrationPersonIn(BaseSchema):
     mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
     is_primary_customer: bool = False
 
+    # ---------------- Normalize Email ----------------
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v):
+        if v:
+            return v.strip().lower()
+        return v
+
+    # ---------------- Sanitize Strings ----------------
+    @field_validator("full_name", "role", mode="before")
+    @classmethod
+    def sanitize_strings(cls, v):
+        if isinstance(v, str):
+            return html.escape(v.strip())
+        return v
+
+
+# ---------------------------------------------------------
+# EDIT SCHEMA (Dynamic Update)
+# ---------------------------------------------------------
 
 class RegistrationPersonEditIn(BaseSchema):
+    """
+    Schema for editing Registration Person (PATCH-like behavior)
+    """
+
     full_name: Optional[str] = Field(None, min_length=2, max_length=150)
     role: Optional[str] = Field(None, min_length=2, max_length=100)
     pan: Optional[Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]] = None
@@ -171,9 +226,34 @@ class RegistrationPersonEditIn(BaseSchema):
     email: Optional[EmailStr] = None
     mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
     is_primary_customer: Optional[bool] = None
+    is_active: Optional[bool] = None   # 🔥 added (since column exists)
 
+    # ---------------- Normalize Email ----------------
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v):
+        if v:
+            return v.strip().lower()
+        return v
+
+    # ---------------- Sanitize Strings ----------------
+    @field_validator("full_name", "role", mode="before")
+    @classmethod
+    def sanitize_strings(cls, v):
+        if isinstance(v, str):
+            return html.escape(v.strip())
+        return v
+
+
+# ---------------------------------------------------------
+# OUTPUT SCHEMA
+# ---------------------------------------------------------
 
 class RegistrationPersonOut(BaseSchema):
+    """
+    Output schema aligned with DB structure
+    """
+
     person_id: int
     customer_id: Optional[int]
     gstin: str
@@ -184,8 +264,13 @@ class RegistrationPersonOut(BaseSchema):
     email: Optional[EmailStr]
     mobile: Optional[str]
     is_primary_customer: bool
-    message: Optional[str] = None
 
+    # 🔥 Audit Fields (Now Present in DB)
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+
+    message: Optional[str] = None
 
 # =========================================================
 # Registration Documents
@@ -194,21 +279,44 @@ class RegistrationPersonOut(BaseSchema):
 class RegistrationDocumentIn(BaseSchema):
     gstin: Annotated[str, Field(pattern=r"^[0-9A-Z]{15}$")]
     person_id: Optional[int] = Field(None, gt=0)
-    document_type: str = Field(..., min_length=2, max_length=100)
+    document_type: str = Field(..., min_length=2, max_length=50)
     document_url: HttpUrl
-    ownership_category: Optional[str] = Field(None, max_length=100)
+    ownership_category: Optional[str] = Field(None, max_length=50)
     mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
 
+    @field_validator("document_type", "ownership_category", mode="before")
+    @classmethod
+    def sanitize_strings(cls, v):
+        if isinstance(v, str):
+            return html.escape(v.strip())
+        return v
+
+
+# ---------------------------------------------------------
+# EDIT SCHEMA (Dynamic Update)
+# ---------------------------------------------------------
 
 class RegistrationDocumentEditIn(BaseSchema):
-    document_type: Optional[str] = Field(None, min_length=2, max_length=100)
+    document_type: Optional[str] = Field(None, min_length=2, max_length=50)
     document_url: Optional[HttpUrl] = None
-    ownership_category: Optional[str] = Field(None, max_length=100)
+    ownership_category: Optional[str] = Field(None, max_length=50)
     verified: Optional[bool] = None
     verified_by: Optional[int] = Field(None, gt=0)
     verified_at: Optional[datetime] = None
     mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
+    is_active: Optional[bool] = None  # allow soft activation/deactivation via edit if needed
 
+    @field_validator("document_type", "ownership_category", mode="before")
+    @classmethod
+    def sanitize_strings(cls, v):
+        if isinstance(v, str):
+            return html.escape(v.strip())
+        return v
+
+
+# ---------------------------------------------------------
+# RESPONSE SCHEMA
+# ---------------------------------------------------------
 
 class RegistrationDocumentOut(BaseSchema):
     document_id: int
@@ -217,8 +325,11 @@ class RegistrationDocumentOut(BaseSchema):
     document_type: str
     document_url: HttpUrl
     ownership_category: Optional[str]
-    verified: Optional[bool]
+    verified: bool
     verified_by: Optional[int]
     verified_at: Optional[datetime]
-    uploaded_at: Optional[datetime]
     mobile: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+    message: Optional[str] = None

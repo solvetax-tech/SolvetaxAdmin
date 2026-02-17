@@ -77,17 +77,18 @@ class SignupRequest(BaseSchema):
 class SignupResponse(BaseSchema):
     emp_id: int
     username: str
-    email: EmailStr
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone_number: Optional[str] = None
-    role: Optional[str] = None
-    is_active: Optional[bool] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    manager_emp_id: Optional[int] = None
     message: str
 
+class LoginRequest(BaseSchema):
+    email: EmailStr
+    password: Annotated[str, Field(min_length=1)]
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v):
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
 
 # =========================================================
 # Error Response
