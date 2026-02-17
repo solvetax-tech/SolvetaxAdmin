@@ -338,6 +338,154 @@ async def filter_employees(
             detail="Internal server error.",
         )
 
+
+
+@router.get(
+    "/employee/{emp_id}",
+    summary="Get Employee",
+    responses={
+        200: {"description": "Employee fetched successfully."},
+        404: {"description": "Employee not found."},
+        500: {"description": "Database or internal error."},
+    },
+)
+async def get_employee(
+    emp_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    Get Employee by emp_id (Production Standard)
+
+    Validation Responsibility Split:
+    --------------------------------
+    1. Authentication & Authorization via dependency
+    2. Path param type validation handled by FastAPI
+    3. Existence validation handled by DB query
+
+    Security:
+    ---------
+    - password_hash is NOT returned
+    - Returns only active employees
+    """
+
+    # --------------------------------------------------
+    # Request Context & Structured Logging
+    # --------------------------------------------------
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    log = logging.LoggerAdapter(
+        logger,
+        {
+            "request_id": request_id,
+            "emp_id": current_emp_id,
+            "api": "get_employee",
+        },
+    )
+
+    log.info(
+        "Incoming get employee request | emp_id=%s",
+        emp_id,
+    )
+
+    # --------------------------------------------------
+    # SQL Query (Exclude password_hash)
+    # --------------------------------------------------
+    sql = f"""
+        SELECT 
+            emp_id,
+            username,
+            email,
+            first_name,
+            last_name,
+            phone_number,
+            role,
+            is_active,
+            created_at,
+            updated_at,
+            manager_emp_id,
+            employee_image_url
+        FROM {DB_SCHEMA}.employees
+        WHERE emp_id = $1
+          AND is_active = TRUE
+        LIMIT 1
+    """
+
+    # --------------------------------------------------
+    # Database Pool Acquisition
+    # --------------------------------------------------
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(sql, emp_id)
+
+        # --------------------------------------------------
+        # Not Found Handling
+        # --------------------------------------------------
+        if not row:
+            log.warning(
+                "Employee not found or inactive | emp_id=%s",
+                emp_id,
+            )
+            raise HTTPException(
+                status_code=404,
+                detail="Employee not found.",
+            )
+
+        log.info(
+            "Employee fetched successfully | emp_id=%s",
+            emp_id,
+        )
+
+        return {
+            **dict(row),
+            "message": "Employee fetched successfully.",
+            "request_id": request_id,
+        }
+
+    # --------------------------------------------------
+    # IMPORTANT: Re-raise HTTP Exceptions First
+    # --------------------------------------------------
+    except HTTPException:
+        raise
+
+    # --------------------------------------------------
+    # DATABASE ERROR HANDLING
+    # --------------------------------------------------
+    except asyncpg.PostgresError as e:
+        log.error(
+            "Database error during get employee | emp_id=%s | error=%s",
+            emp_id,
+            str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Database error.",
+        )
+
+    # --------------------------------------------------
+    # FALLBACK UNEXPECTED ERROR
+    # --------------------------------------------------
+    except Exception:
+        log.exception(
+            "Unexpected error during get employee | emp_id=%s",
+            emp_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+        )
+
+
 # -------------------------------------------------------------------
 # GET ACTIVE RELATIONSHIP MANAGERS
 # -------------------------------------------------------------------
@@ -583,3 +731,140 @@ async def soft_delete_employee(
         except Exception:
             log.exception("Unexpected error during soft delete emp_id=%s", emp_id)
             raise HTTPException(status_code=500, detail="Internal server error.")
+
+
+
+
+# =========================================================
+# LIST ROLES (DYNAMIC FILTER + PAGINATION)
+# =========================================================
+
+@router.get(
+    "/roles",
+    summary="List Roles",
+    responses={
+        200: {"description": "Roles fetched successfully."},
+        500: {"description": "Database or internal error."},
+    },
+)
+async def list_roles(
+    is_active: Optional[bool] = None,
+    include_inactive: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    List Roles (Production Standard)
+
+    Features:
+    ---------
+    ✔ Pagination
+    ✔ Optional active filter
+    ✔ include_inactive toggle
+    ✔ Structured logging
+    ✔ Safe SQL parameterization
+    ✔ Full DB exception handling
+    """
+
+    # --------------------------------------------------
+    # Request Context & Structured Logging
+    # --------------------------------------------------
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    log = logging.LoggerAdapter(
+        logger,
+        {
+            "request_id": request_id,
+            "emp_id": current_emp_id,
+            "api": "list_roles",
+        },
+    )
+
+    log.info(
+        "Incoming roles list request | limit=%s offset=%s",
+        limit,
+        offset,
+    )
+
+    # --------------------------------------------------
+    # Database Pool Acquisition
+    # --------------------------------------------------
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
+    try:
+        conditions = []
+        values = []
+        param_index = 1
+
+        # --------------------------------------------------
+        # Active Filtering Logic (Enterprise Pattern)
+        # --------------------------------------------------
+        if is_active is not None:
+            conditions.append(f"is_active = ${param_index}")
+            values.append(is_active)
+            param_index += 1
+
+        elif not include_inactive:
+            conditions.append("is_active = TRUE")
+
+        # --------------------------------------------------
+        # WHERE Clause Builder
+        # --------------------------------------------------
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        sql = f"""
+            SELECT *
+              FROM {DB_SCHEMA}.roles
+              {where_clause}
+             ORDER BY id ASC
+             LIMIT ${param_index} OFFSET ${param_index + 1}
+        """
+
+        values.extend([limit, offset])
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, *values)
+
+        log.info(
+            "Roles fetched successfully | count=%s",
+            len(rows),
+        )
+
+        return [
+            {
+                **dict(row),
+                "message": "Roles fetched successfully.",
+                "request_id": request_id,
+            }
+            for row in rows
+        ]
+
+    # --------------------------------------------------
+    # Database Error Handling
+    # --------------------------------------------------
+    except asyncpg.PostgresError as e:
+        log.error(
+            "Database error during roles fetch | error=%s",
+            str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Database error.",
+        )
+
+    except Exception:
+        log.exception("Unexpected error during roles fetch")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+        )
