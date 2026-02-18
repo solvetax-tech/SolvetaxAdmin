@@ -10,6 +10,7 @@ from app.utils import get_db_pool, DB_SCHEMA
 from app.security.rbac import require_permission
 from app.logger import logger
 from app.utils import mask_sensitive_data,generate_uuid
+import json
 
 router = APIRouter(
     prefix="/api/v1/customers",
@@ -18,6 +19,7 @@ router = APIRouter(
 #--------------------------------------------------------------
 # CREATE CUSTOMER (is_active DEFAULT = TRUE at DB level)
 #--------------------------------------------------------------
+
 @router.post(
     "",
     response_model=CustomerOut,
@@ -28,8 +30,24 @@ async def create_customer(
     payload: CustomerIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
+    """
+    Create Customer (Production Standard + Version Audit)
+
+    ✔ Atomic transaction (Customer + Version)
+    ✔ entity_type = 'CUSTOMER'
+    ✔ entity_id = 1 (default)
+    ✔ action = 'CREATE'
+    ✔ json populated
+    ✔ updated_json = NULL
+    ✔ Structured logging
+    """
+
+    # --------------------------------------------------
+    # Request Context
+    # --------------------------------------------------
     request_id = str(uuid.uuid4())
-    emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if emp_id_raw else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -38,38 +56,60 @@ async def create_customer(
 
     now = datetime.utcnow()
 
-    # Create masked copy for logging only - using model_dump to avoid affecting payload
     masked_email = mask_sensitive_data(payload.email)
     masked_mobile = mask_sensitive_data(payload.mobile)
 
     log.info(
-        "Incoming create customer request email=%s mobile=%s",
+        "Incoming create customer request | email=%s mobile=%s",
         masked_email,
         masked_mobile,
     )
 
-    pool = await get_db_pool()
+    # --------------------------------------------------
+    # Database Pool Acquisition
+    # --------------------------------------------------
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
 
     async with pool.acquire() as conn:
         try:
-            insert_sql = f"""
-                INSERT INTO {DB_SCHEMA}.customers
-                (full_name, email, mobile, business_name, business_description,
-                 business_image_url, business_type, state, city, remark,
-                 rm_id, op_id, referral_id, created_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-                RETURNING *
-            """
-
             async with conn.transaction():
-                row = await conn.fetchrow(
+
+                # --------------------------------------------------
+                # 1️⃣ Insert Customer
+                # --------------------------------------------------
+                insert_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.customers
+                    (
+                        full_name, email, mobile, business_name,
+                        business_description, business_image_url,
+                        business_type, state, city, remark,
+                        rm_id, op_id, referral_id,
+                        created_at, updated_at
+                    )
+                    VALUES (
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                        $11,$12,$13,$14,$15
+                    )
+                    RETURNING *
+                """
+
+                customer_row = await conn.fetchrow(
                     insert_sql,
                     payload.full_name,
                     payload.email,
                     payload.mobile,
                     payload.business_name,
                     payload.business_description,
-                    str(payload.business_image_url) if payload.business_image_url else None,
+                    str(payload.business_image_url)
+                    if payload.business_image_url
+                    else None,
                     payload.business_type,
                     payload.state,
                     payload.city,
@@ -81,22 +121,46 @@ async def create_customer(
                     now,
                 )
 
-            if not row:
-                log.error("Customer creation failed - no row returned")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Customer creation failed.",
+                if not customer_row:
+                    log.error("Customer creation failed - no row returned")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Customer creation failed.",
+                    )
+
+                customer_id = customer_row["customer_id"]
+
+                # --------------------------------------------------
+                # 2️⃣ Insert Version Audit (INLINE)
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+                await conn.execute(
+                    version_sql,
+                    emp_id,
+                    "CUSTOMER",               # default entity type
+                    1,                        # default entity_id (as requested)
+                    customer_id,              # actual customer created
+                    "CREATE",                 # action
+                    json.dumps(dict(customer_row),default=str),       # snapshot goes into json
+                    None,                     # updated_json must be NULL
                 )
 
             log.info(
-                "Customer created successfully customer_id=%s",
-                row["customer_id"],
+                "Customer created successfully with audit | customer_id=%s",
+                customer_id,
             )
 
-            response_data = dict(row)
+            response_data = dict(customer_row)
             response_data["message"] = "Customer created successfully."
             return response_data
 
+        # --------------------------------------------------
+        # Exception Handling (Production Grade)
+        # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError:
             log.warning("Duplicate customer detected")
             raise HTTPException(
@@ -111,12 +175,19 @@ async def create_customer(
                 detail="Invalid rm_id or op_id.",
             )
 
-        except asyncpg.PostgresError:
-            log.exception("Database error during customer creation")
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during customer creation | error=%s",
+                str(e),
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=500,
                 detail="Database error.",
             )
+
+        except HTTPException:
+            raise
 
         except Exception:
             log.exception("Unexpected error during customer creation")
@@ -425,14 +496,13 @@ async def get_customer(
             status_code=500,
             detail="Internal server error.",
         )
-
 # --------------------------------------------------------------
-# EDIT CUSTOMER (is_active EDITABLE)
+# EDIT CUSTOMER (WITH FULL VERSION AUDIT - ENTERPRISE READY)
 # --------------------------------------------------------------
 
 @router.post(
     "/{customer_id}/customer-dyn/edit",
-    summary="Edit Customer (Dynamic Update - Production Ready)",
+    summary="Edit Customer (Dynamic Update + Version Audit - Production Ready)",
 )
 async def edit_customer(
     customer_id: int,
@@ -440,39 +510,26 @@ async def edit_customer(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Production-Ready Dynamic Customer Update API
+    Enterprise-Grade Dynamic Customer Update API with Version Audit
 
-    Features:
-    ---------
-    ✔ Dynamic field update (PATCH-like behavior)
-    ✔ Structured logging with request_id & emp_id
-    ✔ Field normalization (email, phone, urls)
-    ✔ Full DB exception coverage (asyncpg)
-    ✔ Safe SQL parameterization (SQL Injection safe)
-    ✔ Transaction handling
-    ✔ Detailed audit logs
-    ✔ Enterprise-grade error handling
-
-    Validation Responsibility:
-    --------------------------
-    1. Schema-Level (Pydantic - CustomerEditIn):
-       - Email format
-       - Phone validation
-       - HttpUrl validation
-       - Type & length constraints
-
-    2. Database-Level:
-       - UNIQUE constraints
-       - FOREIGN KEY constraints (rm_id, op_id, etc.)
-       - NOT NULL constraints
-       - Check constraints
+    ✔ Dynamic PATCH-style update
+    ✔ OLD snapshot stored in versions.json
+    ✔ NEW snapshot stored in versions.updated_json
+    ✔ Atomic transaction (update + audit)
+    ✔ Full asyncpg exception coverage
+    ✔ Structured logging
+    ✔ Safe SQL parameterization
+    ✔ Datetime-safe JSON serialization
     """
 
     # --------------------------------------------------
-    # Request Context & Structured Logging
+    # Request Context & Logging
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    # Safe emp_id conversion
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -489,7 +546,7 @@ async def edit_customer(
     )
 
     # --------------------------------------------------
-    # Extract only provided fields (Dynamic Update)
+    # Extract Provided Fields
     # --------------------------------------------------
     try:
         update_data: Dict[str, Any] = payload.model_dump(exclude_unset=True)
@@ -515,7 +572,7 @@ async def edit_customer(
         )
 
     # --------------------------------------------------
-    # Normalize Critical Fields (Production Standard)
+    # Normalize Critical Fields
     # --------------------------------------------------
     try:
         if "email" in update_data and update_data["email"]:
@@ -524,7 +581,7 @@ async def edit_customer(
         if "phone_number" in update_data and update_data["phone_number"]:
             update_data["phone_number"] = update_data["phone_number"].strip()
 
-        # Convert HttpUrl / URL fields to string for asyncpg compatibility
+        # Convert URL fields
         url_fields = ["business_image_url", "website_url"]
         for field in url_fields:
             if field in update_data and update_data[field]:
@@ -532,7 +589,7 @@ async def edit_customer(
 
     except Exception as e:
         log.exception(
-            "Error during field normalization | customer_id=%s | payload=%s | error=%s",
+            "Error during normalization | customer_id=%s | payload=%s | error=%s",
             customer_id,
             update_data,
             str(e),
@@ -543,15 +600,12 @@ async def edit_customer(
         )
 
     # --------------------------------------------------
-    # Database Operation
+    # Database Pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception as e:
-        log.exception(
-            "Database pool acquisition failed | error=%s",
-            str(e),
-        )
+        log.exception("Database pool acquisition failed | error=%s", str(e))
         raise HTTPException(
             status_code=500,
             detail="Database connection error.",
@@ -559,68 +613,103 @@ async def edit_customer(
 
     async with pool.acquire() as conn:
         try:
-            fields = []
-            values = []
-            param_index = 1
-
-            # --------------------------------------------
-            # Build Dynamic SET Clause (SQL Injection Safe)
-            # --------------------------------------------
-            for field_name, value in update_data.items():
-                fields.append(f"{field_name} = ${param_index}")
-                values.append(value)
-                param_index += 1
-
-            # Always update timestamp for audit tracking
-            fields.append("updated_at = NOW()")
-
-            sql = f"""
-                UPDATE {DB_SCHEMA}.customers
-                SET {', '.join(fields)}
-                WHERE customer_id = ${param_index}
-                RETURNING *
-            """
-
-            values.append(customer_id)
-
-            log.debug(
-                "Executing customer update query | customer_id=%s | fields=%s",
-                customer_id,
-                list(update_data.keys()),
-            )
-
-            # Transaction ensures atomic update
             async with conn.transaction():
-                row = await conn.fetchrow(sql, *values)
 
-            # --------------------------------------------
-            # Not Found Handling
-            # --------------------------------------------
-            if not row:
-                log.warning(
-                    "Customer not found for update | customer_id=%s",
+                # --------------------------------------------------
+                # 1️⃣ Fetch OLD Snapshot
+                # --------------------------------------------------
+                old_row = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                      FROM {DB_SCHEMA}.customers
+                     WHERE customer_id = $1
+                     LIMIT 1
+                    """,
                     customer_id,
                 )
-                raise HTTPException(
-                    status_code=404,
-                    detail="Customer not found.",
+
+                if not old_row:
+                    log.warning(
+                        "Customer not found for update | customer_id=%s",
+                        customer_id,
+                    )
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Customer not found.",
+                    )
+
+                # --------------------------------------------------
+                # 2️⃣ Build Dynamic UPDATE Query
+                # --------------------------------------------------
+                fields = []
+                values = []
+                param_index = 1
+
+                for field_name, value in update_data.items():
+                    fields.append(f"{field_name} = ${param_index}")
+                    values.append(value)
+                    param_index += 1
+
+                fields.append("updated_at = NOW()")
+
+                update_sql = f"""
+                    UPDATE {DB_SCHEMA}.customers
+                       SET {', '.join(fields)}
+                     WHERE customer_id = ${param_index}
+                     RETURNING *
+                """
+
+                values.append(customer_id)
+
+                log.debug(
+                    "Executing update | customer_id=%s | fields=%s",
+                    customer_id,
+                    list(update_data.keys()),
+                )
+
+                new_row = await conn.fetchrow(update_sql, *values)
+
+                # --------------------------------------------------
+                # 3️⃣ Insert Version Audit
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                await conn.execute(
+                    version_sql,
+                    emp_id,
+                    "CUSTOMER",
+                    1,
+                    customer_id,
+                    "UPDATE",
+                    json.dumps(dict(old_row), default=str),
+                    json.dumps(dict(new_row), default=str),
                 )
 
             log.info(
-                "Customer updated successfully | customer_id=%s | updated_fields=%s",
+                "Customer updated successfully with audit | customer_id=%s",
                 customer_id,
-                list(update_data.keys()),
             )
 
-            # Return raw dict (Production best practice for dynamic APIs)
             return {
-                **dict(row),
+                **dict(new_row),
                 "message": "Customer updated successfully.",
                 "request_id": request_id,
             }
 
         # --------------------------------------------------
-        # DATABASE EXCEPTION HANDLING (FULL COVERAGE)
+        # FULL DATABASE EXCEPTION COVERAGE
         # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError as e:
             log.warning(
@@ -648,9 +737,8 @@ async def edit_customer(
 
         except asyncpg.exceptions.CheckViolationError as e:
             log.warning(
-                "Check constraint violation | customer_id=%s | payload=%s | error=%s",
+                "Check constraint violation | customer_id=%s | error=%s",
                 customer_id,
-                update_data,
                 str(e),
             )
             raise HTTPException(
@@ -660,9 +748,8 @@ async def edit_customer(
 
         except asyncpg.exceptions.NotNullViolationError as e:
             log.warning(
-                "NOT NULL constraint violation | customer_id=%s | payload=%s | error=%s",
+                "NOT NULL constraint violation | customer_id=%s | error=%s",
                 customer_id,
-                update_data,
                 str(e),
             )
             raise HTTPException(
@@ -672,9 +759,8 @@ async def edit_customer(
 
         except asyncpg.exceptions.DataError as e:
             log.error(
-                "Invalid data format error | customer_id=%s | payload=%s | error=%s",
+                "Invalid data format | customer_id=%s | error=%s",
                 customer_id,
-                update_data,
                 str(e),
                 exc_info=True,
             )
@@ -685,10 +771,8 @@ async def edit_customer(
 
         except asyncpg.PostgresError as e:
             log.error(
-                "Postgres database error during customer update | "
-                "customer_id=%s | payload=%s | error=%s",
+                "Postgres error during update | customer_id=%s | error=%s",
                 customer_id,
-                update_data,
                 str(e),
                 exc_info=True,
             )
@@ -697,79 +781,71 @@ async def edit_customer(
                 detail="Database error occurred.",
             )
 
-        # --------------------------------------------------
-        # FALLBACK UNEXPECTED EXCEPTION (WITH STACK TRACE)
-        # --------------------------------------------------
         except HTTPException:
-            # Re-raise FastAPI HTTP exceptions without modification
             raise
 
         except Exception as e:
             log.exception(
-                "Unexpected error during customer update | "
-                "customer_id=%s | payload=%s | error=%s",
+                "Unexpected error during customer update | customer_id=%s | error=%s",
                 customer_id,
-                update_data,
                 str(e),
             )
             raise HTTPException(
                 status_code=500,
                 detail="Internal server error.",
             )
-
-
-
 # =========================================================
-#soft delete customer (is_active = false)
+# SOFT DELETE CUSTOMER (is_active = false) WITH VERSION AUDIT
 # =========================================================
-
 
 @router.delete(
     "/{customer_id}/soft_delete",
-    summary="Soft delete customer by setting is_active to false",
+    summary="Soft delete customer by setting is_active to false (With Audit)",
 )
 async def soft_delete_customer(
     customer_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
     """
-    Soft delete customer by updating is_active to False.
-    This safely disables the customer record without deleting the row.
+    Soft Delete Customer with Version Audit
 
-    Behavior:
-    ---------
-    - Does NOT remove the row from DB
-    - Sets is_active = FALSE
-    - Updates updated_at timestamp
-    - Maintains referential integrity (FK safe)
+    ✔ Atomic transaction (Soft Delete + Version Insert)
+    ✔ Concurrency safe (AND is_active = TRUE)
+    ✔ json = NULL (for DELETE)
+    ✔ updated_json = NEW snapshot (is_active = FALSE)
+    ✔ action = 'DELETE'
+    ✔ Enterprise structured logging
+    ✔ Full asyncpg exception handling
     """
 
     # --------------------------------------------------
-    # Request Context & Structured Logging (Same as employee API)
+    # Request Context & Logging
     # --------------------------------------------------
     request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": current_emp_id},
+        {
+            "request_id": request_id,
+            "emp_id": emp_id,
+            "api": "soft_delete_customer",
+        },
     )
 
     log.info(
-        "Incoming soft delete customer request customer_id=%s",
+        "Incoming soft delete customer request | customer_id=%s",
         customer_id,
     )
 
     # --------------------------------------------------
-    # Database Operation
+    # DB Pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception as e:
-        log.exception(
-            "Database pool acquisition failed during customer soft delete | error=%s",
-            str(e),
-        )
+        log.exception("Database pool acquisition failed | error=%s", str(e))
         raise HTTPException(
             status_code=500,
             detail="Database connection error.",
@@ -777,71 +853,97 @@ async def soft_delete_customer(
 
     async with pool.acquire() as conn:
         try:
-            # --------------------------------------------------
-            # Soft Delete SQL (Aligned with employee soft delete)
-            # --------------------------------------------------
-            sql = f"""
-                UPDATE {DB_SCHEMA}.customers
-                   SET is_active = FALSE,
-                       updated_at = NOW()
-                 WHERE customer_id = $1
-                   AND is_active = TRUE
-                 RETURNING *
-            """
-
             async with conn.transaction():
-                row = await conn.fetchrow(sql, customer_id)
 
-            # --------------------------------------------------
-            # Not Found / Already Deleted Handling
-            # --------------------------------------------------
-            if not row:
-                # Check if customer exists but already inactive
-                check_sql = f"""
-                    SELECT customer_id, is_active
-                      FROM {DB_SCHEMA}.customers
+                # --------------------------------------------------
+                # 1️⃣ Perform Soft Delete (Concurrency Safe)
+                # --------------------------------------------------
+                delete_sql = f"""
+                    UPDATE {DB_SCHEMA}.customers
+                       SET is_active = FALSE,
+                           updated_at = NOW()
                      WHERE customer_id = $1
+                       AND is_active = TRUE
+                     RETURNING *
                 """
-                existing = await conn.fetchrow(check_sql, customer_id)
 
-                if not existing:
-                    log.warning(
-                        "Customer not found for soft delete customer_id=%s",
+                deleted_row = await conn.fetchrow(delete_sql, customer_id)
+
+                if not deleted_row:
+                    # Check existence separately
+                    check_row = await conn.fetchrow(
+                        f"""
+                        SELECT customer_id, is_active
+                          FROM {DB_SCHEMA}.customers
+                         WHERE customer_id = $1
+                        """,
                         customer_id,
                     )
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Customer not found.",
-                    )
 
-                if existing["is_active"] is False:
+                    if not check_row:
+                        log.warning("Customer not found | customer_id=%s", customer_id)
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Customer not found.",
+                        )
+
                     log.warning(
-                        "Customer already soft deleted customer_id=%s",
+                        "Customer already inactive | customer_id=%s",
                         customer_id,
                     )
                     raise HTTPException(
                         status_code=400,
-                        detail="Customer is already inactive.",
+                        detail="Customer already inactive.",
                     )
 
+                # --------------------------------------------------
+                # 2️⃣ Insert Version Audit (DELETE)
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                # NEW state snapshot (is_active = FALSE)
+                deleted_snapshot = dict(deleted_row)
+
+                await conn.execute(
+                    version_sql,
+                    emp_id,
+                    "CUSTOMER",                     # entity_type
+                    1,                              # entity_id (your default)
+                    customer_id,
+                    "DELETE",
+                    None,                           # json must be NULL
+                    json.dumps(deleted_snapshot, default=str),  # updated_json
+                )
+
             log.info(
-                "Customer soft deleted successfully customer_id=%s",
+                "Customer soft deleted successfully with audit | customer_id=%s",
                 customer_id,
             )
 
-            # Return raw dict (same style as your employee API)
             return {
-                **dict(row),
+                **dict(deleted_row),
                 "message": "Customer soft deleted successfully.",
                 "request_id": request_id,
             }
 
         # --------------------------------------------------
-        # DATABASE EXCEPTION HANDLING (Production Grade)
+        # FULL DATABASE EXCEPTION COVERAGE
         # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError as e:
             log.error(
-                "Foreign key violation during customer soft delete | "
+                "Foreign key violation during soft delete | "
                 "customer_id=%s | error=%s",
                 customer_id,
                 str(e),
@@ -852,9 +954,35 @@ async def soft_delete_customer(
                 detail="Foreign key constraint violation.",
             )
 
+        except asyncpg.exceptions.CheckViolationError as e:
+            log.error(
+                "Audit constraint violation | "
+                "customer_id=%s | error=%s",
+                customer_id,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Audit constraint validation failed.",
+            )
+
+        except asyncpg.exceptions.DataError as e:
+            log.error(
+                "Data error during soft delete | "
+                "customer_id=%s | error=%s",
+                customer_id,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid data format.",
+            )
+
         except asyncpg.PostgresError as e:
             log.error(
-                "Database error during customer soft delete | "
+                "Database error during soft delete | "
                 "customer_id=%s | error=%s",
                 customer_id,
                 str(e),
@@ -870,7 +998,7 @@ async def soft_delete_customer(
 
         except Exception as e:
             log.exception(
-                "Unexpected error during customer soft delete | "
+                "Unexpected error during soft delete | "
                 "customer_id=%s | error=%s",
                 customer_id,
                 str(e),

@@ -91,7 +91,7 @@ class CustomerOut(BaseSchema):
     created_at: datetime
     updated_at: datetime
     message: Optional[str] = None
-
+    is_active: bool
 
 # =========================================================
 # Customer Edit Schema (Partial Update)
