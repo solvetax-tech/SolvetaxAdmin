@@ -8,6 +8,7 @@ from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.sign_up.schemas import EmployeeEditIn, EmployeeOut
 from app.security.rbac import require_permission
 from app.logger import logger
+import json
 
 
 
@@ -17,7 +18,7 @@ router = APIRouter(
 )
 
 # -------------------------------------------------------------------
-# EDIT EMPLOYEE (DYNAMIC UPDATE - PRODUCTION SAFE)
+# EDIT EMPLOYEE (DYNAMIC UPDATE - PRODUCTION SAFE + VERSION AUDIT)
 # -------------------------------------------------------------------
 
 @router.post(
@@ -37,24 +38,14 @@ async def edit_employee(
     current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
     """
-    Edit Employee API (Dynamic Update)
-
-    Validation Responsibility Split:
-    --------------------------------
-    1️⃣ Schema-Level Validation (EmployeeEditIn):
-       - Email format validation
-       - Phone regex validation
-       - HttpUrl validation
-       - Field constraints (length, required types)
-
-    2️⃣ Database-Level Validation:
-       - UNIQUE(email, phone_number)
-       - FOREIGN KEY(manager_emp_id)
-       - NOT NULL constraints
+    Edit Employee API (Dynamic Update + Version Audit)
     """
 
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    # ✅ Safe conversion for version table
+    actor_emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -63,7 +54,6 @@ async def edit_employee(
 
     log.info("Incoming edit employee request emp_id=%s", emp_id)
 
-    # Extract only provided fields
     update_data = payload.model_dump(exclude_unset=True)
 
     if not update_data:
@@ -84,56 +74,99 @@ async def edit_employee(
 
     async with pool.acquire() as conn:
         try:
-            fields = []
-            values = []
-            param_index = 1
-
-            # --------------------------------------------
-            # Normalize critical fields
-            # --------------------------------------------
-
-            if "email" in update_data and update_data["email"]:
-                update_data["email"] = update_data["email"].strip().lower()
-
-            if "phone_number" in update_data and update_data["phone_number"]:
-                update_data["phone_number"] = update_data["phone_number"].strip()
-
-            # --------------------------------------------
-            # Build dynamic SET clause safely
-            # --------------------------------------------
-
-            # Only update fields provided in the update_data, skip others
-
-            for field_name, value in update_data.items():
-                fields.append(f"{field_name} = ${param_index}")
-                values.append(value)
-                param_index += 1
-
-            # Always update timestamp
-            fields.append("updated_at = NOW()")
-
-            sql = f"""
-                UPDATE {DB_SCHEMA}.employees
-                SET {', '.join(fields)}
-                WHERE emp_id = ${param_index}
-                RETURNING *
-            """
-
-            values.append(emp_id)
-
             async with conn.transaction():
-                row = await conn.fetchrow(sql, *values)
 
-            if not row:
-                log.warning("Employee not found for update")
-                raise HTTPException(
-                    status_code=404,
-                    detail="Employee not found.",
+                # --------------------------------------------------
+                # 1️⃣ FETCH OLD SNAPSHOT (FOR VERSION AUDIT)
+                # --------------------------------------------------
+                old_row = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                    FROM {DB_SCHEMA}.employees
+                    WHERE emp_id = $1
+                    """,
+                    emp_id
+                )
+
+                if not old_row:
+                    log.warning("Employee not found for update")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Employee not found.",
+                    )
+
+                # --------------------------------------------------
+                # Normalize critical fields (UNCHANGED LOGIC)
+                # --------------------------------------------------
+                if "email" in update_data and update_data["email"]:
+                    update_data["email"] = update_data["email"].strip().lower()
+
+                if "phone_number" in update_data and update_data["phone_number"]:
+                    update_data["phone_number"] = update_data["phone_number"].strip()
+
+                # --------------------------------------------------
+                # Build dynamic SET clause safely
+                # --------------------------------------------------
+                fields = []
+                values = []
+                param_index = 1
+
+                for field_name, value in update_data.items():
+                    fields.append(f"{field_name} = ${param_index}")
+                    values.append(value)
+                    param_index += 1
+
+                fields.append("updated_at = NOW()")
+
+                sql = f"""
+                    UPDATE {DB_SCHEMA}.employees
+                    SET {', '.join(fields)}
+                    WHERE emp_id = ${param_index}
+                    RETURNING *
+                """
+
+                values.append(emp_id)
+
+                new_row = await conn.fetchrow(sql, *values)
+
+                # --------------------------------------------------
+                # 2️⃣ INSERT VERSION AUDIT
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                await conn.execute(
+                    version_sql,
+                    actor_emp_id,                 # Actor performing update
+                    "EMPLOYEE",                   # entity_type
+                    3,                            # entity_id
+                    None,                         # customer_id (not applicable)
+                    "UPDATE",                     # action
+                    json.dumps(dict(old_row), default=str),   # OLD snapshot
+                    json.dumps(dict(new_row), default=str),   # NEW snapshot
                 )
 
             log.info("Employee updated successfully emp_id=%s", emp_id)
 
-            return {**dict(row), "message": "Employee updated successfully."}
+            return {
+                **dict(new_row),
+                "message": "Employee updated successfully."
+            }
+
+        # --------------------------------------------------
+        # EXCEPTION HANDLING (UNCHANGED FROM YOUR CODE)
+        # --------------------------------------------------
 
         except asyncpg.exceptions.UniqueViolationError as e:
             constraint = getattr(e, "constraint_name", None) or ""
@@ -170,7 +203,8 @@ async def edit_employee(
 
         except Exception:
             log.exception("Unexpected error during employee update emp_id=%s", emp_id)
-            raise HTTPException(status_code=500, detail="Internal server error.") 
+            raise HTTPException(status_code=500, detail="Internal server error.")
+
 # -------------------------------------------------------------------
 # FILTER EMPLOYEES (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
@@ -657,7 +691,7 @@ async def get_active_managers(
             detail="Internal server error.",
         )
 # -------------------------------------------------------------------
-# SOFT DELETE EMPLOYEE (SET is_active TO FALSE)
+# SOFT DELETE EMPLOYEE (SET is_active TO FALSE + VERSION AUDIT)
 # -------------------------------------------------------------------
 
 @router.delete(
@@ -674,11 +708,22 @@ async def soft_delete_employee(
     current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
     """
-    Soft delete employee by updating is_active to False.
-    This safely disables the employee record without deleting the row.
+    Soft delete employee by updating is_active to False
+    + Version Audit
+
+    ✔ Atomic transaction
+    ✔ json = NULL
+    ✔ updated_json = NEW snapshot (is_active = FALSE)
+    ✔ action = DELETE
+    ✔ entity_type = EMPLOYEE
+    ✔ entity_id = 3
     """
+
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    # ✅ actor for audit
+    actor_emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -698,28 +743,110 @@ async def soft_delete_employee(
 
     async with pool.acquire() as conn:
         try:
-            sql = f"""
-                UPDATE {DB_SCHEMA}.employees
-                   SET is_active = FALSE,
-                       updated_at = NOW()
-                 WHERE emp_id = $1
-                 RETURNING *
-            """
             async with conn.transaction():
+
+                # --------------------------------------------------
+                # 1️⃣ Perform Soft Delete (Concurrency Safe)
+                # --------------------------------------------------
+                sql = f"""
+                    UPDATE {DB_SCHEMA}.employees
+                       SET is_active = FALSE,
+                           updated_at = NOW()
+                     WHERE emp_id = $1
+                       AND is_active = TRUE
+                     RETURNING *
+                """
+
                 row = await conn.fetchrow(sql, emp_id)
 
-            if not row:
-                log.warning("Employee not found for soft delete emp_id=%s", emp_id)
-                raise HTTPException(
-                    status_code=404,
-                    detail="Employee not found.",
+                if not row:
+                    # Check existence
+                    check_row = await conn.fetchrow(
+                        f"""
+                        SELECT emp_id, is_active
+                        FROM {DB_SCHEMA}.employees
+                        WHERE emp_id = $1
+                        """,
+                        emp_id
+                    )
+
+                    if not check_row:
+                        log.warning("Employee not found emp_id=%s", emp_id)
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Employee not found.",
+                        )
+
+                    log.warning("Employee already inactive emp_id=%s", emp_id)
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Employee already inactive.",
+                    )
+
+                # --------------------------------------------------
+                # 2️⃣ Insert Version Audit (DELETE)
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                deleted_snapshot = dict(row)
+
+                await conn.execute(
+                    version_sql,
+                    actor_emp_id,                       # Actor
+                    "EMPLOYEE",                         # entity_type
+                    3,                                  # entity_id
+                    None,                               # customer_id
+                    "DELETE",                           # action
+                    None,                               # json must be NULL
+                    json.dumps(deleted_snapshot, default=str),  # updated_json
                 )
 
             log.info("Employee soft deleted successfully emp_id=%s", emp_id)
-            return {**dict(row), "message": "Employee soft deleted successfully."}
+
+            return {
+                **dict(row),
+                "message": "Employee soft deleted successfully."
+            }
+
+        # --------------------------------------------------
+        # ERROR HANDLING (UNCHANGED STRUCTURE)
+        # --------------------------------------------------
 
         except HTTPException:
             raise
+
+        except asyncpg.exceptions.ForeignKeyViolationError as e:
+            log.error(
+                "Foreign key violation during soft delete emp_id=%s error=%s",
+                emp_id, e, exc_info=True,
+            )
+            raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
+
+        except asyncpg.exceptions.CheckViolationError as e:
+            log.error(
+                "Audit constraint violation emp_id=%s error=%s",
+                emp_id, e, exc_info=True,
+            )
+            raise HTTPException(status_code=400, detail="Audit constraint validation failed.")
+
+        except asyncpg.exceptions.DataError as e:
+            log.error(
+                "Data error during soft delete emp_id=%s error=%s",
+                emp_id, e, exc_info=True,
+            )
+            raise HTTPException(status_code=400, detail="Invalid data format.")
 
         except asyncpg.PostgresError as e:
             log.error(
@@ -731,9 +858,6 @@ async def soft_delete_employee(
         except Exception:
             log.exception("Unexpected error during soft delete emp_id=%s", emp_id)
             raise HTTPException(status_code=500, detail="Internal server error.")
-
-
-
 
 # =========================================================
 # LIST ROLES (DYNAMIC FILTER + PAGINATION)
