@@ -10,7 +10,8 @@ from app.gst_registration.schemas import (
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.logger import logger
 from datetime import datetime
-
+from zoneinfo import ZoneInfo
+import json
 
 router = APIRouter(
     prefix="/api/v1/gst-people",
@@ -18,40 +19,40 @@ router = APIRouter(
 )
 
 
+
+
 # -------------------------------------------------------------------
-# CREATE REGISTRATION PERSON (PRODUCTION STANDARD)
+# CREATE REGISTRATION PERSON (Production + Version Audit + IST)
 # -------------------------------------------------------------------
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
     summary="Create Registration Person",
-    responses={
-        201: {"description": "Registration person created successfully."},
-        400: {"description": "Validation failed or GSTIN not found."},
-        409: {"description": "Duplicate registration person."},
-        500: {"description": "Database or internal error."},
-    },
 )
 async def create_registration_person(
     payload: RegistrationPersonIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Create Registration Person (Production Standard)
+    Create Registration Person (Production Standard + Version Audit)
 
-    Validation Responsibility:
-    --------------------------
-    1. Schema-level validation (Pydantic)
-    2. GST existence & active validation (DB)
-    3. Customer derived from GST (Single Source of Truth)
-    4. DB-level constraint validation (UNIQUE / FK / NOT NULL / CHECK)
+    ✔ Atomic transaction (Person + Version)
+    ✔ entity_type = 'REGISTRATION_PERSON'
+    ✔ entity_id = 5 (example)
+    ✔ action = 'CREATE'
+    ✔ json populated
+    ✔ updated_json = NULL
+    ✔ IST timezone safe
+    ✔ Structured logging
     """
 
     # --------------------------------------------------
-    # Request Context & Structured Logging
+    # Request Context
     # --------------------------------------------------
-    request_id = generate_uuid()
-    emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    request_id = generate_uuid
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -59,10 +60,16 @@ async def create_registration_person(
     )
 
     # --------------------------------------------------
+    # IST Time (TIMESTAMPTZ SAFE)
+    # --------------------------------------------------
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
+
+    # --------------------------------------------------
     # Normalize Fields
     # --------------------------------------------------
-    full_name = payload.full_name.strip() if payload.full_name else None
-    role = payload.role.strip() if payload.role else None
+    full_name = payload.full_name.strip()
+    role = payload.role.strip()
     email = payload.email.strip().lower() if payload.email else None
     mobile = payload.mobile.strip() if payload.mobile else None
     pan = payload.pan.strip().upper() if payload.pan else None
@@ -75,87 +82,63 @@ async def create_registration_person(
     )
 
     # --------------------------------------------------
-    # Database Pool Acquisition
+    # Database Pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
         log.exception("Database pool acquisition failed")
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection error.",
-        )
+        raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
         try:
-            # --------------------------------------------------
-            # Validate GST Exists & Active
-            # --------------------------------------------------
-            gst_row = await conn.fetchrow(
-                f"""
-                SELECT customer_id, is_active
-                  FROM {DB_SCHEMA}.gst_registration
-                 WHERE gstin = $1
-                 LIMIT 1
-                """,
-                payload.gstin,
-            )
-
-            if not gst_row:
-                log.warning("GSTIN not found gstin=%s", payload.gstin)
-                raise HTTPException(
-                    status_code=400,
-                    detail="GSTIN not found.",
-                )
-
-            if gst_row["is_active"] is False:
-                log.warning("GSTIN inactive gstin=%s", payload.gstin)
-                raise HTTPException(
-                    status_code=400,
-                    detail="GSTIN is inactive.",
-                )
-
-            # --------------------------------------------------
-            # Derive Customer From GST (Single Source of Truth)
-            # --------------------------------------------------
-            derived_customer_id = gst_row["customer_id"]
-
-            if payload.customer_id and payload.customer_id != derived_customer_id:
-                log.warning(
-                    "Customer mismatch | gst_customer_id=%s payload_customer_id=%s",
-                    derived_customer_id,
-                    payload.customer_id,
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail="Customer ID does not match GST registration.",
-                )
-
-            # --------------------------------------------------
-            # Insert Registration Person
-            # --------------------------------------------------
-            insert_sql = f"""
-                INSERT INTO {DB_SCHEMA}.registration_persons
-                (
-                    customer_id,
-                    gstin,
-                    full_name,
-                    role,
-                    pan,
-                    aadhaar,
-                    email,
-                    mobile,
-                    is_primary_customer,
-                    created_at,
-                    updated_at,
-                    is_active
-                )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW(),TRUE)
-                RETURNING *
-            """
-
             async with conn.transaction():
-                row = await conn.fetchrow(
+
+                # --------------------------------------------------
+                # 1️⃣ Validate GST Exists & Active
+                # --------------------------------------------------
+                gst_row = await conn.fetchrow(
+                    f"""
+                    SELECT customer_id, is_active
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE gstin = $1
+                     LIMIT 1
+                    """,
+                    payload.gstin,
+                )
+
+                if not gst_row:
+                    raise HTTPException(status_code=400, detail="GSTIN not found.")
+
+                if gst_row["is_active"] is False:
+                    raise HTTPException(status_code=400, detail="GSTIN is inactive.")
+
+                derived_customer_id = gst_row["customer_id"]
+
+                # --------------------------------------------------
+                # 2️⃣ Insert Registration Person
+                # --------------------------------------------------
+                insert_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.registration_persons
+                    (
+                        customer_id,
+                        gstin,
+                        full_name,
+                        role,
+                        pan,
+                        aadhaar,
+                        email,
+                        mobile,
+                        is_primary_customer,
+                        created_at,
+                        updated_at,
+                        is_active
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,TRUE)
+                    RETURNING *
+                """
+
+                person_row = await conn.fetchrow(
                     insert_sql,
                     derived_customer_id,
                     payload.gstin,
@@ -166,80 +149,76 @@ async def create_registration_person(
                     email,
                     mobile,
                     payload.is_primary_customer,
+                    now,
+                    now,
                 )
 
-            if not row:
-                log.error("Registration person insert returned empty row")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Registration person creation failed.",
+                if not person_row:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Registration person creation failed.",
+                    )
+
+                person_id = person_row["person_id"]
+
+                # --------------------------------------------------
+                # 3️⃣ Insert Version Audit
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                await conn.execute(
+                    version_sql,
+                    emp_id,
+                    "REGISTRATION_PERSON",
+                    5,  # entity id for registration person
+                    derived_customer_id,
+                    "CREATE",
+                    json.dumps(dict(person_row), default=str),
+                    None,
                 )
 
             log.info(
-                "Registration person created successfully person_id=%s",
-                row["person_id"],
+                "Registration person created successfully with audit | person_id=%s",
+                person_id,
             )
 
-            return {
-                **dict(row),
-                "message": "Registration person created successfully.",
-                "request_id": request_id,
-            }
+            response_data = dict(person_row)
+            response_data["message"] = "Registration person created successfully."
+            response_data["request_id"] = request_id
+
+            return response_data
 
         # --------------------------------------------------
-        # Database Exception Handling (Full Coverage)
+        # Exception Handling
         # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError:
-            log.warning("Unique constraint violation during registration person creation")
-            raise HTTPException(
-                status_code=409,
-                detail="Duplicate registration person.",
-            )
+            raise HTTPException(status_code=409, detail="Duplicate registration person.")
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning("Foreign key violation during registration person creation")
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid foreign key reference.",
-            )
-
-        except asyncpg.exceptions.CheckViolationError:
-            log.warning("Check constraint violation")
-            raise HTTPException(
-                status_code=400,
-                detail="Check constraint validation failed.",
-            )
-
-        except asyncpg.exceptions.NotNullViolationError:
-            log.warning("NOT NULL constraint violation")
-            raise HTTPException(
-                status_code=400,
-                detail="Missing required field value.",
-            )
-
-        except asyncpg.exceptions.DataError:
-            log.exception("Invalid data format during registration person creation", exc_info=True)
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid data format.",
-            )
+            raise HTTPException(status_code=400, detail="Invalid foreign key reference.")
 
         except asyncpg.PostgresError:
             log.exception("Database error during registration person creation")
-            raise HTTPException(
-                status_code=500,
-                detail="Database error.",
-            )
+            raise HTTPException(status_code=500, detail="Database error.")
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during registration person creation")
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error.",
-            )
+            raise HTTPException(status_code=500, detail="Internal server error.")
 
 # -------------------------------------------------------------------
 # LIST REGISTRATION PERSONS (DYNAMIC FILTER + PAGINATION)

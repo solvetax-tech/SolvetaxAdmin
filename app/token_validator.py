@@ -76,11 +76,11 @@ async def validate_token(token: str, request: Request | None = None):
 
             # Ensure both datetimes are offset-aware (UTC)
             expires_at = session["expires_at"]
+            # If naive, assume UTC
             if expires_at.tzinfo is None:
-                # Assume naive datetime is UTC
-                from datetime import timezone
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
             now_utc = datetime.now(timezone.utc)
+
             # Improvement: Add audit logging for session expiry
             if expires_at < now_utc:
                 logging.info(f"Session expired for emp_id={emp_id}, marking as inactive.")

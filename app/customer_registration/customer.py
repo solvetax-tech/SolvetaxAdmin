@@ -11,6 +11,8 @@ from app.security.rbac import require_permission
 from app.logger import logger
 from app.utils import mask_sensitive_data,generate_uuid
 import json
+from zoneinfo import ZoneInfo
+IST = ZoneInfo("Asia/Kolkata")
 
 router = APIRouter(
     prefix="/api/v1/customers",
@@ -19,7 +21,6 @@ router = APIRouter(
 #--------------------------------------------------------------
 # CREATE CUSTOMER (is_active DEFAULT = TRUE at DB level)
 #--------------------------------------------------------------
-
 @router.post(
     "",
     response_model=CustomerOut,
@@ -53,8 +54,6 @@ async def create_customer(
         logger,
         {"request_id": request_id, "emp_id": emp_id},
     )
-
-    now = datetime.utcnow()
 
     masked_email = mask_sensitive_data(payload.email)
     masked_mobile = mask_sensitive_data(payload.mobile)
@@ -90,12 +89,11 @@ async def create_customer(
                         full_name, email, mobile, business_name,
                         business_description, business_image_url,
                         business_type, state, city, remark,
-                        rm_id, op_id, referral_id,
-                        created_at, updated_at
+                        rm_id, op_id, referral_id
                     )
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                        $11,$12,$13,$14,$15
+                        $11,$12,$13
                     )
                     RETURNING *
                 """
@@ -117,8 +115,6 @@ async def create_customer(
                     payload.rm_id,
                     payload.op_id,
                     payload.referral_id,
-                    now,
-                    now,
                 )
 
                 if not customer_row:
@@ -138,15 +134,16 @@ async def create_customer(
                     (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
                     VALUES ($1,$2,$3,$4,$5,$6,$7)
                 """
+
                 await conn.execute(
                     version_sql,
                     emp_id,
-                    "CUSTOMER",               # default entity type
-                    1,                        # default entity_id (as requested)
-                    customer_id,              # actual customer created
-                    "CREATE",                 # action
-                    json.dumps(dict(customer_row),default=str),       # snapshot goes into json
-                    None,                     # updated_json must be NULL
+                    "CUSTOMER",
+                    1,
+                    customer_id,
+                    "CREATE",
+                    json.dumps(dict(customer_row), default=str),
+                    None,
                 )
 
             log.info(
@@ -195,7 +192,6 @@ async def create_customer(
                 status_code=500,
                 detail="Internal server error.",
             )
-
 
 # -------------------------------------------------------------------
 # LIST CUSTOMERS (DYNAMIC FILTER + PAGINATION)
@@ -325,15 +321,25 @@ async def filter_customers(
         # --------------------------------------------------
         # Date Filtering (IDENTICAL to employee_get)
         # --------------------------------------------------
+
         if from_date:
-            conditions.append(f"created_at >= ${param_index}")
-            values.append(from_date)
-            param_index += 1
+            if from_date.tzinfo is None:
+                from_date = from_date.replace(tzinfo=IST)
+        else:
+            from_date = from_date.astimezone(IST)
+        conditions.append(f"created_at >= ${param_index}")
+        values.append(from_date)
+        param_index += 1
 
         if to_date:
-            conditions.append(f"created_at <= ${param_index}")
-            values.append(to_date)
-            param_index += 1
+            if to_date.tzinfo is None:
+                to_date = to_date.replace(tzinfo=IST)
+        else:
+            to_date = to_date.astimezone(IST)
+        conditions.append(f"created_at <= ${param_index}")
+        values.append(to_date)
+        param_index += 1
+
 
         # --------------------------------------------------
         # WHERE Clause Builder (EXACT SAME AS employee_get)
