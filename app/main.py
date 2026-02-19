@@ -74,6 +74,7 @@ from app.gst_registration.gst_people import router as gst_people_config_router
 from app.gst_registration.gst_documents import router as gst_documents_router
 from app.gst_registration.registration_config import router as registration_config_router
 from app.gst_registration.gst_registration_config import router as gst_registration_config_router
+from app.Dashboard.emp_dashboard import router as emp_dashboard_router
 
 
 
@@ -103,6 +104,8 @@ if gst_people_config_router:
     app.include_router(gst_people_config_router)
 if gst_documents_router:
     app.include_router(gst_documents_router)
+if emp_dashboard_router:
+    app.include_router(emp_dashboard_router)
 
 
 
