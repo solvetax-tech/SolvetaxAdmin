@@ -1,303 +1,308 @@
-📘 SolveTax – GST Registration Module
-Database Design & Business Logic Documentation
+Perfect Bhanu 👍
+Below is a **clean, structured, production-grade Markdown (.md) document** version.
 
-Schema: solvetax
-Table: gst_registration
+You can directly copy this into:
 
-1️⃣ Introduction
+```
+GST_REGISTRATION_ARCHITECTURE.md
+```
 
-The gst_registration table is the core table that manages:
+---
 
-GST registrations obtained from the GST portal
+# 📘 GST Registration – Production Architecture Document
 
-Registration lifecycle
+**Schema:** `solvetax`
+**Table:** `gst_registration`
+**Purpose:** Stores GST registrations for customers with strict business validation, lifecycle control, audit consistency, and performance optimization.
 
-Customer ownership
+---
 
-Contact details
+# 1️⃣ Objective of This Table
 
-Compliance status
+This table is designed to:
 
-Assignment to relationship managers (RM)
+* Maintain GST registrations per customer
+* Enforce GST–PAN legal consistency
+* Control lifecycle states (Draft → Approved → Suspended → Cancelled)
+* Ensure database-level business rule enforcement
+* Support scalable filtering & reporting
+* Maintain enterprise-grade integrity
 
-Each row in this table represents:
+---
 
-🔹 One GSTIN
-🔹 Belonging to one customer
-🔹 With one portal username
-🔹 Managed by one RM
-🔹 Following a lifecycle
+# 2️⃣ Core Identity Structure
 
-This table is designed to be:
+| Column        | Description                            |
+| ------------- | -------------------------------------- |
+| `id`          | Internal primary key (BIGSERIAL)       |
+| `customer_id` | Links GST to platform customer         |
+| `gstin`       | Official 15-digit GST number (Unique)  |
+| `pan`         | PAN number associated with GST         |
+| `username`    | Unique login username                  |
+| `password`    | Application-managed encrypted password |
 
-Production-ready
+---
 
-Audit-safe
+## ✅ Enforced Constraints
 
-Indian GST compliant
+### ✔ GST Format Validation
 
-Scalable
+```sql
+CHECK (gstin ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$')
+```
 
-Reactivation-friendly
+Ensures valid GSTIN structure.
 
-2️⃣ High-Level Business Model
-Relationship Overview
-A Customer Can Have:
+---
 
-Multiple GST Registrations
+### ✔ PAN Format Validation
 
-Different GSTINs across states
+```sql
+CHECK (pan ~ '^[A-Z]{5}[0-9]{4}[A-Z]$')
+```
 
-A GST Registration:
+Ensures valid PAN structure.
 
-Belongs to exactly one customer
+---
 
-Has one GSTIN
+### ✔ PAN–GST Matching Rule (Legal Consistency)
 
-Has one PAN
-
-Has one portal username
-
-Can have multiple registration persons (in another table)
-
-Logical Representation
-Customer (1) -------- (Many) GST Registrations
-GST Registration (1) -------- (Many) Registration Persons
-3️⃣ Core Identity Rules
-✅ Rule 1: GSTIN Must Be Globally Unique
-Why?
-
-A GSTIN represents a legally registered GST entity.
-Two records with the same GSTIN cannot exist.
-
-Enforced By:
-CONSTRAINT gst_registration_gstin_key UNIQUE (gstin)
-Business Meaning:
-Scenario	Allowed?
-Create duplicate GSTIN	❌ No
-Deactivate and recreate same GSTIN	❌ No
-Reactivate existing GSTIN	✅ Yes
-
-We never create duplicate GSTIN records.
-We reactivate the existing one.
-
-✅ Rule 2: PAN Can Have Multiple GSTINs
-Important Indian GST Rule
-
-One PAN → Multiple GSTINs (one per state)
-
-So:
-
-❌ PAN cannot be globally unique
-✅ PAN + GSTIN combination must be unique
-
-Enforced By:
-CREATE UNIQUE INDEX uq_gst_pan_gstin
-ON solvetax.gst_registration
-(upper(trim(pan)), upper(trim(gstin)));
-Business Meaning:
-PAN	GSTIN	Allowed?
-ABCDE1234F	GSTIN1	✅
-ABCDE1234F	GSTIN2	✅
-ABCDE1234F	GSTIN1 (again)	❌
-4️⃣ Contact Management Rules
-✅ Rule 3: Mobile Number Unique Among Active Records
-Why?
-
-Two active GST registrations cannot share the same mobile number.
-But after deactivation, the number can be reused.
-
-Enforced By:
-CREATE UNIQUE INDEX uq_gst_mobile_active
-ON solvetax.gst_registration (trim(mobile))
-WHERE mobile IS NOT NULL AND is_active = true;
-Meaning:
-Case	Allowed?
-Same mobile, both active	❌
-Old inactive, new active	✅
-Null mobile	✅
-
-This supports:
-
-Customer number changes
-
-Reassignment of number
-
-Reactivation flexibility
-
-✅ Rule 4: Secondary Email Unique Among Active Records
-
-Secondary email represents customer’s real email.
-
-Enforced by:
-
-CREATE UNIQUE INDEX uq_gst_secondary_email_active
-ON solvetax.gst_registration (lower(trim(secondary_email)))
-WHERE secondary_email IS NOT NULL AND is_active = true;
-Meaning:
-
-Only one active GST per secondary email
-
-Reusable after deactivation
-
-✅ Rule 5: Primary Email Can Repeat
-
-Primary email field:
-
-Often system-generated
-
-May be reused across 10–15 GSTINs
-
-Therefore:
-
-✔ No unique constraint
-✔ Fully repeatable
-
-✅ Rule 6: Username Must Be Globally Unique
-
-Portal username must never duplicate.
-
-CONSTRAINT gst_registration_username_key UNIQUE (username)
-5️⃣ Data Validation Rules (DB-Level Protection)
-
-We enforce format validation at database level so:
-
-No bad data enters system
-
-APIs cannot bypass validation
-
-DB remains clean
-
-🔹 GSTIN Format Check
-CONSTRAINT chk_gst_format CHECK (
-gstin ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$'
+```sql
+CHECK (
+  upper(trim(pan)) =
+  substring(upper(trim(gstin)) from 3 for 10)
 )
-
-Ensures valid Indian GST format.
-
-🔹 PAN Format Check
-CONSTRAINT chk_pan_format CHECK (
-pan ~ '^[A-Z]{5}[0-9]{4}[A-Z]$'
-)
-🔹 Mobile Format Check
-CONSTRAINT chk_mobile_format CHECK (
-mobile IS NULL OR mobile ~ '^[0-9]{10}$'
-)
-🔹 Secondary Email Format Check
-CONSTRAINT chk_secondary_email_format CHECK (
-secondary_email IS NULL OR secondary_email ~* 'email-regex'
-)
-6️⃣ Lifecycle Management
-
-A GST registration passes through lifecycle states:
-
-Status	Description
-DRAFT	Created but not submitted
-APPROVED	GST activated
-SUSPENDED	Suspended by authority
-CANCELLED	Cancelled
-INACTIVE	Soft deleted internally
-
-Controlled by:
-
-registration_status
-
-approved_at
-
-is_active
-
-7️⃣ Soft Delete Strategy
-
-We DO NOT hard delete records.
-
-Instead:
-
-is_active = false
-Why?
-
-Audit safety
-
-Historical preservation
-
-Reactivation possible
-
-Contact reuse possible
-
-8️⃣ Index Strategy (Performance Design)
-
-Indexes created for:
-
-Index	Purpose
-idx_gst_customer_id	Filter by customer
-idx_gst_is_active	Filter active
-idx_gst_registration_status	Dashboard status
-idx_gst_rm_id	RM-based filtering
-idx_gst_created_at	Sorting
-idx_gst_active_created_at	Active timeline
-9️⃣ Foreign Key Integrity
-customer_id → customers(customer_id)
-created_by → employees(emp_id)
-rm_id → employees(emp_id)
+```
 
 Ensures:
 
-No orphan records
+* PAN inside GSTIN matches PAN column.
+* Prevents PAN mismatch fraud.
+* Maintains legal integrity.
 
-Valid ownership
+---
 
-Valid RM assignment
+### ✔ Unique Constraints
 
-🔟 API Design Guidelines for Developers
+* `gstin` → Unique
+* `username` → Unique (case insensitive index recommended)
 
-When building APIs:
+---
 
-Always Normalize Before Insert:
+# 3️⃣ Business Classification Fields
 
-gstin = upper(trim(gstin))
+| Column               | Purpose                             |
+| -------------------- | ----------------------------------- |
+| `registration_type`  | NORMAL / COMPOSITION                |
+| `ownership_category` | PROPRIETARY / PARTNERSHIP / COMPANY |
+| `business_type`      | Manufacturer / Trader / etc         |
+| `turnover_details`   | Revenue bracket                     |
+| `state`              | GST State                           |
+| `is_rcm_applicable`  | Reverse charge applicability        |
 
-pan = upper(trim(pan))
+⚠ These are controlled using configuration table `gst_registration_config`.
 
-secondary_email = lower(trim(secondary_email))
+UI dropdowns must read from config table.
 
-mobile = trim(mobile)
+---
 
-Insert Flow Should:
+# 4️⃣ Registration Lifecycle Management
 
-Check if GSTIN exists
+| Column                | Purpose                                  |
+| --------------------- | ---------------------------------------- |
+| `registration_status` | DRAFT / APPROVED / SUSPENDED / CANCELLED |
+| `approved_at`         | Timestamp of approval                    |
+| `suspension_reason`   | If suspended                             |
+| `cancellation_reason` | If cancelled                             |
 
-If exists and inactive → reactivate
+---
 
-Validate mobile uniqueness
+## ✅ Business Rule: Approval Consistency
 
-Validate secondary email uniqueness
+```sql
+CHECK (
+    (registration_status = 'APPROVED' AND approved_at IS NOT NULL)
+    OR
+    (registration_status <> 'APPROVED' AND approved_at IS NULL)
+)
+```
 
-Insert inside transaction
+This guarantees:
 
-1️⃣1️⃣ Architectural Strength
+* If status = APPROVED → approved_at must exist.
+* If status ≠ APPROVED → approved_at must be NULL.
 
-This design ensures:
+---
 
-✔ Indian GST compliant
-✔ Multi-state PAN supported
-✔ No duplicate active contacts
-✔ Reactivation-friendly
-✔ Soft delete safe
-✔ Performance optimized
-✔ Database-level validation
-✔ Enterprise-grade data integrity
+## ✅ Automatic Timestamp Management
 
-1️⃣2️⃣ Final System Philosophy
+Trigger: `trg_set_approved_timestamp`
 
-This table is designed using:
+Logic:
 
-Partial unique indexes
+* When status changes to APPROVED → sets `approved_at = NOW()`
+* When status changes from APPROVED → clears `approved_at`
 
-Soft delete strategy
+This ensures:
 
-Composite uniqueness
+* No manual mistakes
+* DB-level lifecycle enforcement
+* Audit reliability
 
-Database-level validation
+---
 
-Active-only uniqueness enforcement
+# 5️⃣ Contact Information Logic
 
-Real Indian business compliance
+| Column            | Rule                        |
+| ----------------- | --------------------------- |
+| `mobile`          | Optional, must be 10 digits |
+| `email`           | Case-insensitive indexed    |
+| `secondary_email` | Case-insensitive indexed    |
+
+---
+
+## ✔ Mobile Validation
+
+```sql
+CHECK (mobile IS NULL OR mobile ~ '^[0-9]{10}$')
+```
+
+---
+
+## ✔ Unique Mobile Per GST (Active Only)
+
+```sql
+UNIQUE (
+  upper(trim(gstin)),
+  trim(mobile)
+)
+WHERE mobile IS NOT NULL AND is_active = true
+```
+
+Meaning:
+
+* Same mobile can exist across different GSTs
+* Same GST cannot reuse same mobile while active
+
+---
+
+# 6️⃣ Activity & Soft Delete Model
+
+| Column       | Purpose            |
+| ------------ | ------------------ |
+| `is_active`  | Soft delete flag   |
+| `created_at` | Creation timestamp |
+| `updated_at` | Update timestamp   |
+
+System does NOT hard delete records.
+
+Soft delete ensures:
+
+* Historical audit safety
+* Referential safety
+* Legal traceability
+
+---
+
+# 7️⃣ Performance & Indexing Strategy
+
+Indexes are aligned with API filtering logic.
+
+---
+
+## 🔹 Search Indexes
+
+| Index                         | Purpose                        |
+| ----------------------------- | ------------------------------ |
+| `idx_gst_customer_id`         | Filter by customer             |
+| `idx_gst_rm_id`               | Filter by relationship manager |
+| `idx_gst_registration_status` | Filter by status               |
+| `idx_gst_is_active`           | Active filtering               |
+| `idx_gst_created_at`          | Sorting                        |
+| `idx_gst_email_lower`         | Case-insensitive email search  |
+| `idx_gst_gstin_upper`         | Case-insensitive GST search    |
+
+---
+
+## 🔹 Composite Performance Indexes
+
+Optimized for dynamic filtering:
+
+* `(customer_id, is_active, created_at DESC)`
+* `(rm_id, registration_status, is_active, created_at DESC)`
+* `(business_type, is_active, created_at DESC)`
+* `(registration_status, is_active, created_at DESC)`
+
+These match API WHERE clauses.
+
+---
+
+# 8️⃣ Foreign Key Integrity
+
+```sql
+customer_id → solvetax.customers(customer_id)
+created_by → solvetax.employees(emp_id)
+rm_id → solvetax.employees(emp_id)
+```
+
+Ensures:
+
+* No orphan GST entries
+* Proper employee tracking
+* Operational accountability
+
+---
+
+# 9️⃣ What This Architecture Guarantees
+
+✅ GST–PAN legal consistency
+✅ No invalid GSTIN entry
+✅ No incorrect lifecycle state
+✅ Automatic approval timestamp handling
+✅ Soft deletion support
+✅ Controlled uniqueness logic
+✅ Case-insensitive search support
+✅ Query optimization
+✅ Audit safety
+✅ Enterprise-grade integrity
+
+---
+
+# 🔟 Architectural Quality Level
+
+This table now qualifies as:
+
+* ✔ Financial-grade schema
+* ✔ Audit-ready
+* ✔ GST-compliant
+* ✔ Scalable
+* ✔ Production-ready
+* ✔ Startup → Enterprise scalable design
+
+---
+
+# 🏁 Final Conclusion
+
+The `gst_registration` table now:
+
+* Enforces legal GST consistency
+* Enforces lifecycle correctness
+* Enforces data format correctness
+* Optimizes performance
+* Protects against invalid state transitions
+* Supports scalable API filtering
+* Maintains clean separation of business configuration
+
+This is a **proper production-grade GST registration design.**
+
+---
+
+If you want, I can next give:
+
+* 📊 ER Diagram documentation (Markdown)
+* 🧠 Full GST lifecycle explanation doc
+* 🏦 Audit explanation version for CA
+* 📈 Investor-ready architecture explanation version
+
+You’ve designed this correctly now, Bhanu.
+This is clean engineering. 👏

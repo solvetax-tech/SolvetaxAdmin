@@ -37,43 +37,37 @@ class GSTRegistrationIn(BaseModel):
     """
     Create GST Registration Schema
     --------------------------------
-    • Matches DB constraints
-    • Indian GST compliant
-    • Enforces PAN + GST format
-    • Active-only uniqueness handled at DB level
+    • Dynamic config fields
+    • Literal used only for workflow status
+    • Business workflow validation included
     """
 
     # ----------------------------
-    # Ownership & Identity
+    # Identity
     # ----------------------------
     customer_id: int = Field(..., gt=0)
     username: str = Field(..., min_length=3, max_length=100)
     password: str = Field(..., min_length=8, max_length=128)
 
-    pan: Annotated[
-        str,
-        Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
-    ]
-
-    gstin: Annotated[
-        str,
-        Field(pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$")
-    ]
+    pan: Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
+    gstin: Annotated[str, Field(pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$")]
 
     # ----------------------------
-    # Business Details
+    # Business (Dynamic)
     # ----------------------------
-    registration_type: Optional[
-        Literal["NORMAL", "COMPOSITION"]
-    ] = None
-
+    registration_type: Optional[str] = Field(None, max_length=50)
     ownership_category: Optional[str] = Field(None, max_length=100)
     business_type: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=100)
+    turnover_details: Optional[str] = Field(None, max_length=50)
 
-    turnover_details: Optional[
-        Literal["LESS_THAN_2CR", "LESS_THAN_5CR", "MORE_THAN_5CR"]
-    ] = None
+    # ----------------------------
+    # Workflow Status (Controlled)
+    # ----------------------------
+    registration_status: Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"] = "DRAFT"
+
+    suspension_reason: Optional[str] = Field(None, max_length=255)
+    cancellation_reason: Optional[str] = Field(None, max_length=255)
 
     # ----------------------------
     # Assignment
@@ -89,12 +83,9 @@ class GSTRegistrationIn(BaseModel):
     is_rcm_applicable: bool = False
 
     # ----------------------------
-    # Contact Information
+    # Contact
     # ----------------------------
-    mobile: Optional[
-        Annotated[str, Field(pattern=r"^\d{10}$")]
-    ] = None
-
+    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
     email: Optional[EmailStr] = None
     secondary_email: Optional[EmailStr] = None
 
@@ -109,6 +100,20 @@ class GSTRegistrationIn(BaseModel):
             return v.strip().upper()
         return v
 
+    @field_validator(
+        "registration_type",
+        "ownership_category",
+        "business_type",
+        "state",
+        "turnover_details",
+        mode="before",
+    )
+    @classmethod
+    def normalize_business_fields(cls, v):
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
+
     @field_validator("email", "secondary_email", mode="before")
     @classmethod
     def normalize_email(cls, v):
@@ -116,34 +121,35 @@ class GSTRegistrationIn(BaseModel):
             return v.strip().lower()
         return v
 
-    @field_validator(
-        "username",
-        "ownership_category",
-        "business_type",
-        "state",
-        mode="before",
-    )
+    @field_validator("username", mode="before")
     @classmethod
-    def sanitize_strings(cls, v):
+    def sanitize_username(cls, v):
         if isinstance(v, str):
             return html.escape(v.strip())
         return v
 
+    # =====================================================
+    # Workflow Business Logic
+    # =====================================================
 
+    @model_validator(mode="after")
+    def validate_status_logic(self):
+
+        if self.registration_status == "SUSPENDED" and not self.suspension_reason:
+            raise ValueError("suspension_reason is required when status is SUSPENDED")
+
+        if self.registration_status == "CANCELLED" and not self.cancellation_reason:
+            raise ValueError("cancellation_reason is required when status is CANCELLED")
+
+        return self
 # =========================================================
 # GST Registration - Edit (Dynamic Update)
 # =========================================================
-
 class GSTRegistrationEditIn(BaseModel):
-    """
-    Dynamic Edit Schema
-    ---------------------
-    • All fields optional
-    • DB handles uniqueness
-    • Safe normalization
-    """
 
-    # Identity Updates
+    # ----------------------------
+    # Identity
+    # ----------------------------
     gstin: Optional[
         Annotated[str, Field(
             pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
@@ -157,19 +163,18 @@ class GSTRegistrationEditIn(BaseModel):
         Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
     ] = None
 
+    # ----------------------------
     # Business
-    registration_type: Optional[
-        Literal["NORMAL", "COMPOSITION"]
-    ] = None
-
+    # ----------------------------
+    registration_type: Optional[str] = Field(None, max_length=50)
     ownership_category: Optional[str] = Field(None, max_length=100)
     business_type: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=100)
+    turnover_details: Optional[str] = Field(None, max_length=50)
 
-    turnover_details: Optional[
-        Literal["LESS_THAN_2CR", "LESS_THAN_5CR", "MORE_THAN_5CR"]
-    ] = None
-
+    # ----------------------------
+    # Status (Restricted)
+    # ----------------------------
     registration_status: Optional[
         Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
     ] = None
@@ -177,14 +182,16 @@ class GSTRegistrationEditIn(BaseModel):
     suspension_reason: Optional[str] = Field(None, max_length=255)
     cancellation_reason: Optional[str] = Field(None, max_length=255)
 
-    approved_at: Optional[datetime] = None
-
+    # ----------------------------
     # Flags
+    # ----------------------------
     is_rcm_applicable: Optional[bool] = None
     is_filing_needed: Optional[bool] = None
     is_active: Optional[bool] = None
 
+    # ----------------------------
     # Contact
+    # ----------------------------
     mobile: Optional[
         Annotated[str, Field(pattern=r"^\d{10}$")]
     ] = None
@@ -205,6 +212,20 @@ class GSTRegistrationEditIn(BaseModel):
             return v.strip().upper()
         return v
 
+    @field_validator(
+        "registration_type",
+        "ownership_category",
+        "business_type",
+        "state",
+        "turnover_details",
+        mode="before",
+    )
+    @classmethod
+    def normalize_business_fields(cls, v):
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
+
     @field_validator("email", "secondary_email", mode="before")
     @classmethod
     def normalize_email(cls, v):
@@ -212,19 +233,24 @@ class GSTRegistrationEditIn(BaseModel):
             return v.strip().lower()
         return v
 
-    @field_validator(
-        "suspension_reason",
-        "cancellation_reason",
-        "ownership_category",
-        "business_type",
-        "state",
-        mode="before",
-    )
-    @classmethod
-    def sanitize_strings(cls, v):
-        if isinstance(v, str):
-            return html.escape(v.strip())
-        return v
+    # =====================================================
+    # Status Logic Validation
+    # =====================================================
+
+    @model_validator(mode="after")
+    def validate_status_logic(self):
+
+        if self.registration_status == "SUSPENDED" and not self.suspension_reason:
+            raise ValueError(
+                "suspension_reason is required when status is SUSPENDED"
+            )
+
+        if self.registration_status == "CANCELLED" and not self.cancellation_reason:
+            raise ValueError(
+                "cancellation_reason is required when status is CANCELLED"
+            )
+
+        return self
 # =========================================================
 # GST Registration - Response
 # =========================================================
