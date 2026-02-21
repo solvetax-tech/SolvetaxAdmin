@@ -6,7 +6,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from typing import Optional, Annotated, Literal
+from typing import Optional, Annotated, Literal, List
 from datetime import datetime
 import html
 
@@ -22,6 +22,12 @@ class BaseSchema(BaseModel):
         "from_attributes": True,        # ORM safe
     }
 
+
+
+class GSTConfigOut(BaseModel):
+    value: str
+    display_name: str
+    sort_order: int
 
 # =========================================================
 # GST Registration - Create
