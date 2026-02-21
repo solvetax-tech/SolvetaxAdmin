@@ -19,8 +19,9 @@ router = APIRouter(
 )
 
 # -------------------------------------------------------------------
-# CREATE REGISTRATION DOCUMENT (PRODUCTION STANDARD)
+# CREATE REGISTRATION DOCUMENT (Production Standard + Version Audit + IST)
 # -------------------------------------------------------------------
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -37,26 +38,35 @@ async def create_registration_document(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Create Registration Document (Production Standard)
+    Create Registration Document (Production Standard + Version Audit)
 
-    Validation Responsibility:
-    --------------------------
-    1. Schema-level validation (Pydantic)
-    2. GST existence & active validation
-    3. Registration Person existence & active validation (if provided)
-    4. DB-level constraint validation (FK / NOT NULL / CHECK)
+    ✔ Atomic transaction (Document + Version)
+    ✔ entity_type = 'REGISTRATION_DOCUMENT'
+    ✔ entity_id = 6 (example)
+    ✔ action = 'CREATE'
+    ✔ json populated
+    ✔ updated_json = NULL
+    ✔ IST timezone safe
+    ✔ Structured logging
     """
 
     # --------------------------------------------------
-    # Request Context & Structured Logging
+    # Request Context
     # --------------------------------------------------
-    request_id = generate_uuid()
-    emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    request_id = str(uuid.uuid4())
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
         {"request_id": request_id, "emp_id": emp_id},
     )
+
+    # --------------------------------------------------
+    # IST Time (TIMESTAMPTZ SAFE)
+    # --------------------------------------------------
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
 
     # --------------------------------------------------
     # Normalize Fields
@@ -90,88 +100,89 @@ async def create_registration_document(
 
     async with pool.acquire() as conn:
         try:
-            # --------------------------------------------------
-            # Validate GST Exists & Active
-            # --------------------------------------------------
-            gst_row = await conn.fetchrow(
-                f"""
-                SELECT gstin, is_active
-                  FROM {DB_SCHEMA}.gst_registration
-                 WHERE gstin = $1
-                 LIMIT 1
-                """,
-                payload.gstin,
-            )
+            async with conn.transaction():
 
-            if not gst_row:
-                log.warning("GSTIN not found | gstin=%s", payload.gstin)
-                raise HTTPException(
-                    status_code=400,
-                    detail="GSTIN not found.",
-                )
-
-            if gst_row["is_active"] is False:
-                log.warning("GSTIN inactive | gstin=%s", payload.gstin)
-                raise HTTPException(
-                    status_code=400,
-                    detail="GSTIN is inactive.",
-                )
-
-            # --------------------------------------------------
-            # Validate Registration Person (If Provided)
-            # --------------------------------------------------
-            if payload.person_id:
-                person_row = await conn.fetchrow(
+                # --------------------------------------------------
+                # 1️⃣ Validate GST Exists & Active
+                # --------------------------------------------------
+                gst_row = await conn.fetchrow(
                     f"""
-                    SELECT person_id, is_active
-                      FROM {DB_SCHEMA}.registration_persons
-                     WHERE person_id = $1
+                    SELECT gstin, customer_id, is_active
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE gstin = $1
                      LIMIT 1
                     """,
-                    payload.person_id,
+                    payload.gstin,
                 )
 
-                if not person_row:
-                    log.warning(
-                        "Registration person not found | person_id=%s",
-                        payload.person_id,
-                    )
+                if not gst_row:
+                    log.warning("GSTIN not found | gstin=%s", payload.gstin)
                     raise HTTPException(
                         status_code=400,
-                        detail="Registration person not found.",
+                        detail="GSTIN not found.",
                     )
 
-                if person_row["is_active"] is False:
-                    log.warning(
-                        "Registration person inactive | person_id=%s",
-                        payload.person_id,
-                    )
+                if gst_row["is_active"] is False:
+                    log.warning("GSTIN inactive | gstin=%s", payload.gstin)
                     raise HTTPException(
                         status_code=400,
-                        detail="Registration person is inactive.",
+                        detail="GSTIN is inactive.",
                     )
 
-            # --------------------------------------------------
-            # Insert Registration Document
-            # --------------------------------------------------
-            insert_sql = f"""
-                INSERT INTO {DB_SCHEMA}.registration_documents
-                (
-                    gstin,
-                    person_id,
-                    document_type,
-                    document_url,
-                    ownership_category,
-                    mobile,
-                    created_at,
-                    updated_at,
-                    is_active
-                )
-                VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW(),TRUE)
-                RETURNING *
-            """
+                # --------------------------------------------------
+                # 2️⃣ Validate Registration Person (If Provided)
+                # --------------------------------------------------
+                if payload.person_id:
+                    person_row = await conn.fetchrow(
+                        f"""
+                        SELECT person_id, is_active
+                          FROM {DB_SCHEMA}.registration_persons
+                         WHERE person_id = $1
+                         LIMIT 1
+                        """,
+                        payload.person_id,
+                    )
 
-            async with conn.transaction():
+                    if not person_row:
+                        log.warning(
+                            "Registration person not found | person_id=%s",
+                            payload.person_id,
+                        )
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Registration person not found.",
+                        )
+
+                    if person_row["is_active"] is False:
+                        log.warning(
+                            "Registration person inactive | person_id=%s",
+                            payload.person_id,
+                        )
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Registration person is inactive.",
+                        )
+
+                # --------------------------------------------------
+                # 3️⃣ Insert Registration Document
+                # --------------------------------------------------
+                insert_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.registration_documents
+                    (
+                        gstin,
+                        person_id,
+                        document_type,
+                        document_url,
+                        ownership_category,
+                        mobile,
+                        created_at,
+                        updated_at,
+                        is_active
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE)
+                    RETURNING *
+                """
+
                 row = await conn.fetchrow(
                     insert_sql,
                     payload.gstin,
@@ -180,52 +191,84 @@ async def create_registration_document(
                     document_url,
                     ownership_category,
                     mobile,
+                    now,
+                    now,
                 )
 
-            if not row:
-                log.error("Registration document insert returned empty row")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Registration document creation failed.",
+                if not row:
+                    log.error("Registration document creation failed - no row returned")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Registration document creation failed.",
+                    )
+
+                document_id = row["document_id"]
+
+                # --------------------------------------------------
+                # 4️⃣ Insert Version Audit (INLINE)
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                await conn.execute(
+                    version_sql,
+                    emp_id,
+                    "REGISTRATION_DOCUMENT",
+                    6,  # your entity_id for registration_document
+                    gst_row["customer_id"],
+                    "CREATE",
+                    json.dumps(dict(row), default=str),
+                    None,
                 )
 
             log.info(
-                "Registration document created successfully document_id=%s",
-                row["document_id"],
+                "Registration document created successfully with audit | document_id=%s",
+                document_id,
             )
 
-            return {
-                **dict(row),
-                "message": "Registration document created successfully.",
-                "request_id": request_id,
-            }
+            response_data = dict(row)
+            response_data["message"] = "Registration document created successfully."
+            response_data["request_id"] = request_id
+
+            return response_data
 
         # --------------------------------------------------
-        # Database Exception Handling (Full Coverage)
+        # Exception Handling (Production Grade)
         # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError:
-            log.warning("Unique constraint violation during document creation")
+            log.warning("Duplicate registration document detected")
             raise HTTPException(
                 status_code=409,
                 detail="Duplicate registration document.",
             )
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning("Foreign key violation during document creation")
+            log.warning("Invalid foreign key reference during document creation")
             raise HTTPException(
                 status_code=400,
                 detail="Invalid foreign key reference.",
             )
 
         except asyncpg.exceptions.CheckViolationError:
-            log.warning("Check constraint violation")
+            log.warning("Check constraint violation during document creation")
             raise HTTPException(
                 status_code=400,
                 detail="Check constraint validation failed.",
             )
 
         except asyncpg.exceptions.NotNullViolationError:
-            log.warning("NOT NULL constraint violation")
+            log.warning("NOT NULL constraint violation during document creation")
             raise HTTPException(
                 status_code=400,
                 detail="Missing required field value.",
@@ -238,8 +281,12 @@ async def create_registration_document(
                 detail="Invalid data format.",
             )
 
-        except asyncpg.PostgresError:
-            log.exception("Database error during document creation")
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during document creation | error=%s",
+                str(e),
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=500,
                 detail="Database error.",
@@ -254,8 +301,6 @@ async def create_registration_document(
                 status_code=500,
                 detail="Internal server error.",
             )
-
-
 # -------------------------------------------------------------------
 # LIST REGISTRATION DOCUMENTS (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
@@ -287,7 +332,7 @@ async def list_registration_documents(
 
     Validation Responsibility:
     --------------------------
-    1. FastAPI: Type validation + pagination validation
+    1. FastAPI: Type + pagination validation
     2. DB: Filtering logic only
     """
 
@@ -303,7 +348,7 @@ async def list_registration_documents(
     )
 
     log.info(
-        "Incoming registration documents filter request limit=%s offset=%s",
+        "Incoming registration document filter request limit=%s offset=%s",
         limit,
         offset,
     )
@@ -418,27 +463,40 @@ async def list_registration_documents(
         ]
 
     # --------------------------------------------------
+    # IMPORTANT: Re-raise HTTP Exceptions First
+    # --------------------------------------------------
+    except HTTPException:
+        raise
+
+    # --------------------------------------------------
     # Database Exception Handling
     # --------------------------------------------------
-    except asyncpg.PostgresError:
-        log.exception("Database error during registration documents filtering")
+    except asyncpg.PostgresError as e:
+        log.error(
+            "Database error during registration document filtering | error=%s",
+            str(e),
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=500,
             detail="Database error.",
         )
 
+    # --------------------------------------------------
+    # Unexpected Error Handling
+    # --------------------------------------------------
     except Exception:
-        log.exception("Unexpected error during registration documents filtering")
+        log.exception("Unexpected error during registration document filtering")
         raise HTTPException(
             status_code=500,
             detail="Internal server error.",
         )
 # -------------------------------------------------------------------
-# GET REGISTRATION DOCUMENT BY DOCUMENT_ID (ACTIVE ONLY)
+# GET REGISTRATION DOCUMENT BY GSTIN (ACTIVE ONLY)
 # -------------------------------------------------------------------
 
 @router.get(
-    "/{document_id}/single_filter",
+    "/{gstin}/single_filter",
     summary="Get Registration Document",
     responses={
         200: {"description": "Registration document details."},
@@ -447,16 +505,18 @@ async def list_registration_documents(
     },
 )
 async def get_registration_document(
-    document_id: int,
+    gstin: str,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
-    Get Registration Document by document_id (Production Standard)
+    Get Registration Document by GSTIN (Production Standard)
 
-    ✔ Returns only active records
-    ✔ Structured logging
-    ✔ Safe SQL parameterization
-    ✔ Full DB exception coverage
+    Validation Responsibility Split:
+    --------------------------------
+    1. Authentication & Authorization via dependency
+    2. Path param validation handled by FastAPI
+    3. Existence validation handled by DB query
+    4. Returns only ACTIVE documents
     """
 
     # --------------------------------------------------
@@ -465,30 +525,45 @@ async def get_registration_document(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
+    # Safe emp_id normalization
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+
+    # Mask GSTIN for logs (Security Best Practice)
+    def mask_gstin(value: str) -> str:
+        value = value.strip()
+        if len(value) <= 4:
+            return "****"
+        return f"{value[:2]}******{value[-2:]}"
+
+    masked_gstin = mask_gstin(gstin)
+
     log = logging.LoggerAdapter(
         logger,
         {
             "request_id": request_id,
-            "emp_id": current_emp_id,
+            "emp_id": emp_id,
             "api": "get_registration_document",
         },
     )
 
     log.info(
-        "Incoming get registration document request | document_id=%s",
-        document_id,
+        "Incoming get registration document request | gstin=%s",
+        masked_gstin,
     )
 
+    # --------------------------------------------------
+    # SQL Query Definition (ACTIVE ONLY)
+    # --------------------------------------------------
     sql = f"""
         SELECT *
           FROM {DB_SCHEMA}.registration_documents
-         WHERE document_id = $1
+         WHERE gstin = $1
            AND is_active = TRUE
          LIMIT 1
     """
 
     # --------------------------------------------------
-    # Database Pool Acquisition
+    # Database Pool Acquisition Safety
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
@@ -501,12 +576,15 @@ async def get_registration_document(
 
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(sql, document_id)
+            row = await conn.fetchrow(sql, gstin)
 
+        # --------------------------------------------------
+        # Not Found Handling
+        # --------------------------------------------------
         if not row:
             log.warning(
-                "Registration document not found or inactive | document_id=%s",
-                document_id,
+                "Registration document not found or inactive | gstin=%s",
+                masked_gstin,
             )
             raise HTTPException(
                 status_code=404,
@@ -514,8 +592,8 @@ async def get_registration_document(
             )
 
         log.info(
-            "Registration document fetched successfully | document_id=%s",
-            document_id,
+            "Registration document fetched successfully | gstin=%s",
+            masked_gstin,
         )
 
         return {
@@ -524,14 +602,20 @@ async def get_registration_document(
             "request_id": request_id,
         }
 
+    # --------------------------------------------------
+    # IMPORTANT: Re-raise HTTP Exceptions First
+    # --------------------------------------------------
     except HTTPException:
         raise
 
+    # --------------------------------------------------
+    # DATABASE ERROR HANDLING (Production Grade)
+    # --------------------------------------------------
     except asyncpg.PostgresError as e:
         log.error(
             "Database error during registration document fetch | "
-            "document_id=%s | error=%s",
-            document_id,
+            "gstin=%s | error=%s",
+            masked_gstin,
             str(e),
             exc_info=True,
         )
@@ -540,22 +624,24 @@ async def get_registration_document(
             detail="Database error.",
         )
 
+    # --------------------------------------------------
+    # FALLBACK UNEXPECTED ERROR (WITH STACK TRACE)
+    # --------------------------------------------------
     except Exception:
         log.exception(
-            "Unexpected error during registration document fetch | document_id=%s",
-            document_id,
+            "Unexpected error during registration document fetch | gstin=%s",
+            masked_gstin,
         )
         raise HTTPException(
             status_code=500,
             detail="Internal server error.",
         )
 
-
 # -------------------------------------------------------------------
-# EDIT REGISTRATION DOCUMENT (Dynamic Update - Production Ready)
+# EDIT REGISTRATION DOCUMENT (Dynamic Update - Production Ready + Version Audit)
 # -------------------------------------------------------------------
 @router.post(
-    "/{document_id}/edit",
+    "/{gstin}/edit",
     summary="Edit Registration Document (Dynamic Update - Production Ready)",
     responses={
         200: {"description": "Registration document updated successfully."},
@@ -566,38 +652,19 @@ async def get_registration_document(
     },
 )
 async def edit_registration_document(
-    document_id: int,
+    gstin: str,
     payload: RegistrationDocumentEditIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Production-Ready Dynamic Registration Document Update API
-
-    Features:
-    ---------
-    ✔ Dynamic field update (PATCH-like behavior)
-    ✔ Structured logging with request_id & emp_id
-    ✔ Field normalization
-    ✔ Active-only update (is_active = TRUE)
-    ✔ Safe SQL parameterization
-    ✔ Transaction handling
-    ✔ Full DB exception coverage
-    ✔ Enterprise-grade error handling
-
-    Validation Responsibility:
-    --------------------------
-    1. Schema-Level (Pydantic - RegistrationDocumentEditIn)
-    2. Database-Level:
-       - FOREIGN KEY constraints
-       - NOT NULL constraints
-       - Check constraints
-    """
 
     # --------------------------------------------------
     # Request Context & Structured Logging
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    # Safe emp_id conversion for version table
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -609,8 +676,8 @@ async def edit_registration_document(
     )
 
     log.info(
-        "Incoming edit registration document request | document_id=%s",
-        document_id,
+        "Incoming edit registration document request | gstin=%s",
+        gstin,
     )
 
     # --------------------------------------------------
@@ -620,8 +687,8 @@ async def edit_registration_document(
         update_data = payload.model_dump(exclude_unset=True)
     except Exception as e:
         log.exception(
-            "Failed to serialize payload | document_id=%s | error=%s",
-            document_id,
+            "Failed to serialize payload | gstin=%s | error=%s",
+            gstin,
             str(e),
         )
         raise HTTPException(
@@ -630,7 +697,7 @@ async def edit_registration_document(
         )
 
     if not update_data:
-        log.warning("No fields provided for update | document_id=%s", document_id)
+        log.warning("No fields provided for update | gstin=%s", gstin)
         raise HTTPException(
             status_code=400,
             detail="At least one field must be provided for update.",
@@ -654,8 +721,8 @@ async def edit_registration_document(
 
     except Exception as e:
         log.exception(
-            "Error during field normalization | document_id=%s | payload=%s | error=%s",
-            document_id,
+            "Error during field normalization | gstin=%s | payload=%s | error=%s",
+            gstin,
             update_data,
             str(e),
         )
@@ -671,8 +738,8 @@ async def edit_registration_document(
         pool = await get_db_pool()
     except Exception as e:
         log.exception(
-            "Database pool acquisition failed | document_id=%s | error=%s",
-            document_id,
+            "Database pool acquisition failed | gstin=%s | error=%s",
+            gstin,
             str(e),
         )
         raise HTTPException(
@@ -682,82 +749,100 @@ async def edit_registration_document(
 
     async with pool.acquire() as conn:
         try:
-            fields = []
-            values = []
-            param_index = 1
-
-            # --------------------------------------------------
-            # Build Dynamic SET Clause (SQL Injection Safe)
-            # --------------------------------------------------
-            for field_name, value in update_data.items():
-                fields.append(f"{field_name} = ${param_index}")
-                values.append(value)
-                param_index += 1
-
-            # Always update updated_at
-            fields.append("updated_at = NOW()")
-
-            sql = f"""
-                UPDATE {DB_SCHEMA}.registration_documents
-                   SET {', '.join(fields)}
-                 WHERE document_id = ${param_index}
-                   AND is_active = TRUE
-                 RETURNING *
-            """
-
-            values.append(document_id)
-
-            log.debug(
-                "Executing registration document update | document_id=%s | fields=%s",
-                document_id,
-                list(update_data.keys()),
-            )
-
-            # --------------------------------------------------
-            # Atomic Transaction
-            # --------------------------------------------------
             async with conn.transaction():
-                row = await conn.fetchrow(sql, *values)
 
-            # --------------------------------------------------
-            # Not Found / Inactive Handling
-            # --------------------------------------------------
-            if not row:
-                check_sql = f"""
-                    SELECT document_id, is_active
+                # --------------------------------------------------
+                # 1️⃣ Fetch OLD Snapshot (Active Only)
+                # --------------------------------------------------
+                old_row = await conn.fetchrow(
+                    f"""
+                    SELECT *
                       FROM {DB_SCHEMA}.registration_documents
-                     WHERE document_id = $1
-                """
-                existing = await conn.fetchrow(check_sql, document_id)
+                     WHERE gstin = $1
+                       AND is_active = TRUE
+                     LIMIT 1
+                    """,
+                    gstin,
+                )
 
-                if not existing:
+                if not old_row:
                     log.warning(
-                        "Registration document not found | document_id=%s",
-                        document_id,
+                        "Registration document not found for update | gstin=%s",
+                        gstin,
                     )
                     raise HTTPException(
                         status_code=404,
                         detail="Registration document not found.",
                     )
 
-                if existing["is_active"] is False:
-                    log.warning(
-                        "Registration document is inactive | document_id=%s",
-                        document_id,
+                # --------------------------------------------------
+                # 2️⃣ Build Dynamic SET Clause
+                # --------------------------------------------------
+                fields = []
+                values = []
+                param_index = 1
+
+                for field_name, value in update_data.items():
+                    fields.append(f"{field_name} = ${param_index}")
+                    values.append(value)
+                    param_index += 1
+
+                fields.append("updated_at = NOW()")
+
+                sql = f"""
+                    UPDATE {DB_SCHEMA}.registration_documents
+                       SET {', '.join(fields)}
+                     WHERE gstin = ${param_index}
+                       AND is_active = TRUE
+                     RETURNING *
+                """
+
+                values.append(gstin)
+
+                log.debug(
+                    "Executing registration document update | gstin=%s | fields=%s",
+                    gstin,
+                    list(update_data.keys()),
+                )
+
+                new_row = await conn.fetchrow(sql, *values)
+
+                # --------------------------------------------------
+                # 3️⃣ Insert Version Audit
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
                     )
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Registration document is inactive.",
-                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                await conn.execute(
+                    version_sql,
+                    emp_id,
+                    "REGISTRATION_DOCUMENT",
+                    6,  # Your entity_id for registration_document
+                    None,  # No direct customer_id in this table
+                    "UPDATE",
+                    json.dumps(dict(old_row), default=str),
+                    json.dumps(dict(new_row), default=str),
+                )
 
             log.info(
-                "Registration document updated successfully | document_id=%s | updated_fields=%s",
-                document_id,
+                "Registration document updated successfully with audit | gstin=%s | updated_fields=%s",
+                gstin,
                 list(update_data.keys()),
             )
 
             return {
-                **dict(row),
+                **dict(new_row),
                 "message": "Registration document updated successfully.",
                 "request_id": request_id,
             }
@@ -766,40 +851,28 @@ async def edit_registration_document(
         # FULL DATABASE EXCEPTION COVERAGE
         # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError:
-            log.warning(
-                "Unique constraint violation | document_id=%s",
-                document_id,
-            )
+            log.warning("Unique constraint violation | gstin=%s", gstin)
             raise HTTPException(
                 status_code=409,
                 detail="Duplicate field value violates unique constraint.",
             )
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning(
-                "Foreign key violation | document_id=%s",
-                document_id,
-            )
+            log.warning("Foreign key violation | gstin=%s", gstin)
             raise HTTPException(
                 status_code=400,
                 detail="Invalid foreign key reference.",
             )
 
         except asyncpg.exceptions.CheckViolationError:
-            log.warning(
-                "Check constraint violation | document_id=%s",
-                document_id,
-            )
+            log.warning("Check constraint violation | gstin=%s", gstin)
             raise HTTPException(
                 status_code=400,
                 detail="Check constraint validation failed.",
             )
 
         except asyncpg.exceptions.NotNullViolationError:
-            log.warning(
-                "NOT NULL constraint violation | document_id=%s",
-                document_id,
-            )
+            log.warning("NOT NULL constraint violation | gstin=%s", gstin)
             raise HTTPException(
                 status_code=400,
                 detail="Missing required field value.",
@@ -807,8 +880,8 @@ async def edit_registration_document(
 
         except asyncpg.exceptions.DataError:
             log.error(
-                "Invalid data format | document_id=%s",
-                document_id,
+                "Invalid data format error | gstin=%s",
+                gstin,
                 exc_info=True,
             )
             raise HTTPException(
@@ -818,9 +891,8 @@ async def edit_registration_document(
 
         except asyncpg.PostgresError as e:
             log.error(
-                "Postgres database error during document update | "
-                "document_id=%s | error=%s",
-                document_id,
+                "Postgres database error during document update | gstin=%s | error=%s",
+                gstin,
                 str(e),
                 exc_info=True,
             )
@@ -834,21 +906,20 @@ async def edit_registration_document(
 
         except Exception:
             log.exception(
-                "Unexpected error during registration document update | document_id=%s",
-                document_id,
+                "Unexpected error during document update | gstin=%s",
+                gstin,
             )
             raise HTTPException(
                 status_code=500,
                 detail="Internal server error.",
             )
-
 # =========================================================
-# SOFT DELETE REGISTRATION DOCUMENT (is_active = false)
+# SOFT DELETE REGISTRATION DOCUMENT (is_active = false) WITH VERSION AUDIT
 # =========================================================
 
 @router.delete(
-    "/{document_id}/soft_delete",
-    summary="Soft delete Registration Document by setting is_active to false",
+    "/{gstin}/soft_delete",
+    summary="Soft delete Registration Document (With Audit)",
     responses={
         200: {"description": "Registration document soft deleted successfully."},
         400: {"description": "Registration document already inactive."},
@@ -857,17 +928,19 @@ async def edit_registration_document(
     },
 )
 async def soft_delete_registration_document(
-    document_id: int,
+    gstin: str,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Soft delete Registration Document by updating is_active to FALSE.
+    Soft Delete Registration Document with Version Audit
 
-    Behavior:
-    ---------
-    - Does NOT remove the row from DB
-    - Sets is_active = FALSE
-    - Updates updated_at timestamp
+    ✔ Atomic transaction (Soft Delete + Version Insert)
+    ✔ Concurrency safe (AND is_active = TRUE)
+    ✔ json = NULL (for DELETE)
+    ✔ updated_json = NEW snapshot (is_active = FALSE)
+    ✔ action = 'DELETE'
+    ✔ Enterprise structured logging
+    ✔ Full asyncpg exception handling
     """
 
     # --------------------------------------------------
@@ -875,19 +948,20 @@ async def soft_delete_registration_document(
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
         {
             "request_id": request_id,
-            "emp_id": current_emp_id,
+            "emp_id": emp_id,
             "api": "soft_delete_registration_document",
         },
     )
 
     log.info(
-        "Incoming soft delete registration document request | document_id=%s",
-        document_id,
+        "Incoming soft delete registration document request | gstin=%s",
+        gstin,
     )
 
     # --------------------------------------------------
@@ -895,8 +969,11 @@ async def soft_delete_registration_document(
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
-    except Exception:
-        log.exception("Database pool acquisition failed")
+    except Exception as e:
+        log.exception(
+            "Database pool acquisition failed during registration document soft delete | error=%s",
+            str(e),
+        )
         raise HTTPException(
             status_code=500,
             detail="Database connection error.",
@@ -904,55 +981,87 @@ async def soft_delete_registration_document(
 
     async with pool.acquire() as conn:
         try:
-            # --------------------------------------------------
-            # Soft Delete Query
-            # --------------------------------------------------
-            sql = f"""
-                UPDATE {DB_SCHEMA}.registration_documents
-                   SET is_active = FALSE,
-                       updated_at = NOW()
-                 WHERE document_id = $1
-                   AND is_active = TRUE
-                 RETURNING *
-            """
-
             async with conn.transaction():
-                row = await conn.fetchrow(sql, document_id)
 
-            # --------------------------------------------------
-            # Not Found / Already Inactive Handling
-            # --------------------------------------------------
-            if not row:
-                check_sql = f"""
-                    SELECT document_id, is_active
-                      FROM {DB_SCHEMA}.registration_documents
-                     WHERE document_id = $1
+                # --------------------------------------------------
+                # 1️⃣ Perform Soft Delete (Concurrency Safe)
+                # --------------------------------------------------
+                sql = f"""
+                    UPDATE {DB_SCHEMA}.registration_documents
+                       SET is_active = FALSE,
+                           updated_at = NOW()
+                     WHERE gstin = $1
+                       AND is_active = TRUE
+                     RETURNING *
                 """
-                existing = await conn.fetchrow(check_sql, document_id)
 
-                if not existing:
-                    log.warning(
-                        "Registration document not found | document_id=%s",
-                        document_id,
-                    )
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Registration document not found.",
-                    )
+                row = await conn.fetchrow(sql, gstin)
 
-                if existing["is_active"] is False:
-                    log.warning(
-                        "Registration document already inactive | document_id=%s",
-                        document_id,
+                # --------------------------------------------------
+                # Not Found / Already Inactive Handling
+                # --------------------------------------------------
+                if not row:
+                    check_sql = f"""
+                        SELECT gstin, is_active
+                          FROM {DB_SCHEMA}.registration_documents
+                         WHERE gstin = $1
+                    """
+
+                    existing = await conn.fetchrow(check_sql, gstin)
+
+                    if not existing:
+                        log.warning(
+                            "Registration document not found for soft delete | gstin=%s",
+                            gstin,
+                        )
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Registration document not found.",
+                        )
+
+                    if existing["is_active"] is False:
+                        log.warning(
+                            "Registration document already inactive | gstin=%s",
+                            gstin,
+                        )
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Registration document is already inactive.",
+                        )
+
+                # --------------------------------------------------
+                # 2️⃣ Insert Version Audit (DELETE)
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
                     )
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Registration document is already inactive.",
-                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                deleted_snapshot = dict(row)
+
+                await conn.execute(
+                    version_sql,
+                    emp_id,
+                    "REGISTRATION_DOCUMENT",   # entity_type
+                    6,                         # your entity_id for registration_document
+                    None,                      # No direct customer_id reference
+                    "DELETE",
+                    None,                      # json must be NULL
+                    json.dumps(deleted_snapshot, default=str),
+                )
 
             log.info(
-                "Registration document soft deleted successfully | document_id=%s",
-                document_id,
+                "Registration document soft deleted successfully with audit | gstin=%s",
+                gstin,
             )
 
             return {
@@ -961,18 +1070,53 @@ async def soft_delete_registration_document(
                 "request_id": request_id,
             }
 
-        except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning("Foreign key violation | document_id=%s", document_id)
+        # --------------------------------------------------
+        # DATABASE EXCEPTION HANDLING (Enterprise Grade)
+        # --------------------------------------------------
+        except asyncpg.exceptions.ForeignKeyViolationError as e:
+            log.error(
+                "Foreign key violation during registration document soft delete | "
+                "gstin=%s | error=%s",
+                gstin,
+                str(e),
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=400,
                 detail="Foreign key constraint violation.",
             )
 
+        except asyncpg.exceptions.CheckViolationError as e:
+            log.error(
+                "Audit constraint violation during registration document soft delete | "
+                "gstin=%s | error=%s",
+                gstin,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Audit constraint validation failed.",
+            )
+
+        except asyncpg.exceptions.DataError as e:
+            log.error(
+                "Data error during registration document soft delete | "
+                "gstin=%s | error=%s",
+                gstin,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid data format.",
+            )
+
         except asyncpg.PostgresError as e:
             log.error(
                 "Database error during registration document soft delete | "
-                "document_id=%s | error=%s",
-                document_id,
+                "gstin=%s | error=%s",
+                gstin,
                 str(e),
                 exc_info=True,
             )
@@ -984,10 +1128,12 @@ async def soft_delete_registration_document(
         except HTTPException:
             raise
 
-        except Exception:
+        except Exception as e:
             log.exception(
-                "Unexpected error during registration document soft delete | document_id=%s",
-                document_id,
+                "Unexpected error during registration document soft delete | "
+                "gstin=%s | error=%s",
+                gstin,
+                str(e),
             )
             raise HTTPException(
                 status_code=500,

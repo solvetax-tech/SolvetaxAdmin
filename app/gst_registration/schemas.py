@@ -6,7 +6,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from typing import Optional, Annotated
+from typing import Optional, Annotated, Literal
 from datetime import datetime
 import html
 
@@ -27,44 +27,82 @@ class BaseSchema(BaseModel):
 # GST Registration - Create
 # =========================================================
 
-class GSTRegistrationIn(BaseSchema):
+class GSTRegistrationIn(BaseModel):
+    """
+    Create GST Registration Schema
+    --------------------------------
+    • Matches DB constraints
+    • Indian GST compliant
+    • Enforces PAN + GST format
+    • Active-only uniqueness handled at DB level
+    """
+
+    # ----------------------------
+    # Ownership & Identity
+    # ----------------------------
     customer_id: int = Field(..., gt=0)
     username: str = Field(..., min_length=3, max_length=100)
     password: str = Field(..., min_length=8, max_length=128)
-    pan: Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
-    gstin: Optional[Annotated[str, Field(pattern=r"^[0-9A-Z]{15}$")]] = None
-    registration_type: Optional[str] = Field(
-        None,
-        description="NORMAL / COMPOSITION",
-    )
+
+    pan: Annotated[
+        str,
+        Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+    ]
+
+    gstin: Annotated[
+        str,
+        Field(pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$")
+    ]
+
+    # ----------------------------
+    # Business Details
+    # ----------------------------
+    registration_type: Optional[
+        Literal["NORMAL", "COMPOSITION"]
+    ] = None
+
     ownership_category: Optional[str] = Field(None, max_length=100)
     business_type: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=100)
-    turnover_details: Optional[str] = Field(
-        None,
-        description="LESS_THAN_2CR / LESS_THAN_5CR / MORE_THAN_5CR",
-    )
+
+    turnover_details: Optional[
+        Literal["LESS_THAN_2CR", "LESS_THAN_5CR", "MORE_THAN_5CR"]
+    ] = None
+
+    # ----------------------------
+    # Assignment
+    # ----------------------------
     created_by: Optional[int] = Field(None, gt=0)
     rm_id: Optional[int] = Field(None, gt=0)
+
+    # ----------------------------
+    # Flags
+    # ----------------------------
     is_filing_needed: bool = True
     is_active: bool = True
-    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
+    is_rcm_applicable: bool = False
+
+    # ----------------------------
+    # Contact Information
+    # ----------------------------
+    mobile: Optional[
+        Annotated[str, Field(pattern=r"^\d{10}$")]
+    ] = None
+
     email: Optional[EmailStr] = None
     secondary_email: Optional[EmailStr] = None
 
-    # ----------------------------
-    # Normalize PAN & GSTIN
-    # ----------------------------
+    # =====================================================
+    # Normalization
+    # =====================================================
+
     @field_validator("pan", "gstin", mode="before")
     @classmethod
-    def uppercase_ids(cls, v):
+    def normalize_identifiers(cls, v):
         if v:
-            return v.upper()
+            return v.strip().upper()
         return v
 
-    # ----------------------------
-    # Normalize email (same as customer)
-    # ----------------------------
     @field_validator("email", "secondary_email", mode="before")
     @classmethod
     def normalize_email(cls, v):
@@ -72,15 +110,11 @@ class GSTRegistrationIn(BaseSchema):
             return v.strip().lower()
         return v
 
-    # ----------------------------
-    # Basic XSS sanitization (same as customer)
-    # ----------------------------
     @field_validator(
         "username",
         "ownership_category",
         "business_type",
         "state",
-        "turnover_details",
         mode="before",
     )
     @classmethod
@@ -94,33 +128,75 @@ class GSTRegistrationIn(BaseSchema):
 # GST Registration - Edit (Dynamic Update)
 # =========================================================
 
-class GSTRegistrationEditIn(BaseSchema):
-    gstin: Optional[Annotated[str, Field(pattern=r"^[0-9A-Z]{15}$")]] = None
+class GSTRegistrationEditIn(BaseModel):
+    """
+    Dynamic Edit Schema
+    ---------------------
+    • All fields optional
+    • DB handles uniqueness
+    • Safe normalization
+    """
+
+    # Identity Updates
+    gstin: Optional[
+        Annotated[str, Field(
+            pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
+        )]
+    ] = None
+
     username: Optional[str] = Field(None, min_length=3, max_length=100)
     password: Optional[str] = Field(None, min_length=8, max_length=128)
-    pan: Optional[Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]] = None
-    registration_type: Optional[str] = None
+
+    pan: Optional[
+        Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
+    ] = None
+
+    # Business
+    registration_type: Optional[
+        Literal["NORMAL", "COMPOSITION"]
+    ] = None
+
     ownership_category: Optional[str] = Field(None, max_length=100)
     business_type: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=100)
-    turnover_details: Optional[str] = None
-    registration_status: Optional[str] = None
+
+    turnover_details: Optional[
+        Literal["LESS_THAN_2CR", "LESS_THAN_5CR", "MORE_THAN_5CR"]
+    ] = None
+
+    registration_status: Optional[
+        Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
+    ] = None
+
     suspension_reason: Optional[str] = Field(None, max_length=255)
     cancellation_reason: Optional[str] = Field(None, max_length=255)
+
     approved_at: Optional[datetime] = None
+
+    # Flags
     is_rcm_applicable: Optional[bool] = None
     is_filing_needed: Optional[bool] = None
     is_active: Optional[bool] = None
-    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
+
+    # Contact
+    mobile: Optional[
+        Annotated[str, Field(pattern=r"^\d{10}$")]
+    ] = None
+
     email: Optional[EmailStr] = None
     secondary_email: Optional[EmailStr] = None
+
     rm_id: Optional[int] = Field(None, gt=0)
+
+    # =====================================================
+    # Normalization
+    # =====================================================
 
     @field_validator("pan", "gstin", mode="before")
     @classmethod
-    def uppercase_ids(cls, v):
+    def normalize_identifiers(cls, v):
         if v:
-            return v.upper()
+            return v.strip().upper()
         return v
 
     @field_validator("email", "secondary_email", mode="before")
@@ -136,9 +212,6 @@ class GSTRegistrationEditIn(BaseSchema):
         "ownership_category",
         "business_type",
         "state",
-        "turnover_details",
-        "registration_type",
-        "registration_status",
         mode="before",
     )
     @classmethod
@@ -146,8 +219,6 @@ class GSTRegistrationEditIn(BaseSchema):
         if isinstance(v, str):
             return html.escape(v.strip())
         return v
-
-
 # =========================================================
 # GST Registration - Response
 # =========================================================
@@ -213,12 +284,12 @@ class RegistrationPersonIn(BaseSchema):
 # ---------------------------------------------------------
 # EDIT SCHEMA (Dynamic Update)
 # ---------------------------------------------------------
-
 class RegistrationPersonEditIn(BaseSchema):
     """
     Schema for editing Registration Person (PATCH-like behavior)
     """
-
+    # 🔥 REQUIRED
+    customer_id: Optional[int] = Field(None, ge=1)
     full_name: Optional[str] = Field(None, min_length=2, max_length=150)
     role: Optional[str] = Field(None, min_length=2, max_length=100)
     pan: Optional[Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]] = None
@@ -226,7 +297,7 @@ class RegistrationPersonEditIn(BaseSchema):
     email: Optional[EmailStr] = None
     mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
     is_primary_customer: Optional[bool] = None
-    is_active: Optional[bool] = None   # 🔥 added (since column exists)
+    is_active: Optional[bool] = None
 
     # ---------------- Normalize Email ----------------
     @field_validator("email", mode="before")

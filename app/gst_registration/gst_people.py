@@ -219,7 +219,6 @@ async def create_registration_person(
         except Exception:
             log.exception("Unexpected error during registration person creation")
             raise HTTPException(status_code=500, detail="Internal server error.")
-
 # -------------------------------------------------------------------
 # LIST REGISTRATION PERSONS (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
@@ -234,6 +233,7 @@ async def create_registration_person(
 )
 async def list_registration_persons(
     gstin: Optional[str] = None,
+    person_id: Optional[int] = None,   # ✅ ADDED
     customer_id: Optional[int] = None,
     mobile: Optional[str] = None,
     full_name: Optional[str] = None,
@@ -304,6 +304,12 @@ async def list_registration_persons(
         if gstin and gstin.strip():
             conditions.append(f"gstin ILIKE ${param_index}")
             values.append(f"%{gstin.strip()}%")
+            param_index += 1
+
+        # ✅ NEW FILTER ADDED
+        if person_id is not None:
+            conditions.append(f"person_id = ${param_index}")
+            values.append(person_id)
             param_index += 1
 
         if customer_id is not None:
@@ -391,13 +397,18 @@ async def list_registration_persons(
             status_code=500,
             detail="Internal server error.",
         )
+# -------------------------------------------------------------------
+# GET REGISTRATION PERSON BY GSTIN (ACTIVE ONLY)
+# -------------------------------------------------------------------
 
-# -------------------------------------------------------------------
-# GET REGISTRATION PERSON BY PERSON_ID (ACTIVE ONLY)
-# -------------------------------------------------------------------
+def mask_gstin(gstin: str) -> str:
+    if not gstin or len(gstin) < 6:
+        return "****"
+    return f"{gstin[:2]}******{gstin[-3:]}"
+
 @router.get(
-    "/{person_id}/single_filter",
-    summary="Get Registration Person",
+    "/{gstin}/{person_id}/single_filter",
+    summary="Get Registration Person by GSTIN",
     responses={
         200: {"description": "Registration person details."},
         404: {"description": "Registration person not found."},
@@ -405,14 +416,16 @@ async def list_registration_persons(
     },
 )
 async def get_registration_person(
+    gstin: str,
     person_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
-    Get Registration Person by person_id (Production Standard)
+    Get Registration Person by GSTIN (Production Standard)
 
     ✔ Returns only active records
     ✔ Structured logging
+    ✔ GSTIN masked in logs
     ✔ Safe SQL parameterization
     ✔ Full DB exception coverage
     """
@@ -422,6 +435,8 @@ async def get_registration_person(
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    masked_gstin = mask_gstin(gstin)
 
     log = logging.LoggerAdapter(
         logger,
@@ -433,7 +448,8 @@ async def get_registration_person(
     )
 
     log.info(
-        "Incoming get registration person request | person_id=%s",
+        "Incoming get registration person request | gstin=%s | person_id=%s",
+        masked_gstin,
         person_id,
     )
 
@@ -443,7 +459,8 @@ async def get_registration_person(
     sql = f"""
         SELECT *
           FROM {DB_SCHEMA}.registration_persons
-         WHERE person_id = $1
+         WHERE gstin = $1
+           AND person_id = $2
            AND is_active = TRUE
          LIMIT 1
     """
@@ -462,14 +479,15 @@ async def get_registration_person(
 
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(sql, person_id)
+            row = await conn.fetchrow(sql, gstin, person_id)
 
         # --------------------------------------------------
         # Not Found Handling (Includes Inactive Records)
         # --------------------------------------------------
         if not row:
             log.warning(
-                "Registration person not found or inactive | person_id=%s",
+                "Registration person not found or inactive | gstin=%s | person_id=%s",
+                masked_gstin,
                 person_id,
             )
             raise HTTPException(
@@ -478,7 +496,8 @@ async def get_registration_person(
             )
 
         log.info(
-            "Registration person fetched successfully | person_id=%s",
+            "Registration person fetched successfully | gstin=%s | person_id=%s",
+            masked_gstin,
             person_id,
         )
 
@@ -500,7 +519,8 @@ async def get_registration_person(
     except asyncpg.PostgresError as e:
         log.error(
             "Database error during registration person fetch | "
-            "person_id=%s | error=%s",
+            "gstin=%s | person_id=%s | error=%s",
+            masked_gstin,
             person_id,
             str(e),
             exc_info=True,
@@ -516,7 +536,8 @@ async def get_registration_person(
     except Exception:
         log.exception(
             "Unexpected error during registration person fetch | "
-            "person_id=%s",
+            "gstin=%s | person_id=%s",
+            masked_gstin,
             person_id,
         )
         raise HTTPException(
@@ -524,13 +545,12 @@ async def get_registration_person(
             detail="Internal server error.",
         )
 
-
 # -------------------------------------------------------------------
-# EDIT REGISTRATION PERSON (Dynamic Update - Production Ready)
+# EDIT REGISTRATION PERSON (GSTIN + PERSON_ID)
 # -------------------------------------------------------------------
 @router.post(
-    "/{person_id}/edit",
-    summary="Edit Registration Person (Dynamic Update - Production Ready)",
+    "/{gstin}/{person_id}/edit",
+    summary="Edit Registration Person (Production Ready + Version Audit)",
     responses={
         200: {"description": "Registration person updated successfully."},
         400: {"description": "Validation failed or invalid data."},
@@ -540,37 +560,19 @@ async def get_registration_person(
     },
 )
 async def edit_registration_person(
+    gstin: str,
     person_id: int,
     payload: RegistrationPersonEditIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Production-Ready Dynamic Registration Person Update API
-
-    Features:
-    ---------
-    ✔ Dynamic field update (PATCH-like behavior)
-    ✔ Structured logging with request_id & emp_id
-    ✔ Field normalization (email, mobile, name)
-    ✔ Safe SQL parameterization
-    ✔ Transaction handling
-    ✔ Full DB exception coverage
-    ✔ Enterprise-grade error handling
-
-    Validation Responsibility:
-    --------------------------
-    1. Schema-Level (Pydantic - RegistrationPersonEditIn)
-    2. Database-Level:
-       - FOREIGN KEY constraints
-       - NOT NULL constraints
-       - Check constraints
-    """
 
     # --------------------------------------------------
-    # Request Context & Structured Logging
+    # Request Context
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    masked_gstin = mask_gstin(gstin)
 
     log = logging.LoggerAdapter(
         logger,
@@ -581,186 +583,218 @@ async def edit_registration_person(
         },
     )
 
-    log.info("Incoming edit registration person request | person_id=%s", person_id)
+    log.info(
+        "Incoming edit registration person | gstin=%s | person_id=%s",
+        masked_gstin,
+        person_id,
+    )
 
     # --------------------------------------------------
-    # Extract Only Provided Fields
+    # Extract Payload
     # --------------------------------------------------
     try:
         update_data = payload.model_dump(exclude_unset=True)
-    except Exception as e:
-        log.exception(
-            "Failed to serialize payload | person_id=%s | error=%s",
-            person_id,
-            str(e),
-        )
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid request payload.",
-        )
+    except Exception:
+        log.exception("Payload serialization failed | gstin=%s", masked_gstin)
+        raise HTTPException(status_code=400, detail="Invalid request payload.")
 
     if not update_data:
-        log.warning("No fields provided for update | person_id=%s", person_id)
         raise HTTPException(
             status_code=400,
             detail="At least one field must be provided for update.",
         )
 
     # --------------------------------------------------
-    # Normalize Critical Fields
+    # Normalize Fields
     # --------------------------------------------------
-    try:
-        if "email" in update_data and update_data["email"]:
-            update_data["email"] = update_data["email"].strip().lower()
+    if "email" in update_data and update_data["email"]:
+        update_data["email"] = update_data["email"].strip().lower()
 
-        if "mobile" in update_data and update_data["mobile"]:
-            update_data["mobile"] = update_data["mobile"].strip()
+    if "mobile" in update_data and update_data["mobile"]:
+        update_data["mobile"] = update_data["mobile"].strip()
 
-        if "full_name" in update_data and update_data["full_name"]:
-            update_data["full_name"] = update_data["full_name"].strip()
+    if "pan" in update_data and update_data["pan"]:
+        update_data["pan"] = update_data["pan"].strip().upper()
 
-        if "role" in update_data and update_data["role"]:
-            update_data["role"] = update_data["role"].strip()
+    if "aadhaar" in update_data and update_data["aadhaar"]:
+        update_data["aadhaar"] = update_data["aadhaar"].strip()
 
-    except Exception as e:
-        log.exception(
-            "Error during field normalization | person_id=%s | payload=%s | error=%s",
-            person_id,
-            update_data,
-            str(e),
-        )
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid field values provided.",
-        )
+    if "full_name" in update_data and update_data["full_name"]:
+        update_data["full_name"] = update_data["full_name"].strip()
+
+    if "role" in update_data and update_data["role"]:
+        update_data["role"] = update_data["role"].strip()
 
     # --------------------------------------------------
-    # Database Pool Acquisition
+    # DB Connection
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
-    except Exception as e:
-        log.exception(
-            "Database pool acquisition failed | person_id=%s | error=%s",
-            person_id,
-            str(e),
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection error.",
-        )
+    except Exception:
+        log.exception("DB pool acquisition failed | gstin=%s", masked_gstin)
+        raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
         try:
-            fields = []
-            values = []
-            param_index = 1
-
-            # --------------------------------------------------
-            # Build Dynamic SET Clause (SQL Injection Safe)
-            # --------------------------------------------------
-            for field_name, value in update_data.items():
-                fields.append(f"{field_name} = ${param_index}")
-                values.append(value)
-                param_index += 1
-
-            # NOTE:
-            # registration_persons table does NOT have updated_at column.
-            # So we are NOT appending updated_at = NOW()
-
-            sql = f"""
-                UPDATE {DB_SCHEMA}.registration_persons
-                   SET {', '.join(fields)}
-                 WHERE person_id = ${param_index}
-                 RETURNING *
-            """
-
-            values.append(person_id)
-
-            log.debug(
-                "Executing registration person update query | person_id=%s | fields=%s",
-                person_id,
-                list(update_data.keys()),
-            )
-
-            # --------------------------------------------------
-            # Transaction (Atomic Update)
-            # --------------------------------------------------
             async with conn.transaction():
-                row = await conn.fetchrow(sql, *values)
 
-            # --------------------------------------------------
-            # Not Found Handling
-            # --------------------------------------------------
-            if not row:
-                log.warning("Registration person not found | person_id=%s", person_id)
-                raise HTTPException(
-                    status_code=404,
-                    detail="Registration person not found.",
+                # --------------------------------------------------
+                # 1️⃣ Validate GST
+                # --------------------------------------------------
+                gst_row = await conn.fetchrow(
+                    f"""
+                    SELECT gstin, is_active
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE gstin = $1
+                     LIMIT 1
+                    """,
+                    gstin,
                 )
 
-            log.info(
-                "Registration person updated successfully | person_id=%s | updated_fields=%s",
-                person_id,
-                list(update_data.keys()),
-            )
+                if not gst_row:
+                    raise HTTPException(status_code=404, detail="GST not found.")
+
+                if gst_row["is_active"] is False:
+                    raise HTTPException(status_code=400, detail="GST is inactive.")
+
+                # --------------------------------------------------
+                # 2️⃣ Fetch OLD Person
+                # --------------------------------------------------
+                old_row = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                      FROM {DB_SCHEMA}.registration_persons
+                     WHERE gstin = $1
+                       AND person_id = $2
+                     LIMIT 1
+                    """,
+                    gstin,
+                    person_id,
+                )
+
+                if not old_row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Registration person not found.",
+                    )
+
+                # --------------------------------------------------
+                # 3️⃣ Validate Customer if updating
+                # --------------------------------------------------
+                if "customer_id" in update_data:
+
+                    customer_row = await conn.fetchrow(
+                        f"""
+                        SELECT customer_id, is_active
+                          FROM {DB_SCHEMA}.customers
+                         WHERE customer_id = $1
+                         LIMIT 1
+                        """,
+                        update_data["customer_id"],
+                    )
+
+                    if not customer_row:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Customer not found.",
+                        )
+
+                    if customer_row["is_active"] is False:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Customer is inactive.",
+                        )
+
+                # --------------------------------------------------
+                # 4️⃣ Build Dynamic Update
+                # --------------------------------------------------
+                fields = []
+                values = []
+                param_index = 1
+
+                for field_name, value in update_data.items():
+                    fields.append(f"{field_name} = ${param_index}")
+                    values.append(value)
+                    param_index += 1
+
+                fields.append("updated_at = NOW()")
+
+                sql = f"""
+                    UPDATE {DB_SCHEMA}.registration_persons
+                       SET {', '.join(fields)}
+                     WHERE gstin = ${param_index}
+                       AND person_id = ${param_index + 1}
+                     RETURNING *
+                """
+
+                values.append(gstin)
+                values.append(person_id)
+
+                new_row = await conn.fetchrow(sql, *values)
+
+                # --------------------------------------------------
+                # 5️⃣ Version Audit
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    emp_id,
+                    "REGISTRATION_PERSON",
+                    5,
+                    new_row["customer_id"],
+                    "UPDATE",
+                    json.dumps(dict(old_row), default=str),
+                    json.dumps(dict(new_row), default=str),
+                )
 
             return {
-                **dict(row),
+                **dict(new_row),
                 "message": "Registration person updated successfully.",
                 "request_id": request_id,
             }
 
         # --------------------------------------------------
-        # DATABASE EXCEPTION HANDLING (Full Coverage)
+        # UNIQUE VIOLATION HANDLING (Exact)
         # --------------------------------------------------
-        except asyncpg.exceptions.UniqueViolationError:
-            log.warning("Unique constraint violation | person_id=%s", person_id)
+        except asyncpg.exceptions.UniqueViolationError as e:
+
+            constraint_name = getattr(e, "constraint_name", "")
+
+            UNIQUE_MAP = {
+                "uq_reg_person_email": "Email already exists.",
+                "uq_reg_person_pan": "PAN already exists.",
+                "uq_reg_person_mobile": "Mobile already exists.",
+                "uq_reg_person_aadhaar": "Aadhaar already exists.",
+                "uq_reg_person_primary_per_gstin_customer":
+                    "Only one primary person allowed per GSTIN for this customer.",
+            }
+
             raise HTTPException(
                 status_code=409,
-                detail="Duplicate field value violates unique constraint.",
+                detail=UNIQUE_MAP.get(
+                    constraint_name,
+                    f"Duplicate value violates constraint: {constraint_name}",
+                ),
             )
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning("Foreign key violation | person_id=%s", person_id)
             raise HTTPException(
                 status_code=400,
                 detail="Invalid foreign key reference.",
             )
 
-        except asyncpg.exceptions.CheckViolationError:
-            log.warning("Check constraint violation | person_id=%s", person_id)
-            raise HTTPException(
-                status_code=400,
-                detail="Check constraint validation failed.",
-            )
-
-        except asyncpg.exceptions.NotNullViolationError:
-            log.warning("NOT NULL constraint violation | person_id=%s", person_id)
-            raise HTTPException(
-                status_code=400,
-                detail="Missing required field value.",
-            )
-
-        except asyncpg.exceptions.DataError:
-            log.error(
-                "Invalid data format error | person_id=%s",
-                person_id,
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid data format provided.",
-            )
-
-        except asyncpg.PostgresError as e:
-            log.error(
-                "Postgres database error during registration person update | "
-                "person_id=%s | error=%s",
-                person_id,
-                str(e),
-                exc_info=True,
-            )
+        except asyncpg.PostgresError:
             raise HTTPException(
                 status_code=500,
                 detail="Database error occurred.",
@@ -770,23 +804,17 @@ async def edit_registration_person(
             raise
 
         except Exception:
-            log.exception(
-                "Unexpected error during registration person update | person_id=%s",
-                person_id,
-            )
             raise HTTPException(
                 status_code=500,
                 detail="Internal server error.",
             )
-
-
 # =========================================================
-# SOFT DELETE REGISTRATION PERSON (is_active = false)
+# SOFT DELETE REGISTRATION PERSON (is_active = false) WITH VERSION AUDIT
 # =========================================================
 
 @router.delete(
-    "/{person_id}/soft_delete",
-    summary="Soft delete Registration Person by setting is_active to false",
+    "/{gstin}/{person_id}/soft_delete",
+    summary="Soft delete Registration Person (With Audit)",
     responses={
         200: {"description": "Registration person soft deleted successfully."},
         400: {"description": "Registration person already inactive."},
@@ -795,18 +823,20 @@ async def edit_registration_person(
     },
 )
 async def soft_delete_registration_person(
+    gstin: str,
     person_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Soft delete Registration Person by updating is_active to FALSE.
+    Soft Delete Registration Person with Version Audit
 
-    Behavior:
-    ---------
-    - Does NOT remove the row from DB
-    - Sets is_active = FALSE
-    - Updates updated_at timestamp
-    - Maintains referential integrity (FK safe)
+    ✔ Atomic transaction (Soft Delete + Version Insert)
+    ✔ Concurrency safe (AND is_active = TRUE)
+    ✔ json = NULL (for DELETE)
+    ✔ updated_json = NEW snapshot (is_active = FALSE)
+    ✔ action = 'DELETE'
+    ✔ Enterprise structured logging
+    ✔ Full asyncpg exception handling
     """
 
     # --------------------------------------------------
@@ -814,18 +844,22 @@ async def soft_delete_registration_person(
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+
+    masked_gstin = mask_gstin(gstin)
 
     log = logging.LoggerAdapter(
         logger,
         {
             "request_id": request_id,
-            "emp_id": current_emp_id,
+            "emp_id": emp_id,
             "api": "soft_delete_registration_person",
         },
     )
 
     log.info(
-        "Incoming soft delete registration person request | person_id=%s",
+        "Incoming soft delete registration person request | gstin=%s | person_id=%s",
+        masked_gstin,
         person_id,
     )
 
@@ -846,55 +880,91 @@ async def soft_delete_registration_person(
 
     async with pool.acquire() as conn:
         try:
-            # --------------------------------------------------
-            # Soft Delete Query
-            # --------------------------------------------------
-            sql = f"""
-                UPDATE {DB_SCHEMA}.registration_persons
-                   SET is_active = FALSE,
-                       updated_at = NOW()
-                 WHERE person_id = $1
-                   AND is_active = TRUE
-                 RETURNING *
-            """
-
             async with conn.transaction():
-                row = await conn.fetchrow(sql, person_id)
 
-            # --------------------------------------------------
-            # Not Found / Already Inactive Handling
-            # --------------------------------------------------
-            if not row:
-                check_sql = f"""
-                    SELECT person_id, is_active
-                      FROM {DB_SCHEMA}.registration_persons
-                     WHERE person_id = $1
+                # --------------------------------------------------
+                # 1️⃣ Perform Soft Delete (Concurrency Safe)
+                # --------------------------------------------------
+                sql = f"""
+                    UPDATE {DB_SCHEMA}.registration_persons
+                       SET is_active = FALSE,
+                           updated_at = NOW()
+                     WHERE gstin = $1
+                       AND person_id = $2
+                       AND is_active = TRUE
+                     RETURNING *
                 """
 
-                existing = await conn.fetchrow(check_sql, person_id)
+                row = await conn.fetchrow(sql, gstin, person_id)
 
-                if not existing:
-                    log.warning(
-                        "Registration person not found for soft delete | person_id=%s",
-                        person_id,
-                    )
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Registration person not found.",
-                    )
+                # --------------------------------------------------
+                # Not Found / Already Inactive Handling
+                # --------------------------------------------------
+                if not row:
+                    check_sql = f"""
+                        SELECT gstin, person_id, is_active
+                          FROM {DB_SCHEMA}.registration_persons
+                         WHERE gstin = $1
+                           AND person_id = $2
+                    """
 
-                if existing["is_active"] is False:
-                    log.warning(
-                        "Registration person already inactive | person_id=%s",
-                        person_id,
+                    existing = await conn.fetchrow(check_sql, gstin, person_id)
+
+                    if not existing:
+                        log.warning(
+                            "Registration person not found for soft delete | gstin=%s | person_id=%s",
+                            masked_gstin,
+                            person_id,
+                        )
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Registration person not found.",
+                        )
+
+                    if existing["is_active"] is False:
+                        log.warning(
+                            "Registration person already inactive | gstin=%s | person_id=%s",
+                            masked_gstin,
+                            person_id,
+                        )
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Registration person is already inactive.",
+                        )
+
+                # --------------------------------------------------
+                # 2️⃣ Insert Version Audit (DELETE)
+                # --------------------------------------------------
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
                     )
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Registration person is already inactive.",
-                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                """
+
+                deleted_snapshot = dict(row)
+
+                await conn.execute(
+                    version_sql,
+                    emp_id,
+                    "REGISTRATION_PERSON",
+                    5,  # ✅ NOT CHANGED
+                    deleted_snapshot["customer_id"],
+                    "DELETE",
+                    None,
+                    json.dumps(deleted_snapshot, default=str),
+                )
 
             log.info(
-                "Registration person soft deleted successfully | person_id=%s",
+                "Registration person soft deleted successfully with audit | gstin=%s | person_id=%s",
+                masked_gstin,
                 person_id,
             )
 
@@ -910,7 +980,8 @@ async def soft_delete_registration_person(
         except asyncpg.exceptions.ForeignKeyViolationError as e:
             log.error(
                 "Foreign key violation during registration person soft delete | "
-                "person_id=%s | error=%s",
+                "gstin=%s | person_id=%s | error=%s",
+                masked_gstin,
                 person_id,
                 str(e),
                 exc_info=True,
@@ -920,10 +991,39 @@ async def soft_delete_registration_person(
                 detail="Foreign key constraint violation.",
             )
 
+        except asyncpg.exceptions.CheckViolationError as e:
+            log.error(
+                "Audit constraint violation during registration person soft delete | "
+                "gstin=%s | person_id=%s | error=%s",
+                masked_gstin,
+                person_id,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Audit constraint validation failed.",
+            )
+
+        except asyncpg.exceptions.DataError as e:
+            log.error(
+                "Data error during registration person soft delete | "
+                "gstin=%s | person_id=%s | error=%s",
+                masked_gstin,
+                person_id,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid data format.",
+            )
+
         except asyncpg.PostgresError as e:
             log.error(
                 "Database error during registration person soft delete | "
-                "person_id=%s | error=%s",
+                "gstin=%s | person_id=%s | error=%s",
+                masked_gstin,
                 person_id,
                 str(e),
                 exc_info=True,
@@ -939,7 +1039,8 @@ async def soft_delete_registration_person(
         except Exception as e:
             log.exception(
                 "Unexpected error during registration person soft delete | "
-                "person_id=%s | error=%s",
+                "gstin=%s | person_id=%s | error=%s",
+                masked_gstin,
                 person_id,
                 str(e),
             )
