@@ -496,15 +496,7 @@ async def list_gst_registrations(
         )
 
         return {
-            "data": [dict(row) for row in rows],
-            "pagination": {
-                "total": total_count,
-                "limit": limit,
-                "offset": offset,
-                "returned": len(rows),
-            },
-            "request_id": request_id,
-            "message": "GST registrations filtered successfully.",
+            "data": [dict(row) for row in rows]
         }
 
     # --------------------------------------------------
