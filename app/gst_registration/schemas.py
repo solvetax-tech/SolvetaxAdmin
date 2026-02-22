@@ -281,22 +281,68 @@ class GSTRegistrationOut(BaseSchema):
     updated_at: datetime
     message: Optional[str] = None
 
+# =========================================================
+# Registration Person - Create
+# =========================================================
 
-# =========================================================
-# Registration Person
-# =========================================================
 class RegistrationPersonIn(BaseSchema):
-    customer_id: Optional[int] = Field(None, gt=0)
-    gstin: Annotated[str, Field(pattern=r"^[0-9A-Z]{15}$")]
+
+    # ----------------------------
+    # Ownership Mapping
+    # ----------------------------
+
+    gstin: Annotated[
+        str,
+        Field(pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$")
+    ]
+
     full_name: str = Field(..., min_length=2, max_length=150)
-    role: str = Field(..., min_length=2, max_length=100)
-    pan: Optional[Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]] = None
-    aadhaar: Optional[Annotated[str, Field(pattern=r"^\d{12}$")]] = None
+
+    designation: str = Field(..., min_length=2, max_length=100)
+
+    # ----------------------------
+    # Identity
+    # ----------------------------
+    pan: Optional[
+        Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
+    ] = None
+
+    aadhaar: Optional[
+        Annotated[str, Field(pattern=r"^\d{12}$")]
+    ] = None
+
+    # ----------------------------
+    # Contact
+    # ----------------------------
     email: Optional[EmailStr] = None
-    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
+
+    mobile: Optional[
+        Annotated[str, Field(pattern=r"^\d{10}$")]
+    ] = None
+
+    # ----------------------------
+    # Flags
+    # ----------------------------
     is_primary_customer: bool = False
 
-    # ---------------- Normalize Email ----------------
+    # =====================================================
+    # 🔥 Normalization (CRITICAL)
+    # =====================================================
+
+    @field_validator("gstin", "pan", mode="before")
+    @classmethod
+    def normalize_upper_identifiers(cls, v):
+        if v:
+            return v.strip().upper()
+        return v
+
+    @field_validator("aadhaar", "mobile", mode="before")
+    @classmethod
+    def normalize_trim_numeric(cls, v):
+        if v:
+            return v.strip()
+        return v
+
     @field_validator("email", mode="before")
     @classmethod
     def normalize_email(cls, v):
@@ -304,34 +350,69 @@ class RegistrationPersonIn(BaseSchema):
             return v.strip().lower()
         return v
 
-    # ---------------- Sanitize Strings ----------------
-    @field_validator("full_name", "role", mode="before")
+    @field_validator("full_name", "designation", mode="before")
     @classmethod
     def sanitize_strings(cls, v):
         if isinstance(v, str):
             return html.escape(v.strip())
         return v
+# =========================================================
+# Registration Person - Edit (Dynamic Update)
+# =========================================================
 
-
-# ---------------------------------------------------------
-# EDIT SCHEMA (Dynamic Update)
-# ---------------------------------------------------------
 class RegistrationPersonEditIn(BaseSchema):
-    """
-    Schema for editing Registration Person (PATCH-like behavior)
-    """
-    # 🔥 REQUIRED
-    customer_id: Optional[int] = Field(None, ge=1)
+
+    # ----------------------------
+    # Optional Fields
+    # ----------------------------
+    customer_id: Optional[int] = Field(None, gt=0)
+
+    gstin: Optional[
+        Annotated[str, Field(
+            pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
+        )]
+    ] = None
+
     full_name: Optional[str] = Field(None, min_length=2, max_length=150)
-    role: Optional[str] = Field(None, min_length=2, max_length=100)
-    pan: Optional[Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]] = None
-    aadhaar: Optional[Annotated[str, Field(pattern=r"^\d{12}$")]] = None
+
+    designation: Optional[str] = Field(None, min_length=2, max_length=100)
+
+    pan: Optional[
+        Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
+    ] = None
+
+    aadhaar: Optional[
+        Annotated[str, Field(pattern=r"^\d{12}$")]
+    ] = None
+
     email: Optional[EmailStr] = None
-    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
+
+    mobile: Optional[
+        Annotated[str, Field(pattern=r"^\d{10}$")]
+    ] = None
+
     is_primary_customer: Optional[bool] = None
+
     is_active: Optional[bool] = None
 
-    # ---------------- Normalize Email ----------------
+    # =====================================================
+    # 🔥 Normalization
+    # =====================================================
+
+    @field_validator("gstin", "pan", mode="before")
+    @classmethod
+    def normalize_upper_identifiers(cls, v):
+        if v:
+            return v.strip().upper()
+        return v
+
+    @field_validator("aadhaar", "mobile", mode="before")
+    @classmethod
+    def normalize_trim_numeric(cls, v):
+        if v:
+            return v.strip()
+        return v
+
     @field_validator("email", mode="before")
     @classmethod
     def normalize_email(cls, v):
@@ -339,14 +420,12 @@ class RegistrationPersonEditIn(BaseSchema):
             return v.strip().lower()
         return v
 
-    # ---------------- Sanitize Strings ----------------
-    @field_validator("full_name", "role", mode="before")
+    @field_validator("full_name", "designation", mode="before")
     @classmethod
     def sanitize_strings(cls, v):
         if isinstance(v, str):
             return html.escape(v.strip())
         return v
-
 
 # ---------------------------------------------------------
 # OUTPUT SCHEMA

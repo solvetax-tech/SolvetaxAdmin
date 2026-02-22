@@ -321,18 +321,20 @@ async def list_gst_registrations(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
-    Enterprise Grade Dynamic GST Filtering
-    ✔ Fully Index Optimized
-    ✔ Pagination Safe
-    ✔ Deterministic Ordering
-    ✔ Total Count Included
-    ✔ IST Safe
+    Enterprise Grade GST Filtering
+
+    ✔ Fully index aligned
+    ✔ Trim + case-safe filtering
+    ✔ Deterministic ordering
+    ✔ Pagination metadata returned
+    ✔ Structured logging
+    ✔ Total count for UI
     """
 
     # --------------------------------------------------
     # Request Context
     # --------------------------------------------------
-    request_id = generate_uuid()
+    request_id = str(uuid.uuid4())
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
     log = logging.LoggerAdapter(
@@ -341,7 +343,7 @@ async def list_gst_registrations(
     )
 
     log.info(
-        "Incoming GST filter request | limit=%s offset=%s",
+        "Incoming GST filter | limit=%s offset=%s",
         limit,
         offset,
     )
@@ -356,7 +358,7 @@ async def list_gst_registrations(
         )
 
     # --------------------------------------------------
-    # Database Pool
+    # DB Pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
@@ -431,7 +433,7 @@ async def list_gst_registrations(
             param_index += 1
 
         # --------------------------------------------------
-        # Active Filtering Logic
+        # Active Filtering Pattern (Enterprise Standard)
         # --------------------------------------------------
 
         if is_active is not None:
@@ -442,7 +444,7 @@ async def list_gst_registrations(
             conditions.append("is_active = TRUE")
 
         # --------------------------------------------------
-        # Date Range Filtering
+        # Date Filtering
         # --------------------------------------------------
 
         if from_date:
@@ -456,7 +458,7 @@ async def list_gst_registrations(
             param_index += 1
 
         # --------------------------------------------------
-        # WHERE Clause Builder
+        # WHERE Builder
         # --------------------------------------------------
 
         where_clause = (
@@ -464,11 +466,11 @@ async def list_gst_registrations(
         )
 
         # --------------------------------------------------
-        # Total Count Query (for UI pagination)
+        # Queries
         # --------------------------------------------------
 
         count_sql = f"""
-            SELECT COUNT(*) 
+            SELECT COUNT(*)
               FROM {DB_SCHEMA}.gst_registration
               {where_clause}
         """
@@ -488,13 +490,21 @@ async def list_gst_registrations(
             rows = await conn.fetch(data_sql, *values_with_pagination)
 
         log.info(
-            "GST filter success | count=%s total=%s",
+            "GST filter success | returned=%s total=%s",
             len(rows),
             total_count,
         )
 
         return {
-            "data": [dict(row) for row in rows]
+            "data": [dict(row) for row in rows],
+            "pagination": {
+                "total": total_count,
+                "limit": limit,
+                "offset": offset,
+                "returned": len(rows),
+            },
+            "request_id": request_id,
+            "message": "GST registrations filtered successfully.",
         }
 
     # --------------------------------------------------
@@ -759,11 +769,26 @@ async def edit_gst_registration(
                 detail="Invalid foreign key reference provided.",
             )
 
-        except asyncpg.exceptions.CheckViolationError:
+        # --------------------------------------------------
+# CHECK CONSTRAINT HANDLING (DETAILED)
+# --------------------------------------------------
+        except asyncpg.exceptions.CheckViolationError as e:
+            constraint = getattr(e, "constraint_name", None)
+            CHECK_MAP = {
+                "chk_gst_format":"Invalid GSTIN format.",
+                "chk_pan_format":"Invalid PAN format. Expected format: ABCDE1234F.",
+                "chk_mobile_format":"Invalid mobile number format. Must be 10 digits.",
+                "chk_secondary_email_format":"Invalid secondary email format.",
+                "chk_gstin_pan_match":"PAN does not match GSTIN. PAN must match characters 3–12 of GSTIN.",
+                "chk_approved_logic":"Invalid approved status logic. If status is APPROVED, approved_at must be set. Otherwise it must be NULL.",
+                }
             raise HTTPException(
                 status_code=400,
-                detail="Check constraint validation failed (PAN/GST/Approved logic).",
-            )
+                detail=CHECK_MAP.get(
+                    constraint,
+                    f"Data violates constraint: {constraint}",
+                    ),
+                    )
 
         except asyncpg.exceptions.NotNullViolationError:
             raise HTTPException(
