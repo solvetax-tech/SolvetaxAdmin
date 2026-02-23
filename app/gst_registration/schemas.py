@@ -281,20 +281,19 @@ class GSTRegistrationOut(BaseSchema):
     updated_at: datetime
     message: Optional[str] = None
 
-# =========================================================
-# Registration Person - Create
-# =========================================================
 
+# --------------------------------------------------
+# Input Schema for Registration Person
+# --------------------------------------------------
 class RegistrationPersonIn(BaseSchema):
 
     # ----------------------------
     # Ownership Mapping
     # ----------------------------
-
-    gstin: Annotated[
-        str,
-        Field(pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$")
-    ]
+    gstin: str = Field(
+        ...,
+        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
+    )
 
     full_name: str = Field(..., min_length=2, max_length=150)
 
@@ -303,22 +302,22 @@ class RegistrationPersonIn(BaseSchema):
     # ----------------------------
     # Identity
     # ----------------------------
-    pan: Optional[
-        Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
-    ] = None
+    pan: Optional[str] = Field(
+        None, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$"
+    )
 
-    aadhaar: Optional[
-        Annotated[str, Field(pattern=r"^\d{12}$")]
-    ] = None
+    aadhaar: Optional[str] = Field(
+        None, pattern=r"^\d{12}$"
+    )
 
     # ----------------------------
     # Contact
     # ----------------------------
     email: Optional[EmailStr] = None
 
-    mobile: Optional[
-        Annotated[str, Field(pattern=r"^\d{10}$")]
-    ] = None
+    mobile: Optional[str] = Field(
+        None, pattern=r"^\d{10}$"
+    )
 
     # ----------------------------
     # Flags
@@ -328,7 +327,6 @@ class RegistrationPersonIn(BaseSchema):
     # =====================================================
     # 🔥 Normalization (CRITICAL)
     # =====================================================
-
     @field_validator("gstin", "pan", mode="before")
     @classmethod
     def normalize_upper_identifiers(cls, v):
@@ -361,45 +359,30 @@ class RegistrationPersonIn(BaseSchema):
 # =========================================================
 
 class RegistrationPersonEditIn(BaseSchema):
+    """
+    Edit Registration Person (Dynamic Update)
+    Only editable fields are included.
+    """
 
     # ----------------------------
-    # Optional Fields
+    # Editable Fields
     # ----------------------------
-    customer_id: Optional[int] = Field(None, gt=0)
-
-    gstin: Optional[
-        Annotated[str, Field(
-            pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
-        )]
-    ] = None
-
     full_name: Optional[str] = Field(None, min_length=2, max_length=150)
-
     designation: Optional[str] = Field(None, min_length=2, max_length=100)
 
-    pan: Optional[
-        Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
-    ] = None
-
-    aadhaar: Optional[
-        Annotated[str, Field(pattern=r"^\d{12}$")]
-    ] = None
+    pan: Optional[Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]] = None
+    aadhaar: Optional[Annotated[str, Field(pattern=r"^\d{12}$")]] = None
 
     email: Optional[EmailStr] = None
-
-    mobile: Optional[
-        Annotated[str, Field(pattern=r"^\d{10}$")]
-    ] = None
+    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
 
     is_primary_customer: Optional[bool] = None
-
     is_active: Optional[bool] = None
 
     # =====================================================
     # 🔥 Normalization
     # =====================================================
-
-    @field_validator("gstin", "pan", mode="before")
+    @field_validator("pan", mode="before")
     @classmethod
     def normalize_upper_identifiers(cls, v):
         if v:
@@ -426,7 +409,6 @@ class RegistrationPersonEditIn(BaseSchema):
         if isinstance(v, str):
             return html.escape(v.strip())
         return v
-
 # ---------------------------------------------------------
 # OUTPUT SCHEMA
 # ---------------------------------------------------------
@@ -453,121 +435,52 @@ class RegistrationPersonOut(BaseSchema):
     is_active: bool
 
     message: Optional[str] = None
+
+# -------------------------------------------------------------------
+# SCHEMA: RegistrationDocumentIn
+# -------------------------------------------------------------------
 class RegistrationDocumentIn(BaseSchema):
-
-    gstin: Annotated[str, Field(
-        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
-    )]
-
-    person_id: Optional[int] = Field(None, gt=0)
-
+    person_id: Optional[int] = Field(..., gt=0)
     document_type: str = Field(..., min_length=2, max_length=50)
-
     document_url: HttpUrl
-
-    ownership_category: Optional[str] = Field(None, max_length=50)
-
-    mobile: Optional[Annotated[str, Field(
-        pattern=r"^\d{10}$"
-    )]] = None
+    verified: Optional[bool] = Field(False, description="Set True if document is verified on creation")
 
     # -----------------------------------------------------
     # Normalization
     # -----------------------------------------------------
-
-    @field_validator("gstin", mode="before")
     @classmethod
-    def normalize_gstin(cls, v):
-        if v:
-            return v.strip().upper()
+    def normalize_person_id(cls, v):
         return v
 
-    @field_validator("document_type", "ownership_category", mode="before")
+    @field_validator("document_type", mode="before")
     @classmethod
     def sanitize_strings(cls, v):
         if isinstance(v, str):
             return html.escape(v.strip().upper())
-        return v
-
-    @field_validator("mobile", mode="before")
-    @classmethod
-    def normalize_mobile(cls, v):
-        if v:
-            return v.strip()
         return v
 
 class RegistrationDocumentEditIn(BaseSchema):
-
     document_type: Optional[str] = Field(None, min_length=2, max_length=50)
-
     document_url: Optional[HttpUrl] = None
-
-    ownership_category: Optional[str] = Field(None, max_length=50)
-
     verified: Optional[bool] = None
-
-    verified_by: Optional[int] = Field(None, gt=0)
-
-    verified_at: Optional[datetime] = None
-
-    mobile: Optional[Annotated[str, Field(
-        pattern=r"^\d{10}$"
-    )]] = None
-
-    is_active: Optional[bool] = None
 
     # -----------------------------------------------------
     # Normalization
     # -----------------------------------------------------
-
-    @field_validator("document_type", "ownership_category", mode="before")
+    @field_validator("document_type", mode="before")
     @classmethod
-    def sanitize_strings(cls, v):
+    def normalize_strings(cls, v):
         if isinstance(v, str):
-            return html.escape(v.strip().upper())
-        return v
-
-    @field_validator("mobile", mode="before")
-    @classmethod
-    def normalize_mobile(cls, v):
-        if v:
-            return v.strip()
+            return v.strip().upper()
         return v
 
     # -----------------------------------------------------
-    # Verification Logic Validation (Aligned with DB)
+    # Verification Logic Validation (Patch-Safe)
     # -----------------------------------------------------
-
     @model_validator(mode="after")
     def validate_verification_logic(self):
-
-        # If verified is being set to TRUE
-        if self.verified is True:
-
-            if not self.verified_by:
-                raise ValueError(
-                    "verified_by is required when verified = TRUE"
-                )
-
-            if not self.verified_at:
-                raise ValueError(
-                    "verified_at is required when verified = TRUE"
-                )
-
-        # If verified is explicitly FALSE,
-        # verified_by and verified_at should not be provided
-        if self.verified is False:
-
-            if self.verified_by is not None:
-                raise ValueError(
-                    "verified_by must be NULL when verified = FALSE"
-                )
-
-            if self.verified_at is not None:
-                raise ValueError(
-                    "verified_at must be NULL when verified = FALSE"
-                )
-
+        if self.verified is not None and not isinstance(self.verified, bool):
+            raise ValueError("verified must be a boolean if provided")
         return self
 # ---------------------------------------------------------
 # RESPONSE SCHEMA
