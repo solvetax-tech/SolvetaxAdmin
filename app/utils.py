@@ -116,76 +116,6 @@ def passwords_match(password1: str, password2: str) -> bool:
 
 
 
-def validate_mobile(v):
-    if v is not None and (not v.isdigit() or len(v) != 10):
-        raise ValueError('Mobile number must be exactly 10 digits')
-    return v
-
-def validate_gstin(v):
-    if v is not None and (not v.isdigit() or len(v) != 15):
-        raise ValueError('GSTIN must be exactly 15 alphanumeric characters')
-    return v
-
-def validate_pan(v):
-    if v is not None:
-        pattern = re.compile("^[A-Z]{5}[0-9]{4}[A-Z]$")
-        if not pattern.match(v):
-            raise ValueError('PAN must be 10 characters: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F)')
-    return v
-
-def validate_aadhaar(v):
-    if v is not None:
-        if not (v.isdigit() and len(v) == 12):
-            raise ValueError('Aadhaar must be exactly 12 digits')
-    return v
-
-def validate_email(v):
-    if v is not None:
-        email_regex = r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)"
-        if not re.match(email_regex, v):
-            raise ValueError('Invalid email address')
-    return v
-
-def validate_url(v):
-    if v is not None:
-        url_regex = re.compile(
-            r'^(https?://)?'  # http:// or https://
-            r'(([A-Za-z0-9-]+\.)+[A-Za-z]{2,6})'  # domain...
-            r'(:\d+)?'  # optional port
-            r'(/[-A-Za-z0-9@:%._\+~#=]*)*'  # path
-            r'(\?[;&A-Za-z0-9%_.,=+-]*)?'  # query string
-            r'(#[A-Za-z0-9_-]*)?$'  # fragment locator
-        )
-        if not url_regex.match(v):
-            raise ValueError('Invalid URL')
-    return v
-
-async def check_duplicate_mobile_pan_aadhaar_for_gstin(pool, gstin: str, mobile: str = None, pan: str = None, aadhaar: str = None, exclude_id: str = None):
-    conditions = ["gstin = $1"]
-    values = [gstin]
-
-    if mobile is not None:
-        conditions.append("mobile = ${}".format(len(values) + 1))
-        values.append(mobile)
-    if pan is not None:
-        conditions.append("pan = ${}".format(len(values) + 1))
-        values.append(pan)
-    if aadhaar is not None:
-        conditions.append("aadhaar = ${}".format(len(values) + 1))
-        values.append(aadhaar)
-
-    if exclude_id is not None:
-        conditions.append("id != ${}".format(len(values) + 1))
-        values.append(exclude_id)
-
-    where_clause = " AND ".join(conditions)
-
-    sql = f"SELECT 1 FROM {DB_SCHEMA}.gst_registration WHERE {where_clause} LIMIT 1"
-
-    exists = await pool.fetchval(sql, *values)
-    return bool(exists)
-
-
 async def get_user_permissions(emp_id: int, conn, DB_SCHEMA="solvetax") -> Dict[str, Any]:
     """
     Fetch permissions from DB based on employee_roles only (no group_roles).
@@ -244,3 +174,21 @@ async def get_user_permissions(emp_id: int, conn, DB_SCHEMA="solvetax") -> Dict[
     except Exception as e:
         logging.error(f"[permissions] Error fetching permissions for emp_id={emp_id}: {e}")
         return {"platform": {}}
+
+import secrets
+import hashlib
+
+# --------------------------------------------------
+# Generate Secure Refresh Token
+# --------------------------------------------------
+def generate_refresh_token() -> str:
+    return secrets.token_urlsafe(64)
+
+
+# --------------------------------------------------
+# Hash Refresh Token (Store only hash in DB)
+# --------------------------------------------------
+def hash_refresh_token(refresh_token: str) -> str:
+    hash_obj = hashlib.sha256()
+    hash_obj.update(refresh_token.encode("utf-8"))
+    return hash_obj.hexdigest()
