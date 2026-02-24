@@ -876,7 +876,7 @@ async def soft_delete_registration_person(
 # (Enterprise + Version Audit + Cascade Docs + GSTIN & Customer Active Check)
 # -------------------------------------------------------------------
 
-@router.put(
+@router.post(
     "/{person_id}/activate",
     summary="Activate Registration Person (Production Ready + Audit + Cascade Documents)",
     responses={

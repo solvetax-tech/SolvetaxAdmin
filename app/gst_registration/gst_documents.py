@@ -429,7 +429,7 @@ async def list_registration_documents(
         log.exception("Unexpected error during registration document filtering")
         raise HTTPException(status_code=500, detail="Internal server error.")
 
-        
+
 @router.post(
     "/{document_id}/edit",
     summary="Edit Registration Document (Flexible Verified + Version Audit)",
@@ -798,12 +798,14 @@ async def soft_delete_registration_document(
         except Exception:
             log.exception("Unexpected error during document soft delete")
             raise HTTPException(status_code=500, detail="Internal server error.")
+
+
 # -------------------------------------------------------------------
 # ACTIVATE REGISTRATION DOCUMENT
 # (Enterprise + Version Audit + Concurrency Safe)
 # -------------------------------------------------------------------
 
-@router.put(
+@router.post(
     "/{document_id}/activate",
     summary="Activate Registration Document (Production Ready + Audit)",
     responses={
@@ -818,28 +820,16 @@ async def activate_registration_document(
     document_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    ✔ Atomic transaction (Activate + Version Insert)
-    ✔ Concurrency safe (AND is_active = FALSE)
-    ✔ updated_json = NEW snapshot
-    ✔ Person-state enforcement (must be active)
-    ✔ Verified flexible (optional log if verified=True)
-    ✔ Structured logging
-    ✔ Full exception mapping
-    """
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
-    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
         {
             "request_id": request_id,
-            "emp_id": current_emp_id,
+            "emp_id": emp_id,
             "api": "activate_registration_document",
         },
     )
@@ -860,68 +850,85 @@ async def activate_registration_document(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Activate Document (Concurrency Safe)
+                # 1️⃣ Fetch Document WITH ROW LOCK (Prevents race)
                 # --------------------------------------------------
-                activate_sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_documents
-                       SET is_active = TRUE,
-                           updated_at = NOW()
+                doc_row = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                      FROM {DB_SCHEMA}.registration_documents
                      WHERE document_id = $1
-                       AND is_active = FALSE
-                     RETURNING *
-                """
-                activated_row = await conn.fetchrow(activate_sql, document_id)
+                     FOR UPDATE
+                    """,
+                    document_id,
+                )
 
-                # --------------------------------------------------
-                # If nothing updated → check existence
-                # --------------------------------------------------
-                if not activated_row:
-                    existing_row = await conn.fetchrow(
-                        f"""
-                        SELECT document_id, is_active
-                          FROM {DB_SCHEMA}.registration_documents
-                         WHERE document_id = $1
-                        """,
-                        document_id,
+                if not doc_row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Registration document not found.",
                     )
 
-                    if not existing_row:
-                        raise HTTPException(status_code=404, detail="Registration document not found.")
-
-                    if existing_row["is_active"] is True:
-                        raise HTTPException(status_code=400, detail="Registration document already active.")
-
-                    raise HTTPException(status_code=409, detail="Document state changed. Please retry.")
+                if doc_row["is_active"]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Registration document already active.",
+                    )
 
                 # --------------------------------------------------
-                # 2️⃣ Business Rule Enforcement (Person must be active)
+                # 2️⃣ Validate Parent Person BEFORE Activation
                 # --------------------------------------------------
-                if activated_row["person_id"]:
+                if doc_row["person_id"]:
                     person_row = await conn.fetchrow(
                         f"""
                         SELECT is_active
                           FROM {DB_SCHEMA}.registration_persons
                          WHERE person_id = $1
                         """,
-                        activated_row["person_id"],
+                        doc_row["person_id"],
                     )
 
-                    if person_row and person_row["is_active"] is False:
+                    if not person_row:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Associated person not found.",
+                        )
+
+                    if person_row["is_active"] is False:
                         raise HTTPException(
                             status_code=400,
                             detail="Cannot activate document: activate the associated person first.",
                         )
 
-                # Optional: log if activating a verified document
-                if activated_row["verified"]:
+                # --------------------------------------------------
+                # 3️⃣ Activate Document (Safe Update)
+                # --------------------------------------------------
+                activated_row = await conn.fetchrow(
+                    f"""
+                    UPDATE {DB_SCHEMA}.registration_documents
+                       SET is_active = TRUE,
+                           updated_at = NOW()
+                     WHERE document_id = $1
+                       AND is_active = FALSE
+                     RETURNING *
+                    """,
+                    document_id,
+                )
+
+                if not activated_row:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Document state changed. Please retry.",
+                    )
+
+                # Optional: Log if verified document
+                if activated_row.get("verified"):
                     log.warning(
-                        "Activating a verified document | document_id=%s | emp_id=%s",
+                        "Activating verified document | document_id=%s",
                         document_id,
-                        emp_id,
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Version Audit Insert
+                # 4️⃣ Version Audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -942,8 +949,8 @@ async def activate_registration_document(
                     document_id,
                     activated_row["customer_id"],
                     "ACTIVATE",
-                    None,  # json = NULL
-                    json.dumps(dict(activated_row), default=str),  # updated snapshot
+                    None,
+                    json.dumps(dict(activated_row), default=str),
                 )
 
             log.info("Document activated successfully | document_id=%s", document_id)
@@ -976,4 +983,3 @@ async def activate_registration_document(
         except Exception:
             log.exception("Unexpected error during document activation")
             raise HTTPException(status_code=500, detail="Internal server error.")
-

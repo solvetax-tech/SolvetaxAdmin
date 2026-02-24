@@ -32,14 +32,13 @@ class GSTConfigOut(BaseModel):
 # =========================================================
 # GST Registration - Create
 # =========================================================
-
 class GSTRegistrationIn(BaseModel):
     """
     Create GST Registration Schema
     --------------------------------
-    • Dynamic config fields
-    • Literal used only for workflow status
-    • Business workflow validation included
+    • Strict validation aligned with DB constraints
+    • System fields (is_active, approved_at) NOT exposed
+    • Workflow validation enforced
     """
 
     # ----------------------------
@@ -64,7 +63,12 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     # Workflow Status (Controlled)
     # ----------------------------
-    registration_status: Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"] = "DRAFT"
+    registration_status: Literal[
+        "DRAFT",
+        "APPROVED",
+        "SUSPENDED",
+        "CANCELLED",
+    ] = "DRAFT"
 
     suspension_reason: Optional[str] = Field(None, max_length=255)
     cancellation_reason: Optional[str] = Field(None, max_length=255)
@@ -76,10 +80,9 @@ class GSTRegistrationIn(BaseModel):
     rm_id: Optional[int] = Field(None, gt=0)
 
     # ----------------------------
-    # Flags
+    # Flags (System Controlled)
     # ----------------------------
     is_filing_needed: bool = True
-    is_active: bool = True
     is_rcm_applicable: bool = False
 
     # ----------------------------
@@ -100,6 +103,13 @@ class GSTRegistrationIn(BaseModel):
             return v.strip().upper()
         return v
 
+    @field_validator("username", mode="before")
+    @classmethod
+    def normalize_username(cls, v):
+        if isinstance(v, str):
+            return html.escape(v.strip().lower())
+        return v
+
     @field_validator(
         "registration_type",
         "ownership_category",
@@ -121,11 +131,11 @@ class GSTRegistrationIn(BaseModel):
             return v.strip().lower()
         return v
 
-    @field_validator("username", mode="before")
+    @field_validator("mobile", mode="before")
     @classmethod
-    def sanitize_username(cls, v):
-        if isinstance(v, str):
-            return html.escape(v.strip())
+    def normalize_mobile(cls, v):
+        if v:
+            return v.strip()
         return v
 
     # =====================================================
@@ -136,20 +146,18 @@ class GSTRegistrationIn(BaseModel):
     def validate_status_logic(self):
 
         if self.registration_status == "SUSPENDED" and not self.suspension_reason:
-            raise ValueError("suspension_reason is required when status is SUSPENDED")
+            raise ValueError(
+                "suspension_reason is required when status is SUSPENDED"
+            )
 
         if self.registration_status == "CANCELLED" and not self.cancellation_reason:
-            raise ValueError("cancellation_reason is required when status is CANCELLED")
+            raise ValueError(
+                "cancellation_reason is required when status is CANCELLED"
+            )
 
         return self
-# =========================================================
-# GST Registration - Edit (Dynamic Update)
-# =========================================================
 class GSTRegistrationEditIn(BaseModel):
 
-    # ----------------------------
-    # Identity
-    # ----------------------------
     gstin: Optional[
         Annotated[str, Field(
             pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
@@ -163,18 +171,12 @@ class GSTRegistrationEditIn(BaseModel):
         Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
     ] = None
 
-    # ----------------------------
-    # Business
-    # ----------------------------
     registration_type: Optional[str] = Field(None, max_length=50)
     ownership_category: Optional[str] = Field(None, max_length=100)
     business_type: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=100)
     turnover_details: Optional[str] = Field(None, max_length=50)
 
-    # ----------------------------
-    # Status (Restricted)
-    # ----------------------------
     registration_status: Optional[
         Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
     ] = None
@@ -182,16 +184,10 @@ class GSTRegistrationEditIn(BaseModel):
     suspension_reason: Optional[str] = Field(None, max_length=255)
     cancellation_reason: Optional[str] = Field(None, max_length=255)
 
-    # ----------------------------
-    # Flags
-    # ----------------------------
     is_rcm_applicable: Optional[bool] = None
     is_filing_needed: Optional[bool] = None
     is_active: Optional[bool] = None
 
-    # ----------------------------
-    # Contact
-    # ----------------------------
     mobile: Optional[
         Annotated[str, Field(pattern=r"^\d{10}$")]
     ] = None
@@ -201,15 +197,22 @@ class GSTRegistrationEditIn(BaseModel):
 
     rm_id: Optional[int] = Field(None, gt=0)
 
-    # =====================================================
+    # ----------------------------
     # Normalization
-    # =====================================================
+    # ----------------------------
 
     @field_validator("pan", "gstin", mode="before")
     @classmethod
     def normalize_identifiers(cls, v):
         if v:
             return v.strip().upper()
+        return v
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def normalize_username(cls, v):
+        if isinstance(v, str):
+            return v.strip().lower()
         return v
 
     @field_validator(
@@ -233,9 +236,12 @@ class GSTRegistrationEditIn(BaseModel):
             return v.strip().lower()
         return v
 
-    # =====================================================
-    # Status Logic Validation
-    # =====================================================
+    @field_validator("mobile", mode="before")
+    @classmethod
+    def normalize_mobile(cls, v):
+        if v:
+            return v.strip()
+        return v
 
     @model_validator(mode="after")
     def validate_status_logic(self):
