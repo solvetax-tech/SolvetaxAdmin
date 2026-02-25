@@ -36,18 +36,29 @@ def _get_client_ip(request: Request | None) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "Unknown"
-
-
 async def validate_token(token: str, request: Request | None = None):
     try:
+        if not JWT_SECRET or not JWT_ALGORITHM:
+            return False, "Server misconfiguration"
+
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
 
-        emp_id = int(payload.get("sub"))
-        jti = payload.get("jti")
+        emp_id_raw = payload.get("sub")
+        if not emp_id_raw:
+            return False, "Invalid token payload"
+
+        try:
+            emp_id = int(emp_id_raw)
+        except (TypeError, ValueError):
+            return False, "Invalid token subject"
 
         pool = await get_db_pool()
 
         async with pool.acquire() as conn:
+
+            # --------------------------------------------------
+            # 1️⃣ Session Check
+            # --------------------------------------------------
             session = await conn.fetchrow(
                 f"""
                 SELECT *
@@ -63,20 +74,40 @@ async def validate_token(token: str, request: Request | None = None):
             if not session:
                 return False, "Session not active"
 
+            # --------------------------------------------------
+            # 2️⃣ Expiry Check
+            # --------------------------------------------------
             expires_at = session["expires_at"]
 
-            if expires_at:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if expires_at < datetime.now(timezone.utc):
-                    await conn.execute(
-                        f"""
-                        UPDATE {DB_SCHEMA}.session_token
-                        SET is_active=false
-                        WHERE id=$1
-                        """,
-                        session["id"]
-                    )
-                    return False, "Session expired"
+            if expires_at and expires_at < datetime.now(timezone.utc):
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.session_token
+                    SET is_active=false
+                    WHERE id=$1
+                    """,
+                    session["id"]
+                )
+                return False, "Session expired"
+
+            # --------------------------------------------------
+            # 3️⃣ 🔥 EMPLOYEE ACTIVE RE-CHECK (ADD THIS)
+            # --------------------------------------------------
+            employee = await conn.fetchrow(
+                f"SELECT is_active FROM {DB_SCHEMA}.employees WHERE emp_id=$1",
+                emp_id
+            )
+
+            if not employee or not employee["is_active"]:
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.session_token
+                    SET is_active=false
+                    WHERE id=$1
+                    """,
+                    session["id"]
+                )
+                return False, "Employee account inactive"
 
         return True, "Valid"
 
@@ -84,8 +115,8 @@ async def validate_token(token: str, request: Request | None = None):
         return False, "Token expired"
     except jwt.InvalidTokenError:
         return False, "Invalid token"
-    except Exception as e:
-        return False, str(e)
+    except Exception:
+        return False, "Token validation failed"
 
 class TokenValidatorMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

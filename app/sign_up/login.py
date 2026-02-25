@@ -15,10 +15,9 @@ import secrets
 load_dotenv()
 JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "15"))
+JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
 router = APIRouter(prefix="/app/v1", tags=["Login"])
-
 @router.post(
     "/login",
     responses={
@@ -36,15 +35,16 @@ async def login(
     request_id = generate_uuid()
     log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": "-"})
 
-    email = payload.email.strip().lower()
-    password = payload.password
+    email = (payload.email or "").strip().lower()
+    password = payload.password or ""
+
     ip_address = request.client.host if request.client else "Unknown"
     device_info = request.headers.get("User-Agent", "Unknown Device")
 
-    log.info("[login] Received login request email=%s ip=%s", email, ip_address)
+    log.info("[login] Attempt email=%s ip=%s", email, ip_address)
 
     # --------------------------------------------------
-    # Rate Limiting (Preserved)
+    # Rate Limiting
     # --------------------------------------------------
     identifier = f"{ip_address}:{email}"
     now_epoch = int(time.time())
@@ -54,39 +54,37 @@ async def login(
     if not hasattr(request.app.state, "rate_limit_store"):
         request.app.state.rate_limit_store = {}
 
-    rate_limit_store = request.app.state.rate_limit_store
-    request_times = rate_limit_store.get(identifier, [])
-    request_times = [t for t in request_times if t > now_epoch - window]
+    store = request.app.state.rate_limit_store
+    attempts = store.get(identifier, [])
+    attempts = [t for t in attempts if t > now_epoch - window]
 
-    if len(request_times) >= max_requests:
-        log.warning("Rate limit exceeded for %s", identifier)
-        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
+    if len(attempts) >= max_requests:
+        log.warning("[login] Rate limit exceeded")
+        raise HTTPException(status_code=429, detail="Too many login attempts.")
 
-    request_times.append(now_epoch)
-    rate_limit_store[identifier] = request_times
+    attempts.append(now_epoch)
+    store[identifier] = attempts
 
     # --------------------------------------------------
     # DB Connection
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
-    except Exception as e:
-        log.error("[login] DB pool init failed: %s", e, exc_info=True)
+    except Exception:
+        log.exception("[login] DB pool error")
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
 
     try:
         async with pool.acquire() as conn:
 
-            # --------------------------------------------------
-            # Fetch Employee
-            # --------------------------------------------------
             employee = await conn.fetchrow(
-                f"SELECT * FROM {DB_SCHEMA}.employees WHERE lower(email) = $1",
+                f"SELECT * FROM {DB_SCHEMA}.employees WHERE lower(email)=$1",
                 email
             )
 
             if not employee:
-                log.warning("[login] Invalid credentials (email not found)")
+                hash_password(password)  # prevent timing attack
+                log.warning("[login] Invalid credentials")
                 raise HTTPException(status_code=401, detail="Invalid credentials")
 
             emp_id = employee["emp_id"]
@@ -96,9 +94,6 @@ async def login(
                 log.warning("[login] Inactive employee")
                 raise HTTPException(status_code=401, detail="Employee account is inactive")
 
-            # --------------------------------------------------
-            # Password Validation (Constant-Time)
-            # --------------------------------------------------
             computed_hash = hash_password(password)
 
             if not secrets.compare_digest(
@@ -108,47 +103,34 @@ async def login(
                 log.warning("[login] Invalid password")
                 raise HTTPException(status_code=401, detail="Invalid credentials")
 
-            # --------------------------------------------------
-            # JWT Creation (Access Token - Short Expiry)
-            # --------------------------------------------------
             if not JWT_SECRET or not JWT_ALGORITHM:
                 log.error("[login] JWT configuration missing")
                 raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
 
             now_aware = datetime.now(timezone.utc)
             access_expiry = now_aware + timedelta(minutes=JWT_EXPIRE_MINUTES)
+            refresh_expiry = now_aware + timedelta(days=14)
 
             permissions = await get_user_permissions(emp_id, conn)
-            jti = generate_uuid()
 
             jwt_payload = {
                 "sub": str(emp_id),
                 "iat": int(now_aware.timestamp()),
                 "exp": int(access_expiry.timestamp()),
-                "jti": jti,
+                "jti": generate_uuid(),
                 "permissions": permissions,
             }
 
-            try:
-                access_token = jwt.encode(jwt_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-            except Exception as e:
-                log.error("[login] JWT encode failed: %s", e, exc_info=True)
-                raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
+            access_token = jwt.encode(
+                jwt_payload,
+                JWT_SECRET,
+                algorithm=JWT_ALGORITHM
+            )
 
-            # --------------------------------------------------
-            # Secure Refresh Token Creation (HASHED STORAGE)
-            # --------------------------------------------------
             raw_refresh_token = generate_refresh_token()
             refresh_hash = hash_refresh_token(raw_refresh_token)
-            refresh_expiry = now_aware + timedelta(days=14)
 
-            # Remove tzinfo for DB compatibility
-            access_expiry_db = access_expiry.replace(tzinfo=None)
-            refresh_expiry_db = refresh_expiry.replace(tzinfo=None)
-
-            # --------------------------------------------------
-            # Persist Session
-            # --------------------------------------------------
+            # 🔥 FIX: DO NOT remove timezone
             await conn.execute(
                 f"""
                 INSERT INTO {DB_SCHEMA}.session_token
@@ -167,37 +149,29 @@ async def login(
                 """,
                 emp_id,
                 access_token,
-                refresh_hash,        # 🔐 Store HASH only
-                access_expiry_db,
-                refresh_expiry_db,
+                refresh_hash,
+                access_expiry,      # ✅ timezone aware
+                refresh_expiry,     # ✅ timezone aware
                 device_info,
                 ip_address
             )
 
-            log.info(
-                "[login] Session created | emp_id=%s device=%s ip=%s",
-                emp_id,
-                device_info,
-                ip_address
-            )
+            log.info("[login] Session created successfully")
 
             return {
                 "access_token": access_token,
-                "refresh_token": raw_refresh_token,  # 🔐 Return raw token only once
+                "refresh_token": raw_refresh_token,
                 "expires_in_minutes": JWT_EXPIRE_MINUTES
             }
 
     except HTTPException:
         raise
-    except Exception as e:
-        log.error("[login] Unexpected error: %s", e, exc_info=True)
+    except Exception:
+        log.exception("[login] Unexpected error")
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
-
-
 
 class RefreshRequest(BaseModel):
     refresh_token: str
-
 
 @router.post(
     "/refresh",
@@ -215,14 +189,17 @@ async def refresh_token_endpoint(
     request_id = generate_uuid()
     log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": "-"})
 
-    raw_refresh_token = payload.refresh_token.strip()
+    raw_refresh_token = (payload.refresh_token or "").strip()
     ip_address = request.client.host if request.client else "Unknown"
     device_info = request.headers.get("User-Agent", "Unknown Device")
 
+    if not raw_refresh_token:
+        raise HTTPException(status_code=401, detail="Invalid refresh token.")
+
     try:
         pool = await get_db_pool()
-    except Exception as e:
-        log.error("[refresh] DB pool error: %s", e, exc_info=True)
+    except Exception:
+        log.exception("[refresh] DB pool error")
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
 
     refresh_hash = hash_refresh_token(raw_refresh_token)
@@ -234,53 +211,57 @@ async def refresh_token_endpoint(
                 f"""
                 SELECT *
                 FROM {DB_SCHEMA}.session_token
-                WHERE refresh_token = $1
-                AND is_active = true
+                WHERE refresh_token=$1
+                AND is_active=true
                 """,
                 refresh_hash
             )
 
             if not session:
-                log.warning("[refresh] Invalid refresh token attempt")
+                log.warning("[refresh] Invalid refresh token")
                 raise HTTPException(status_code=401, detail="Invalid refresh token.")
 
-            # --------------------------------------------------
-            # Expiry Check (Authoritative DB Check)
-            # --------------------------------------------------
             refresh_expiry = session["refresh_expires_at"]
             now_utc = datetime.now(timezone.utc)
 
-            if refresh_expiry:
-                if refresh_expiry.tzinfo is None:
-                    refresh_expiry = refresh_expiry.replace(tzinfo=timezone.utc)
-
-                if refresh_expiry < now_utc:
-                    await conn.execute(
-                        f"""
-                        UPDATE {DB_SCHEMA}.session_token
-                        SET is_active = false
-                        WHERE id = $1
-                        """,
-                        session["id"]
-                    )
-                    log.warning("[refresh] Expired refresh token used")
-                    raise HTTPException(status_code=401, detail="Refresh token expired.")
+            if refresh_expiry and refresh_expiry < now_utc:
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.session_token
+                    SET is_active=false
+                    WHERE id=$1
+                    """,
+                    session["id"]
+                )
+                log.warning("[refresh] Expired refresh token used")
+                raise HTTPException(status_code=401, detail="Refresh token expired.")
 
             emp_id = session["emp_id"]
             log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
 
-            # --------------------------------------------------
-            # Rotate Refresh Token (CRITICAL SECURITY)
-            # --------------------------------------------------
+            employee = await conn.fetchrow(
+                f"SELECT is_active FROM {DB_SCHEMA}.employees WHERE emp_id=$1",
+                emp_id
+            )
+
+            if not employee or not employee["is_active"]:
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.session_token
+                    SET is_active=false
+                    WHERE id=$1
+                    """,
+                    session["id"]
+                )
+                log.warning("[refresh] Employee disabled, session revoked")
+                raise HTTPException(status_code=401, detail="Employee account inactive.")
+
             new_refresh_raw = generate_refresh_token()
             new_refresh_hash = hash_refresh_token(new_refresh_raw)
 
             access_expiry = now_utc + timedelta(minutes=JWT_EXPIRE_MINUTES)
             refresh_expiry_new = now_utc + timedelta(days=14)
 
-            # --------------------------------------------------
-            # Create New Access Token (Fresh Permissions)
-            # --------------------------------------------------
             permissions = await get_user_permissions(emp_id, conn)
 
             new_payload = {
@@ -297,24 +278,22 @@ async def refresh_token_endpoint(
                 algorithm=JWT_ALGORITHM
             )
 
-            # --------------------------------------------------
-            # Update Session Record (Rotation)
-            # --------------------------------------------------
+            # 🔥 FIX: DO NOT remove timezone
             await conn.execute(
                 f"""
                 UPDATE {DB_SCHEMA}.session_token
-                SET session_token = $1,
-                    refresh_token = $2,
-                    expires_at = $3,
-                    refresh_expires_at = $4,
-                    ip_address = $5,
-                    device_info = $6
-                WHERE id = $7
+                SET session_token=$1,
+                    refresh_token=$2,
+                    expires_at=$3,
+                    refresh_expires_at=$4,
+                    ip_address=$5,
+                    device_info=$6
+                WHERE id=$7
                 """,
                 new_access_token,
                 new_refresh_hash,
-                access_expiry.replace(tzinfo=None),
-                refresh_expiry_new.replace(tzinfo=None),
+                access_expiry,          # ✅ timezone aware
+                refresh_expiry_new,     # ✅ timezone aware
                 ip_address,
                 device_info,
                 session["id"]

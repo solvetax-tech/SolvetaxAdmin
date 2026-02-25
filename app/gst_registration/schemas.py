@@ -29,9 +29,8 @@ class GSTConfigOut(BaseModel):
     display_name: str
     sort_order: int
 
-# =========================================================
-# GST Registration - Create
-# =========================================================
+
+
 class GSTRegistrationIn(BaseModel):
     """
     Create GST Registration Schema
@@ -49,11 +48,16 @@ class GSTRegistrationIn(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
 
     pan: Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
-    gstin: Annotated[str, Field(pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$")]
+    gstin: Optional[
+        Annotated[str, Field(
+            pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
+        )]
+    ] = None
 
     # ----------------------------
-    # Business (Dynamic)
+    # Business
     # ----------------------------
+    business_name: Optional[str] = Field(None, max_length=200)
     registration_type: Optional[str] = Field(None, max_length=50)
     ownership_category: Optional[str] = Field(None, max_length=100)
     business_type: Optional[str] = Field(None, max_length=100)
@@ -61,7 +65,7 @@ class GSTRegistrationIn(BaseModel):
     turnover_details: Optional[str] = Field(None, max_length=50)
 
     # ----------------------------
-    # Workflow Status (Controlled)
+    # Workflow Status
     # ----------------------------
     registration_status: Literal[
         "DRAFT",
@@ -80,7 +84,7 @@ class GSTRegistrationIn(BaseModel):
     rm_id: Optional[int] = Field(None, gt=0)
 
     # ----------------------------
-    # Flags (System Controlled)
+    # Flags
     # ----------------------------
     is_filing_needed: bool = True
     is_rcm_applicable: bool = False
@@ -99,8 +103,13 @@ class GSTRegistrationIn(BaseModel):
     @field_validator("pan", "gstin", mode="before")
     @classmethod
     def normalize_identifiers(cls, v):
-        if v:
-            return v.strip().upper()
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v.upper()
         return v
 
     @field_validator("username", mode="before")
@@ -108,6 +117,16 @@ class GSTRegistrationIn(BaseModel):
     def normalize_username(cls, v):
         if isinstance(v, str):
             return html.escape(v.strip().lower())
+        return v
+
+    @field_validator("business_name", mode="before")
+    @classmethod
+    def normalize_business_name(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v
         return v
 
     @field_validator(
@@ -121,7 +140,10 @@ class GSTRegistrationIn(BaseModel):
     @classmethod
     def normalize_business_fields(cls, v):
         if isinstance(v, str):
-            return v.strip().upper()
+            v = v.strip()
+            if v == "":
+                return None
+            return v.upper()
         return v
 
     @field_validator("email", "secondary_email", mode="before")
@@ -156,7 +178,10 @@ class GSTRegistrationIn(BaseModel):
             )
 
         return self
+
 class GSTRegistrationEditIn(BaseModel):
+
+    business_name: Optional[str] = Field(None, max_length=200)
 
     gstin: Optional[
         Annotated[str, Field(
@@ -197,22 +222,42 @@ class GSTRegistrationEditIn(BaseModel):
 
     rm_id: Optional[int] = Field(None, gt=0)
 
-    # ----------------------------
-    # Normalization
-    # ----------------------------
+    # =====================================================
+    # Normalization (Improved & Safe)
+    # =====================================================
+
+    @field_validator("business_name", mode="before")
+    @classmethod
+    def normalize_business_name(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v
+        return v
 
     @field_validator("pan", "gstin", mode="before")
     @classmethod
     def normalize_identifiers(cls, v):
-        if v:
-            return v.strip().upper()
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v.upper()
         return v
 
     @field_validator("username", mode="before")
     @classmethod
     def normalize_username(cls, v):
         if isinstance(v, str):
-            return v.strip().lower()
+            v = v.strip()
+            if v == "":
+                return None
+            return v.lower()
         return v
 
     @field_validator(
@@ -226,22 +271,39 @@ class GSTRegistrationEditIn(BaseModel):
     @classmethod
     def normalize_business_fields(cls, v):
         if isinstance(v, str):
-            return v.strip().upper()
+            v = v.strip()
+            if v == "":
+                return None
+            return v.upper()
         return v
 
     @field_validator("email", "secondary_email", mode="before")
     @classmethod
     def normalize_email(cls, v):
-        if v:
-            return v.strip().lower()
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v.lower()
         return v
 
     @field_validator("mobile", mode="before")
     @classmethod
     def normalize_mobile(cls, v):
-        if v:
-            return v.strip()
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v
         return v
+
+    # =====================================================
+    # Workflow Validation
+    # =====================================================
 
     @model_validator(mode="after")
     def validate_status_logic(self):
@@ -288,21 +350,14 @@ class GSTRegistrationOut(BaseSchema):
     message: Optional[str] = None
 
 
-# --------------------------------------------------
-# Input Schema for Registration Person
-# --------------------------------------------------
 class RegistrationPersonIn(BaseSchema):
 
     # ----------------------------
-    # Ownership Mapping
+    # Required Mapping
     # ----------------------------
-    gstin: str = Field(
-        ...,
-        pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
-    )
+    gst_registration_id: int = Field(..., gt=0)
 
     full_name: str = Field(..., min_length=2, max_length=150)
-
     designation: str = Field(..., min_length=2, max_length=100)
 
     # ----------------------------
@@ -331,18 +386,19 @@ class RegistrationPersonIn(BaseSchema):
     is_primary_customer: bool = False
 
     # =====================================================
-    # 🔥 Normalization (CRITICAL)
+    # 🔥 Normalization
     # =====================================================
-    @field_validator("gstin", "pan", mode="before")
+
+    @field_validator("pan", mode="before")
     @classmethod
-    def normalize_upper_identifiers(cls, v):
+    def normalize_pan(cls, v):
         if v:
             return v.strip().upper()
         return v
 
     @field_validator("aadhaar", "mobile", mode="before")
     @classmethod
-    def normalize_trim_numeric(cls, v):
+    def normalize_numeric(cls, v):
         if v:
             return v.strip()
         return v
