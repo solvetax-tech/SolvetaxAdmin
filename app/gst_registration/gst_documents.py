@@ -38,20 +38,7 @@ async def create_registration_document(
     payload: RegistrationDocumentIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Create Registration Document
-    ----------------------------
-    ✔ Atomic transaction (Document + Version)
-    ✔ GST & mobile derived from person_id
-    ✔ Person must exist & active
-    ✔ One active document per person/type enforced by DB
-    ✔ Enterprise structured logging
-    ✔ Verified logic supported
-    """
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
@@ -68,15 +55,9 @@ async def create_registration_document(
         payload.verified,
     )
 
-    # --------------------------------------------------
-    # IST Timestamp
-    # --------------------------------------------------
     IST = ZoneInfo("Asia/Kolkata")
     now = datetime.now(IST)
 
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
@@ -88,52 +69,51 @@ async def create_registration_document(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Derive GSTIN and Mobile from Person (if provided)
+                # 1️⃣ Fetch Person (source of truth)
                 # --------------------------------------------------
-                gstin = None
-                mobile = None
+                person_row = await conn.fetchrow(
+                    f"""
+                    SELECT gst_registration_id,
+                           mobile,
+                           is_active
+                      FROM {DB_SCHEMA}.registration_persons
+                     WHERE person_id = $1
+                     LIMIT 1
+                    """,
+                    payload.person_id,
+                )
 
-                if payload.person_id:
-                    person_row = await conn.fetchrow(
-                        f"""
-                        SELECT gstin, mobile, is_active
-                          FROM {DB_SCHEMA}.registration_persons
-                         WHERE person_id = $1
-                         LIMIT 1
-                        """,
-                        payload.person_id,
-                    )
+                if not person_row:
+                    raise HTTPException(status_code=400, detail="Registration person not found.")
 
-                    if not person_row:
-                        raise HTTPException(status_code=400, detail="Registration person not found.")
-
-                    if person_row["is_active"] is False:
-                        raise HTTPException(status_code=400, detail="Registration person is inactive.")
-
-                    gstin = person_row["gstin"].strip().upper()
-                    mobile = person_row["mobile"].strip() if person_row["mobile"] else None
-
-                else:
-                    raise HTTPException(status_code=400, detail="person_id is required to derive GSTIN and mobile.")
+                if person_row["is_active"] is False:
+                    raise HTTPException(status_code=400, detail="Registration person is inactive.")
 
                 # --------------------------------------------------
-                # 2️⃣ Validate GST Exists & Active
+                # 2️⃣ Fetch GST via FK (Correct Architecture)
                 # --------------------------------------------------
                 gst_row = await conn.fetchrow(
                     f"""
-                    SELECT customer_id, is_active
+                    SELECT id,
+                           gstin,
+                           customer_id,
+                           is_active
                       FROM {DB_SCHEMA}.gst_registration
-                     WHERE upper(gstin) = $1
+                     WHERE id = $1
                      LIMIT 1
                     """,
-                    gstin,
+                    person_row["gst_registration_id"],
                 )
 
                 if not gst_row:
-                    raise HTTPException(status_code=400, detail="GSTIN not found.")
+                    raise HTTPException(status_code=400, detail="Associated GST registration not found.")
 
-                if not gst_row["is_active"]:
-                    raise HTTPException(status_code=400, detail="GSTIN is inactive.")
+                if gst_row["is_active"] is False:
+                    raise HTTPException(status_code=400, detail="Associated GST is inactive.")
+
+                # GSTIN may be NULL — handle safely
+                gstin = gst_row["gstin"].strip().upper() if gst_row["gstin"] else None
+                mobile = person_row["mobile"].strip() if person_row["mobile"] else None
 
                 # --------------------------------------------------
                 # 3️⃣ Insert Registration Document
@@ -160,10 +140,10 @@ async def create_registration_document(
                     gstin,
                     payload.person_id,
                     payload.document_type.strip().upper(),
-                    str(payload.document_url),
+                    str(payload.document_url).strip(),
                     mobile,
                     payload.verified,
-                    emp_id if payload.verified else None,  # verified_by only if verified=True
+                    emp_id if payload.verified else None,
                     now,
                     now,
                 )
@@ -172,7 +152,7 @@ async def create_registration_document(
                     raise HTTPException(status_code=500, detail="Registration document creation failed.")
 
                 # --------------------------------------------------
-                # 4️⃣ Version Audit Insert (json = inserted row, updated_json = NULL)
+                # 4️⃣ Version Audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -192,8 +172,8 @@ async def create_registration_document(
                     document_row["document_id"],
                     gst_row["customer_id"],
                     "CREATE",
-                    json.dumps(dict(document_row), default=str),  # json = row data
-                    None,  # updated_json = NULL for CREATE
+                    json.dumps(dict(document_row), default=str),
+                    None,
                 )
 
             log.info(
@@ -207,16 +187,12 @@ async def create_registration_document(
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # UNIQUE CONSTRAINT HANDLING
-        # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError as e:
             constraint = getattr(e, "constraint_name", None)
             UNIQUE_MAP = {
                 "uq_doc_person_type_active":
                     "This document type already exists for this person (active)."
             }
-            log.warning("Unique constraint violation | constraint=%s", constraint, exc_info=True)
             raise HTTPException(
                 status_code=409,
                 detail=UNIQUE_MAP.get(
@@ -225,15 +201,9 @@ async def create_registration_document(
                 ),
             )
 
-        # --------------------------------------------------
-        # FOREIGN KEY
-        # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(status_code=400, detail="Invalid foreign key reference.")
 
-        # --------------------------------------------------
-        # CHECK CONSTRAINT HANDLING (DETAILED)
-        # --------------------------------------------------
         except asyncpg.exceptions.CheckViolationError as e:
             constraint = getattr(e, "constraint_name", None)
             CHECK_MAP = {
@@ -246,11 +216,8 @@ async def create_registration_document(
                 detail=CHECK_MAP.get(constraint, f"Data violates constraint: {constraint}"),
             )
 
-        # --------------------------------------------------
-        # GENERAL DB ERROR
-        # --------------------------------------------------
-        except asyncpg.PostgresError as e:
-            log.error("Database error | %s", str(e), exc_info=True)
+        except asyncpg.PostgresError:
+            log.exception("Database error during document creation")
             raise HTTPException(status_code=500, detail="Database error.")
 
         except HTTPException:
