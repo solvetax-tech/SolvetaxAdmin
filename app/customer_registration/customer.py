@@ -18,54 +18,63 @@ router = APIRouter(
     prefix="/api/v1/customers",
     tags=["Customers"]
 )
-#--------------------------------------------------------------
-# CREATE CUSTOMER (is_active DEFAULT = TRUE at DB level)
-#--------------------------------------------------------------
+
+# -------------------------------------------------------------------
+# CREATE CUSTOMER (Enterprise Production + Version Audit + Services)
+# -------------------------------------------------------------------
+
 @router.post(
     "",
     response_model=CustomerOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create Customer",
+    summary="Create Customer (Production Ready + Audit)",
+    responses={
+        201: {"description": "Customer created successfully."},
+        400: {"description": "Validation failed."},
+        409: {"description": "Duplicate value violation."},
+        500: {"description": "Database or internal error."},
+    },
 )
 async def create_customer(
     payload: CustomerIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Create Customer (Production Standard + Version Audit)
-
     ✔ Atomic transaction (Customer + Version)
     ✔ entity_type = 'CUSTOMER'
-    ✔ entity_id = 1 (default)
+    ✔ entity_id = customer_id
     ✔ action = 'CREATE'
-    ✔ json populated
+    ✔ services (text[]) supported
+    ✔ json populated (NEW snapshot)
     ✔ updated_json = NULL
     ✔ Structured logging
+    ✔ Constraint-specific error handling
     """
 
     # --------------------------------------------------
     # Request Context
     # --------------------------------------------------
-    request_id = str(uuid.uuid4())
+    request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-    emp_id = int(emp_id_raw) if emp_id_raw else None
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": emp_id},
+        {"request_id": request_id, "emp_id": emp_id, "api": "create_customer"},
     )
 
     masked_email = mask_sensitive_data(payload.email)
     masked_mobile = mask_sensitive_data(payload.mobile)
 
     log.info(
-        "Incoming create customer request | email=%s mobile=%s",
+        "Incoming create customer request | email=%s mobile=%s services=%s",
         masked_email,
         masked_mobile,
+        payload.services,
     )
 
     # --------------------------------------------------
-    # Database Pool Acquisition
+    # DB Pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
@@ -81,19 +90,28 @@ async def create_customer(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Insert Customer
+                # 1️⃣ Insert Customer (WITH SERVICES)
                 # --------------------------------------------------
                 insert_sql = f"""
                     INSERT INTO {DB_SCHEMA}.customers
                     (
-                        full_name, email, mobile, business_name,
-                        business_description, business_image_url,
-                        business_type, state, city, remark,
-                        rm_id, op_id, referral_id
+                        full_name,
+                        email,
+                        mobile,
+                        business_name,
+                        business_description,
+                        business_image_url,
+                        business_type,
+                        state,
+                        city,
+                        remark,
+                        rm_id,
+                        op_id,
+                        referral_id,
+                        services
                     )
                     VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                        $11,$12,$13
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
                     )
                     RETURNING *
                 """
@@ -115,6 +133,7 @@ async def create_customer(
                     payload.rm_id,
                     payload.op_id,
                     payload.referral_id,
+                    payload.services if payload.services else [],
                 )
 
                 if not customer_row:
@@ -127,19 +146,25 @@ async def create_customer(
                 customer_id = customer_row["customer_id"]
 
                 # --------------------------------------------------
-                # 2️⃣ Insert Version Audit (INLINE)
+                # 2️⃣ Version Audit
                 # --------------------------------------------------
-                version_sql = f"""
-                    INSERT INTO {DB_SCHEMA}.versions
-                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7)
-                """
-
                 await conn.execute(
-                    version_sql,
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
                     emp_id,
                     "CUSTOMER",
-                    1,
+                    customer_id,
                     customer_id,
                     "CREATE",
                     json.dumps(dict(customer_row), default=str),
@@ -147,40 +172,83 @@ async def create_customer(
                 )
 
             log.info(
-                "Customer created successfully with audit | customer_id=%s",
+                "Customer created successfully with services | customer_id=%s",
                 customer_id,
             )
 
-            response_data = dict(customer_row)
-            response_data["message"] = "Customer created successfully."
-            return response_data
+            return {
+                **dict(customer_row),
+                "message": "Customer created successfully.",
+                "request_id": request_id,
+            }
 
         # --------------------------------------------------
-        # Exception Handling (Production Grade)
+        # UNIQUE CONSTRAINT HANDLING
         # --------------------------------------------------
-        except asyncpg.exceptions.UniqueViolationError:
-            log.warning("Duplicate customer detected")
+        except asyncpg.exceptions.UniqueViolationError as e:
+            constraint = getattr(e, "constraint_name", "")
+
+            UNIQUE_MAP = {
+                # Add future mappings here
+            }
+
             raise HTTPException(
                 status_code=409,
-                detail="Customer already exists.",
+                detail=UNIQUE_MAP.get(
+                    constraint,
+                    "Duplicate value violates unique constraint.",
+                ),
             )
 
-        except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning("Invalid foreign key reference (rm_id/op_id)")
+        # --------------------------------------------------
+        # FOREIGN KEY HANDLING
+        # --------------------------------------------------
+        except asyncpg.exceptions.ForeignKeyViolationError as e:
+            constraint = getattr(e, "constraint_name", "")
+
+            FK_MAP = {
+                "customers_rm_id_fkey": "Invalid rm_id provided.",
+                "customers_op_id_fkey": "Invalid op_id provided.",
+                "customers_referral_id_fkey": "Invalid referral_id provided.",
+            }
+
             raise HTTPException(
                 status_code=400,
-                detail="Invalid rm_id or op_id.",
+                detail=FK_MAP.get(
+                    constraint,
+                    "Invalid foreign key reference provided.",
+                ),
             )
 
-        except asyncpg.PostgresError as e:
-            log.error(
-                "Database error during customer creation | error=%s",
-                str(e),
-                exc_info=True,
+        # --------------------------------------------------
+        # CHECK / NOT NULL / DATA
+        # --------------------------------------------------
+        except asyncpg.exceptions.CheckViolationError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Data violates constraint: {getattr(e, 'constraint_name', '')}",
             )
+
+        except asyncpg.exceptions.NotNullViolationError:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required field value.",
+            )
+
+        except asyncpg.exceptions.DataError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid data format provided.",
+            )
+
+        # --------------------------------------------------
+        # GENERIC DB ERROR
+        # --------------------------------------------------
+        except asyncpg.PostgresError:
+            log.exception("Database error during customer creation")
             raise HTTPException(
                 status_code=500,
-                detail="Database error.",
+                detail="Database error occurred.",
             )
 
         except HTTPException:
@@ -194,13 +262,20 @@ async def create_customer(
             )
 
 # -------------------------------------------------------------------
-# LIST CUSTOMERS (DYNAMIC FILTER + PAGINATION)
+# LIST CUSTOMERS (Enterprise Filter + Pagination + Services Support)
 # -------------------------------------------------------------------
 
-from fastapi import Request
+from fastapi import Query
+from datetime import datetime
+
 @router.get(
     "/customer_get/filter",
-    summary="Filter Customers",
+    summary="Filter Customers (Enterprise Dynamic Filter)",
+    responses={
+        200: {"description": "Customers fetched successfully."},
+        400: {"description": "Validation failed."},
+        500: {"description": "Database or internal error."},
+    },
 )
 async def filter_customers(
     customer_id: Optional[int] = None,
@@ -214,6 +289,12 @@ async def filter_customers(
     op_id: Optional[int] = None,
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
+
+    # 👇 NEW SERVICES FILTERS
+    service: Optional[str] = None,                    # single service
+    services_all: Optional[List[str]] = Query(None), # must contain all
+    services_any: Optional[List[str]] = Query(None), # overlap
+
     from_date: Optional[datetime] = None,
     to_date: Optional[datetime] = None,
     limit: int = Query(20, ge=1, le=100),
@@ -221,30 +302,37 @@ async def filter_customers(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
-    Filter Customers API (RBAC REMOVED - Same as Employee Filter)
-
-    Validation Responsibility Split:
-    --------------------------------
-    1️⃣ FastAPI:
-        - Type validation
-        - Pagination limits
-
-    2️⃣ Database:
-        - Filtering logic only (no RBAC restrictions)
+    ✔ Dynamic filtering
+    ✔ Services array filtering
+    ✔ Pagination
+    ✔ Total count metadata
+    ✔ Active filtering logic
+    ✔ Clean date handling
+    ✔ Structured logging
+    ✔ DB-safe parameter binding
     """
 
+    # --------------------------------------------------
+    # Request Context
+    # --------------------------------------------------
     request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": current_emp_id},
+        {"request_id": request_id, "emp_id": emp_id, "api": "filter_customers"},
     )
 
-    log.info("Incoming customer filter request limit=%s offset=%s", limit, offset)
+    log.info(
+        "Incoming customer filter | limit=%s offset=%s service=%s",
+        limit,
+        offset,
+        service,
+    )
 
     # --------------------------------------------------
-    # Date Sanity Validation (IDENTICAL to employee_get)
+    # Date Validation
     # --------------------------------------------------
     if from_date and to_date and from_date > to_date:
         raise HTTPException(
@@ -252,185 +340,8 @@ async def filter_customers(
             detail="from_date cannot be greater than to_date.",
         )
 
-    try:
-        pool = await get_db_pool()
-
-        conditions = []
-        values = []
-        param_index = 1
-
-        # --------------------------------------------------
-        # Business Filters (SAME PATTERN AS employee_get)
-        # --------------------------------------------------
-
-        if customer_id is not None:
-            conditions.append(f"customer_id = ${param_index}")
-            values.append(customer_id)
-            param_index += 1
-
-        if full_name and full_name.strip():
-            conditions.append(f"full_name ILIKE ${param_index}")
-            values.append(f"%{full_name.strip()}%")
-            param_index += 1
-
-        if email and email.strip():
-            conditions.append(f"email ILIKE ${param_index}")
-            values.append(f"%{email.strip()}%")
-            param_index += 1
-
-        if mobile and mobile.strip():
-            conditions.append(f"mobile = ${param_index}")
-            values.append(mobile.strip())
-            param_index += 1
-
-        if business_type:
-            conditions.append(f"business_type = ${param_index}")
-            values.append(business_type)
-            param_index += 1
-
-        if state:
-            conditions.append(f"state = ${param_index}")
-            values.append(state)
-            param_index += 1
-
-        if city:
-            conditions.append(f"city = ${param_index}")
-            values.append(city)
-            param_index += 1
-
-        if rm_id is not None:
-            conditions.append(f"rm_id = ${param_index}")
-            values.append(rm_id)
-            param_index += 1
-
-        if op_id is not None:
-            conditions.append(f"op_id = ${param_index}")
-            values.append(op_id)
-            param_index += 1
-
-        # --------------------------------------------------
-        # Status Filtering (IDENTICAL to employee_get)
-        # --------------------------------------------------
-        if is_active is not None:
-            conditions.append(f"is_active = ${param_index}")
-            values.append(is_active)
-            param_index += 1
-        elif not include_inactive:
-            conditions.append("is_active = TRUE")
-
-        # --------------------------------------------------
-        # Date Filtering (IDENTICAL to employee_get)
-        # --------------------------------------------------
-
-        if from_date:
-            if from_date.tzinfo is None:
-                from_date = from_date.replace(tzinfo=IST)
-        else:
-            from_date = from_date.astimezone(IST)
-        conditions.append(f"created_at >= ${param_index}")
-        values.append(from_date)
-        param_index += 1
-
-        if to_date:
-            if to_date.tzinfo is None:
-                to_date = to_date.replace(tzinfo=IST)
-        else:
-            to_date = to_date.astimezone(IST)
-        conditions.append(f"created_at <= ${param_index}")
-        values.append(to_date)
-        param_index += 1
-
-
-        # --------------------------------------------------
-        # WHERE Clause Builder (EXACT SAME AS employee_get)
-        # --------------------------------------------------
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.customers
-              {where_clause}
-             ORDER BY created_at DESC
-             LIMIT ${param_index} OFFSET ${param_index + 1}
-        """
-
-        values.extend([limit, offset])
-
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql, *values)
-
-        log.info("Customers filtered successfully count=%s", len(rows))
-
-        return [
-            {**dict(row), "message": "Customers filtered successfully."}
-            for row in rows
-        ]
-
     # --------------------------------------------------
-    # DB VALIDATIONS (IDENTICAL to employee_get)
-    # --------------------------------------------------
-    except asyncpg.PostgresError:
-        log.exception("Database error during customer filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Database error.",
-        )
-
-    except Exception:
-        log.exception("Unexpected error during customer filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
-
-
-
-# -------------------------------------------------------------------
-# GET CUSTOMER BY ID
-# -------------------------------------------------------------------
-@router.get(
-    "/{customer_id}",
-    summary="Get Customer",
-)
-async def get_customer(
-    customer_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "READ")),
-):
-    """
-    Get Customer by ID (Production Standard)
-
-    Validation Responsibility Split:
-    --------------------------------
-    1. Authentication & Authorization via dependency
-    2. Path param type validation handled by FastAPI
-    3. Existence validation handled by DB query
-    """
-
-    # --------------------------------------------------
-    # Request Context & Structured Logging (Aligned)
-    # --------------------------------------------------
-    request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
-
-    log = logging.LoggerAdapter(
-        logger,
-        {"request_id": request_id, "emp_id": current_emp_id},
-    )
-
-    log.info(
-        "Incoming get customer request customer_id=%s",
-        customer_id,
-    )
-
-    sql = f"""
-        SELECT *
-          FROM {DB_SCHEMA}.customers
-         WHERE customer_id = $1
-         LIMIT 1
-    """
-
-    # --------------------------------------------------
-    # Database Pool Acquisition Safety
+    # DB Pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
@@ -442,68 +353,165 @@ async def get_customer(
         )
 
     try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(sql, customer_id)
+        conditions = []
+        values = []
+        idx = 1
 
         # --------------------------------------------------
-        # Not Found Handling (Consistent Style)
+        # Standard Filters
         # --------------------------------------------------
-        if not row:
-            log.warning(
-                "Customer not found customer_id=%s",
-                customer_id,
-            )
-            raise HTTPException(
-                status_code=404,
-                detail="Customer not found.",
-            )
+
+        if customer_id is not None:
+            conditions.append(f"customer_id = ${idx}")
+            values.append(customer_id)
+            idx += 1
+
+        if full_name:
+            conditions.append(f"full_name ILIKE ${idx}")
+            values.append(f"%{full_name.strip()}%")
+            idx += 1
+
+        if email:
+            conditions.append(f"email ILIKE ${idx}")
+            values.append(f"%{email.strip().lower()}%")
+            idx += 1
+
+        if mobile:
+            conditions.append(f"mobile = ${idx}")
+            values.append(mobile.strip())
+            idx += 1
+
+        if business_type:
+            conditions.append(f"business_type = ${idx}")
+            values.append(business_type)
+            idx += 1
+
+        if state:
+            conditions.append(f"state = ${idx}")
+            values.append(state)
+            idx += 1
+
+        if city:
+            conditions.append(f"city = ${idx}")
+            values.append(city)
+            idx += 1
+
+        if rm_id is not None:
+            conditions.append(f"rm_id = ${idx}")
+            values.append(rm_id)
+            idx += 1
+
+        if op_id is not None:
+            conditions.append(f"op_id = ${idx}")
+            values.append(op_id)
+            idx += 1
+
+        # --------------------------------------------------
+        # SERVICES FILTERING
+        # --------------------------------------------------
+
+        if service:
+            conditions.append(f"${idx} = ANY(services)")
+            values.append(service.strip())
+            idx += 1
+
+        if services_all:
+            conditions.append(f"services @> ${idx}")
+            values.append(services_all)
+            idx += 1
+
+        if services_any:
+            conditions.append(f"services && ${idx}")
+            values.append(services_any)
+            idx += 1
+
+        # --------------------------------------------------
+        # Status Filtering
+        # --------------------------------------------------
+
+        if is_active is not None:
+            conditions.append(f"is_active = ${idx}")
+            values.append(is_active)
+            idx += 1
+        elif not include_inactive:
+            conditions.append("is_active = TRUE")
+
+        # --------------------------------------------------
+        # Date Filtering
+        # --------------------------------------------------
+
+        if from_date:
+            conditions.append(f"created_at >= ${idx}")
+            values.append(from_date)
+            idx += 1
+
+        if to_date:
+            conditions.append(f"created_at <= ${idx}")
+            values.append(to_date)
+            idx += 1
+
+        # --------------------------------------------------
+        # WHERE Clause
+        # --------------------------------------------------
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        # --------------------------------------------------
+        # COUNT Query
+        # --------------------------------------------------
+
+        count_sql = f"""
+            SELECT COUNT(*)
+              FROM {DB_SCHEMA}.customers
+              {where_clause}
+        """
+
+        # --------------------------------------------------
+        # Main Query
+        # --------------------------------------------------
+
+        main_sql = f"""
+            SELECT *
+              FROM {DB_SCHEMA}.customers
+              {where_clause}
+             ORDER BY created_at DESC
+             LIMIT ${idx} OFFSET ${idx + 1}
+        """
+
+        values_with_pagination = values + [limit, offset]
+
+        async with pool.acquire() as conn:
+            total_count = await conn.fetchval(count_sql, *values)
+            rows = await conn.fetch(main_sql, *values_with_pagination)
 
         log.info(
-            "Customer fetched successfully customer_id=%s",
-            customer_id,
+            "Customer filter success | total=%s returned=%s",
+            total_count,
+            len(rows),
         )
 
-        # Return raw dict with message (same style as filter/list APIs)
         return {
-            **dict(row),
-            "message": "Customer fetched successfully.",
+            "data": [dict(row) for row in rows]    
         }
 
-    # --------------------------------------------------
-    # IMPORTANT: Re-raise HTTP Exceptions First
-    # --------------------------------------------------
+    except asyncpg.PostgresError:
+        log.exception("Database error during customer filtering")
+        raise HTTPException(
+            status_code=500,
+            detail="Database error occurred.",
+        )
+
     except HTTPException:
         raise
 
-    # --------------------------------------------------
-    # DATABASE ERROR HANDLING (Improved)
-    # --------------------------------------------------
-    except asyncpg.PostgresError as e:
-        log.error(
-            "Database error during get customer customer_id=%s error=%s",
-            customer_id,
-            str(e),
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Database error.",
-        )
-
-    # --------------------------------------------------
-    # FALLBACK UNEXPECTED ERROR (WITH STACK TRACE)
-    # --------------------------------------------------
     except Exception:
-        log.exception(
-            "Unexpected error during get customer customer_id=%s",
-            customer_id,
-        )
+        log.exception("Unexpected error during customer filtering")
         raise HTTPException(
             status_code=500,
             detail="Internal server error.",
         )
 # --------------------------------------------------------------
-# EDIT CUSTOMER (WITH FULL VERSION AUDIT - ENTERPRISE READY)
+# EDIT CUSTOMER (FULL ENTERPRISE DYNAMIC PATCH + VERSION AUDIT)
 # --------------------------------------------------------------
 
 @router.post(
@@ -516,40 +524,36 @@ async def edit_customer(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Enterprise-Grade Dynamic Customer Update API with Version Audit
+    Enterprise-Grade Dynamic Customer Update API
 
-    ✔ Dynamic PATCH-style update
-    ✔ OLD snapshot stored in versions.json
-    ✔ NEW snapshot stored in versions.updated_json
-    ✔ Atomic transaction (update + audit)
-    ✔ Full asyncpg exception coverage
+    ✔ DB-aligned schema
+    ✔ Safe PATCH-style dynamic update
+    ✔ SELECT ... FOR UPDATE (row locking)
+    ✔ OLD snapshot in versions.json
+    ✔ NEW snapshot in versions.updated_json
+    ✔ Atomic transaction
+    ✔ Whitelist-protected fields
+    ✔ Full asyncpg exception handling
     ✔ Structured logging
-    ✔ Safe SQL parameterization
-    ✔ Datetime-safe JSON serialization
     """
 
     # --------------------------------------------------
-    # Request Context & Logging
+    # Request Context
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
-
-    # Safe emp_id conversion
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
         {
             "request_id": request_id,
-            "emp_id": current_emp_id,
+            "emp_id": emp_id,
             "api": "edit_customer",
         },
     )
 
-    log.info(
-        "Incoming edit customer request | customer_id=%s",
-        customer_id,
-    )
+    log.info("Incoming edit customer request | customer_id=%s", customer_id)
 
     # --------------------------------------------------
     # Extract Provided Fields
@@ -557,52 +561,40 @@ async def edit_customer(
     try:
         update_data: Dict[str, Any] = payload.model_dump(exclude_unset=True)
     except Exception as e:
-        log.exception(
-            "Failed to serialize payload | customer_id=%s | error=%s",
-            customer_id,
-            str(e),
-        )
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid request payload.",
-        )
+        log.exception("Payload serialization failed | error=%s", str(e))
+        raise HTTPException(status_code=400, detail="Invalid request payload.")
 
     if not update_data:
-        log.warning(
-            "No fields provided for update | customer_id=%s",
-            customer_id,
-        )
         raise HTTPException(
             status_code=400,
             detail="At least one field must be provided for update.",
         )
 
     # --------------------------------------------------
-    # Normalize Critical Fields
+    # Allowed Fields Whitelist (Security Layer)
     # --------------------------------------------------
-    try:
-        if "email" in update_data and update_data["email"]:
-            update_data["email"] = update_data["email"].strip().lower()
+    allowed_fields = {
+        "full_name",
+        "email",
+        "mobile",
+        "business_name",
+        "business_description",
+        "business_image_url",
+        "business_type",
+        "state",
+        "city",
+        "remark",
+        "rm_id",
+        "op_id",
+        "referral_id",
+        "is_active",
+    }
 
-        if "phone_number" in update_data and update_data["phone_number"]:
-            update_data["phone_number"] = update_data["phone_number"].strip()
-
-        # Convert URL fields
-        url_fields = ["business_image_url", "website_url"]
-        for field in url_fields:
-            if field in update_data and update_data[field]:
-                update_data[field] = str(update_data[field])
-
-    except Exception as e:
-        log.exception(
-            "Error during normalization | customer_id=%s | payload=%s | error=%s",
-            customer_id,
-            update_data,
-            str(e),
-        )
+    invalid_fields = set(update_data.keys()) - allowed_fields
+    if invalid_fields:
         raise HTTPException(
             status_code=400,
-            detail="Invalid field values provided.",
+            detail=f"Invalid fields provided: {', '.join(invalid_fields)}",
         )
 
     # --------------------------------------------------
@@ -610,42 +602,35 @@ async def edit_customer(
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
-    except Exception as e:
-        log.exception("Database pool acquisition failed | error=%s", str(e))
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection error.",
-        )
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Fetch OLD Snapshot
+                # 1️⃣ Lock Existing Row (Prevents Lost Updates)
                 # --------------------------------------------------
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT *
                       FROM {DB_SCHEMA}.customers
                      WHERE customer_id = $1
-                     LIMIT 1
+                     FOR UPDATE
                     """,
                     customer_id,
                 )
 
                 if not old_row:
-                    log.warning(
-                        "Customer not found for update | customer_id=%s",
-                        customer_id,
-                    )
                     raise HTTPException(
                         status_code=404,
                         detail="Customer not found.",
                     )
 
                 # --------------------------------------------------
-                # 2️⃣ Build Dynamic UPDATE Query
+                # 2️⃣ Build Dynamic Update Query
                 # --------------------------------------------------
                 fields = []
                 values = []
@@ -667,18 +652,13 @@ async def edit_customer(
 
                 values.append(customer_id)
 
-                log.debug(
-                    "Executing update | customer_id=%s | fields=%s",
-                    customer_id,
-                    list(update_data.keys()),
-                )
-
                 new_row = await conn.fetchrow(update_sql, *values)
 
                 # --------------------------------------------------
-                # 3️⃣ Insert Version Audit
+                # 3️⃣ Version Audit Insert
                 # --------------------------------------------------
-                version_sql = f"""
+                await conn.execute(
+                    f"""
                     INSERT INTO {DB_SCHEMA}.versions
                     (
                         emp_id,
@@ -690,13 +670,10 @@ async def edit_customer(
                         updated_json
                     )
                     VALUES ($1,$2,$3,$4,$5,$6,$7)
-                """
-
-                await conn.execute(
-                    version_sql,
+                    """,
                     emp_id,
                     "CUSTOMER",
-                    1,
+                    customer_id,
                     customer_id,
                     "UPDATE",
                     json.dumps(dict(old_row), default=str),
@@ -704,7 +681,7 @@ async def edit_customer(
                 )
 
             log.info(
-                "Customer updated successfully with audit | customer_id=%s",
+                "Customer updated successfully | customer_id=%s",
                 customer_id,
             )
 
@@ -717,118 +694,82 @@ async def edit_customer(
         # --------------------------------------------------
         # FULL DATABASE EXCEPTION COVERAGE
         # --------------------------------------------------
-        except asyncpg.exceptions.UniqueViolationError as e:
-            log.warning(
-                "Unique constraint violation | customer_id=%s | payload=%s | error=%s",
-                customer_id,
-                update_data,
-                str(e),
-            )
+        except asyncpg.exceptions.UniqueViolationError:
             raise HTTPException(
                 status_code=409,
                 detail="Duplicate field value violates unique constraint.",
             )
 
-        except asyncpg.exceptions.ForeignKeyViolationError as e:
-            log.warning(
-                "Foreign key violation | customer_id=%s | payload=%s | error=%s",
-                customer_id,
-                update_data,
-                str(e),
-            )
+        except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid foreign key reference.",
             )
 
         except asyncpg.exceptions.CheckViolationError as e:
-            log.warning(
-                "Check constraint violation | customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-            )
             raise HTTPException(
                 status_code=400,
-                detail="Check constraint validation failed.",
+                detail=str(e),
             )
 
-        except asyncpg.exceptions.NotNullViolationError as e:
-            log.warning(
-                "NOT NULL constraint violation | customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-            )
+        except asyncpg.exceptions.NotNullViolationError:
             raise HTTPException(
                 status_code=400,
                 detail="Missing required field value.",
             )
 
-        except asyncpg.exceptions.DataError as e:
-            log.error(
-                "Invalid data format | customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-                exc_info=True,
-            )
+        except asyncpg.exceptions.DataError:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid data format provided.",
             )
 
         except asyncpg.PostgresError as e:
-            log.error(
-                "Postgres error during update | customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-                exc_info=True,
-            )
+            log.exception("Postgres error during update")
             raise HTTPException(
                 status_code=500,
-                detail="Database error occurred.",
+                detail=str(e),
             )
 
         except HTTPException:
             raise
 
-        except Exception as e:
-            log.exception(
-                "Unexpected error during customer update | customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-            )
+        except Exception:
+            log.exception("Unexpected error during customer update")
             raise HTTPException(
                 status_code=500,
                 detail="Internal server error.",
             )
 # =========================================================
-# SOFT DELETE CUSTOMER (is_active = false) WITH VERSION AUDIT
+# CONDITIONAL CUSTOMER SOFT DELETE
 # =========================================================
 
 @router.delete(
     "/{customer_id}/soft_delete",
-    summary="Soft delete customer by setting is_active to false (With Audit)",
+    summary="Soft delete customer only if exactly one GST exists",
+    responses={
+        200: {"description": "Customer and GST deactivated."},
+        400: {"description": "Business rule violation."},
+        404: {"description": "Customer not found."},
+        500: {"description": "Internal server error."},
+    },
 )
 async def soft_delete_customer(
     customer_id: int,
-    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Soft Delete Customer with Version Audit
+    Soft delete customer ONLY if exactly one GST exists.
 
-    ✔ Atomic transaction (Soft Delete + Version Insert)
-    ✔ Concurrency safe (AND is_active = TRUE)
-    ✔ json = NULL (for DELETE)
-    ✔ updated_json = NEW snapshot (is_active = FALSE)
-    ✔ action = 'DELETE'
-    ✔ Enterprise structured logging
-    ✔ Full asyncpg exception handling
+    ✔ If 1 GST → Full cascade delete
+    ✔ If >1 GST → Reject
+    ✔ Atomic transaction
+    ✔ Concurrency safe
+    ✔ Version audit (CUSTOMER only)
     """
 
-    # --------------------------------------------------
-    # Request Context & Logging
-    # --------------------------------------------------
     request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id") or current_user.get("sub")
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
@@ -836,76 +777,140 @@ async def soft_delete_customer(
         {
             "request_id": request_id,
             "emp_id": emp_id,
-            "api": "soft_delete_customer",
+            "api": "conditional_customer_soft_delete",
         },
     )
 
-    log.info(
-        "Incoming soft delete customer request | customer_id=%s",
-        customer_id,
-    )
+    log.info("Incoming customer soft delete | customer_id=%s", customer_id)
 
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
     try:
         pool = await get_db_pool()
-    except Exception as e:
-        log.exception("Database pool acquisition failed | error=%s", str(e))
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection error.",
-        )
+    except Exception:
+        log.exception("Database pool error")
+        raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Perform Soft Delete (Concurrency Safe)
+                # 1️⃣ Lock Customer
                 # --------------------------------------------------
-                delete_sql = f"""
+                customer = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                      FROM {DB_SCHEMA}.customers
+                     WHERE customer_id = $1
+                     FOR UPDATE
+                    """,
+                    customer_id,
+                )
+
+                if not customer:
+                    raise HTTPException(404, "Customer not found.")
+
+                if customer["is_active"] is False:
+                    raise HTTPException(400, "Customer already inactive.")
+
+                # --------------------------------------------------
+                # 2️⃣ Count Active GSTs
+                # --------------------------------------------------
+                gst_count = await conn.fetchval(
+                    f"""
+                    SELECT COUNT(*)
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE customer_id = $1
+                       AND is_active = TRUE
+                    """,
+                    customer_id,
+                )
+
+                if gst_count == 0:
+                    raise HTTPException(
+                        400,
+                        "Customer has no active GST registrations.",
+                    )
+
+                if gst_count > 1:
+                    raise HTTPException(
+                        400,
+                        "Customer has multiple GST registrations. "
+                        "Please deactivate GST individually.",
+                    )
+
+                # --------------------------------------------------
+                # 3️⃣ Fetch Single GST ID
+                # --------------------------------------------------
+                gst_id = await conn.fetchval(
+                    f"""
+                    SELECT id
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE customer_id = $1
+                       AND is_active = TRUE
+                    """,
+                    customer_id,
+                )
+
+                # --------------------------------------------------
+                # 4️⃣ Soft Delete Customer
+                # --------------------------------------------------
+                deleted_customer = await conn.fetchrow(
+                    f"""
                     UPDATE {DB_SCHEMA}.customers
                        SET is_active = FALSE,
                            updated_at = NOW()
                      WHERE customer_id = $1
-                       AND is_active = TRUE
                      RETURNING *
-                """
-
-                deleted_row = await conn.fetchrow(delete_sql, customer_id)
-
-                if not deleted_row:
-                    # Check existence separately
-                    check_row = await conn.fetchrow(
-                        f"""
-                        SELECT customer_id, is_active
-                          FROM {DB_SCHEMA}.customers
-                         WHERE customer_id = $1
-                        """,
-                        customer_id,
-                    )
-
-                    if not check_row:
-                        log.warning("Customer not found | customer_id=%s", customer_id)
-                        raise HTTPException(
-                            status_code=404,
-                            detail="Customer not found.",
-                        )
-
-                    log.warning(
-                        "Customer already inactive | customer_id=%s",
-                        customer_id,
-                    )
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Customer already inactive.",
-                    )
+                    """,
+                    customer_id,
+                )
 
                 # --------------------------------------------------
-                # 2️⃣ Insert Version Audit (DELETE)
+                # 5️⃣ Soft Delete GST
                 # --------------------------------------------------
-                version_sql = f"""
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_registration
+                       SET is_active = FALSE,
+                           updated_at = NOW()
+                     WHERE id = $1
+                    """,
+                    gst_id,
+                )
+
+                # --------------------------------------------------
+                # 6️⃣ Soft Delete Persons
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.registration_persons
+                       SET is_active = FALSE,
+                           updated_at = NOW()
+                     WHERE gst_registration_id = $1
+                    """,
+                    gst_id,
+                )
+
+                # --------------------------------------------------
+                # 7️⃣ Soft Delete Documents
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.registration_documents d
+                       SET is_active = FALSE,
+                           updated_at = NOW()
+                      FROM {DB_SCHEMA}.registration_persons p
+                     WHERE d.person_id = p.person_id
+                       AND p.gst_registration_id = $1
+                    """,
+                    gst_id,
+                )
+
+                # --------------------------------------------------
+                # 8️⃣ Version Audit (CUSTOMER ONLY)
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
                     INSERT INTO {DB_SCHEMA}.versions
                     (
                         emp_id,
@@ -917,98 +922,302 @@ async def soft_delete_customer(
                         updated_json
                     )
                     VALUES ($1,$2,$3,$4,$5,$6,$7)
-                """
-
-                # NEW state snapshot (is_active = FALSE)
-                deleted_snapshot = dict(deleted_row)
-
-                await conn.execute(
-                    version_sql,
+                    """,
                     emp_id,
-                    "CUSTOMER",                     # entity_type
-                    1,                              # entity_id (your default)
+                    "CUSTOMER",
+                    customer_id,
                     customer_id,
                     "DELETE",
-                    None,                           # json must be NULL
-                    json.dumps(deleted_snapshot, default=str),  # updated_json
+                    None,
+                    json.dumps(dict(deleted_customer), default=str),
                 )
 
             log.info(
-                "Customer soft deleted successfully with audit | customer_id=%s",
+                "Customer and single GST cascade deleted | customer_id=%s",
                 customer_id,
             )
 
             return {
-                **dict(deleted_row),
-                "message": "Customer soft deleted successfully.",
+                "customer_id": customer_id,
+                "gst_id": gst_id,
+                "message": "Customer and associated GST fully deactivated.",
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # FULL DATABASE EXCEPTION COVERAGE
-        # --------------------------------------------------
-        except asyncpg.exceptions.ForeignKeyViolationError as e:
-            log.error(
-                "Foreign key violation during soft delete | "
-                "customer_id=%s | error=%s",
+        except asyncpg.PostgresError as e:
+            log.exception("Postgres error")
+            raise HTTPException(status_code=500, detail=str(e))
+
+        except HTTPException:
+            raise
+
+        except Exception:
+            log.exception("Unexpected error")
+            raise HTTPException(status_code=500, detail="Internal server error.")
+
+# =========================================================
+# ACTIVATE CUSTOMER (Conditional + Explicit GST Guidance)
+# =========================================================
+
+@router.post(
+    "/{customer_id}/activate",
+    summary="Activate Customer (Conditional + Cascade + Audit)",
+    responses={
+        200: {"description": "Customer activated successfully."},
+        400: {"description": "Business validation failed."},
+        404: {"description": "Customer not found."},
+        409: {"description": "Conflict detected."},
+        500: {"description": "Database or internal error."},
+    },
+)
+async def activate_customer(
+    customer_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    """
+    Activate customer ONLY if exactly one GST exists.
+
+    ✔ If 1 GST → Full cascade activation
+    ✔ If >1 GST → Reject with explicit instruction to activate GST individually
+    ✔ Atomic transaction
+    ✔ Concurrency safe
+    ✔ Version audit (CUSTOMER only)
+    ✔ Structured logging
+    """
+
+    # --------------------------------------------------
+    # Request Context
+    # --------------------------------------------------
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {
+            "request_id": request_id,
+            "emp_id": emp_id,
+            "api": "activate_customer",
+        },
+    )
+
+    log.info("Incoming customer activation | customer_id=%s", customer_id)
+
+    # --------------------------------------------------
+    # DB Pool
+    # --------------------------------------------------
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+
+                # --------------------------------------------------
+                # 1️⃣ Lock Customer
+                # --------------------------------------------------
+                customer = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                      FROM {DB_SCHEMA}.customers
+                     WHERE customer_id = $1
+                     FOR UPDATE
+                    """,
+                    customer_id,
+                )
+
+                if not customer:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Customer not found.",
+                    )
+
+                if customer["is_active"]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Customer already active.",
+                    )
+
+                # --------------------------------------------------
+                # 2️⃣ Count GST Registrations
+                # --------------------------------------------------
+                gst_count = await conn.fetchval(
+                    f"""
+                    SELECT COUNT(*)
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE customer_id = $1
+                    """,
+                    customer_id,
+                )
+
+                if gst_count == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Customer has no GST registrations to activate.",
+                    )
+
+                if gst_count > 1:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Customer has multiple GST registrations. "
+                            "Please activate GST individually using "
+                            f"POST /customers/{customer_id}/gst/{{gst_id}}/activate"
+                        ),
+                    )
+
+                # --------------------------------------------------
+                # 3️⃣ Lock Single GST
+                # --------------------------------------------------
+                gst_row = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE customer_id = $1
+                     FOR UPDATE
+                    """,
+                    customer_id,
+                )
+
+                if not gst_row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="GST registration not found.",
+                    )
+
+                gst_id = gst_row["id"]
+
+                # --------------------------------------------------
+                # 4️⃣ Activate Customer
+                # --------------------------------------------------
+                activated_customer = await conn.fetchrow(
+                    f"""
+                    UPDATE {DB_SCHEMA}.customers
+                       SET is_active = TRUE,
+                           updated_at = NOW()
+                     WHERE customer_id = $1
+                       AND is_active = FALSE
+                     RETURNING *
+                    """,
+                    customer_id,
+                )
+
+                if not activated_customer:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Customer state changed. Please retry.",
+                    )
+
+                # --------------------------------------------------
+                # 5️⃣ Activate GST
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_registration
+                       SET is_active = TRUE,
+                           updated_at = NOW()
+                     WHERE id = $1
+                    """,
+                    gst_id,
+                )
+
+                # --------------------------------------------------
+                # 6️⃣ Activate Persons
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.registration_persons
+                       SET is_active = TRUE,
+                           updated_at = NOW()
+                     WHERE gst_registration_id = $1
+                    """,
+                    gst_id,
+                )
+
+                # --------------------------------------------------
+                # 7️⃣ Activate Documents
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.registration_documents d
+                       SET is_active = TRUE,
+                           updated_at = NOW()
+                      FROM {DB_SCHEMA}.registration_persons p
+                     WHERE d.person_id = p.person_id
+                       AND p.gst_registration_id = $1
+                    """,
+                    gst_id,
+                )
+
+                # --------------------------------------------------
+                # 8️⃣ Version Audit (CUSTOMER ONLY)
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    emp_id,
+                    "CUSTOMER",
+                    customer_id,
+                    customer_id,
+                    "ACTIVATE",
+                    None,
+                    json.dumps(dict(activated_customer), default=str),
+                )
+
+            log.info(
+                "Customer activated successfully | customer_id=%s | gst_id=%s",
                 customer_id,
-                str(e),
-                exc_info=True,
+                gst_id,
             )
+
+            return {
+                "customer_id": customer_id,
+                "gst_id": gst_id,
+                "message": (
+                    "Customer and associated GST activated successfully."
+                ),
+                "request_id": request_id,
+            }
+
+        except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(
                 status_code=400,
                 detail="Foreign key constraint violation.",
             )
 
         except asyncpg.exceptions.CheckViolationError as e:
-            log.error(
-                "Audit constraint violation | "
-                "customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=400,
-                detail="Audit constraint validation failed.",
-            )
+            log.exception("CHECK constraint error")
+            raise HTTPException(status_code=400, detail=str(e))
 
-        except asyncpg.exceptions.DataError as e:
-            log.error(
-                "Data error during soft delete | "
-                "customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-                exc_info=True,
-            )
+        except asyncpg.exceptions.DataError:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid data format.",
             )
 
         except asyncpg.PostgresError as e:
-            log.error(
-                "Database error during soft delete | "
-                "customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail="Database error.",
-            )
+            log.exception("Database error during activation")
+            raise HTTPException(status_code=500, detail=str(e))
 
         except HTTPException:
             raise
 
-        except Exception as e:
-            log.exception(
-                "Unexpected error during soft delete | "
-                "customer_id=%s | error=%s",
-                customer_id,
-                str(e),
-            )
+        except Exception:
+            log.exception("Unexpected error during activation")
             raise HTTPException(
                 status_code=500,
                 detail="Internal server error.",

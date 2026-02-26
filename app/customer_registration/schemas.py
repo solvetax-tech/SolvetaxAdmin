@@ -1,5 +1,5 @@
 from pydantic import (BaseModel,EmailStr,Field,HttpUrl,field_validator,model_validator)
-from typing import Optional, Annotated
+from typing import Optional, Annotated, List
 from datetime import datetime
 import re
 import html
@@ -17,34 +17,47 @@ class BaseSchema(BaseModel):
     }
 
 
+
 # =========================================================
-# Customer Create Schema
+# Customer Create Schema (DB-Aligned + Services Array)
 # =========================================================
 
 class CustomerIn(BaseSchema):
-    full_name: str = Field(..., min_length=2, max_length=100)
-    email: Optional[EmailStr] = Field(None, max_length=255)
-    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
-    business_name: Optional[str] = Field(None, max_length=150)
-    business_description: Optional[str] = Field(None, max_length=500)
+    full_name: str = Field(..., min_length=2, max_length=150)
+    email: Optional[EmailStr] = Field(None, max_length=150)
+    mobile: Annotated[str, Field(pattern=r"^\d{10}$")]
+    business_name: Optional[str] = Field(None, max_length=200)
+    business_description: Optional[str] = None
     business_image_url: Optional[HttpUrl] = None
-    business_type: Optional[str] = Field(None, max_length=100)
+    business_type: Optional[str] = Field(None, max_length=50)
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
-    remark: Optional[str] = Field(None, max_length=500)
+    remark: Optional[str] = None
     rm_id: Optional[int] = Field(None, gt=0)
     op_id: Optional[int] = Field(None, gt=0)
     referral_id: Optional[int] = Field(None, gt=0)
 
+    services: List[str] = Field(default_factory=list)
+
+    # -----------------------------------------------------
     # Normalize email
+    # -----------------------------------------------------
     @field_validator("email", mode="before")
     @classmethod
     def normalize_email(cls, v):
-        if v:
-            return v.strip().lower()
-        return v
+        return v.strip().lower() if v else v
 
-    # Basic XSS sanitation
+    # -----------------------------------------------------
+    # Normalize mobile
+    # -----------------------------------------------------
+    @field_validator("mobile", mode="before")
+    @classmethod
+    def normalize_mobile(cls, v):
+        return v.strip()
+
+    # -----------------------------------------------------
+    # Sanitize text fields
+    # -----------------------------------------------------
     @field_validator(
         "full_name",
         "business_name",
@@ -57,18 +70,29 @@ class CustomerIn(BaseSchema):
     )
     @classmethod
     def sanitize_strings(cls, v):
-        if isinstance(v, str):
-            return html.escape(v.strip())
-        return v
+        return html.escape(v.strip()) if isinstance(v, str) else v
 
-    # Business rule validation
-    @model_validator(mode="after")
-    def validate_contact_info(self):
-        if not self.email and not self.mobile:
-            raise ValueError("Either email or mobile must be provided")
-        return self
+    # -----------------------------------------------------
+    # Normalize & Deduplicate Services
+    # -----------------------------------------------------
+    @field_validator("services", mode="before")
+    @classmethod
+    def normalize_services(cls, v):
+        if v is None:
+            return []
 
+        if not isinstance(v, list):
+            raise ValueError("services must be a list of strings")
 
+        cleaned = []
+        for service in v:
+            if not isinstance(service, str):
+                raise ValueError("Each service must be a string")
+            s = service.strip()
+            if s:
+                cleaned.append(s)
+
+        return list(dict.fromkeys(cleaned))
 # =========================================================
 # Customer Response Schema
 # =========================================================
@@ -94,24 +118,26 @@ class CustomerOut(BaseSchema):
     is_active: bool
 
 # =========================================================
-# Customer Edit Schema (Partial Update)
+# Customer Edit Schema (Safe PATCH + Services Support)
 # =========================================================
 
 class CustomerEditIn(BaseSchema):
-    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
-    email: Optional[EmailStr] = Field(None, max_length=255)
+    full_name: Optional[str] = Field(None, min_length=2, max_length=150)
+    email: Optional[EmailStr] = Field(None, max_length=150)
     mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
-    business_name: Optional[str] = Field(None, max_length=150)
-    business_description: Optional[str] = Field(None, max_length=500)
+    business_name: Optional[str] = Field(None, max_length=200)
+    business_description: Optional[str] = None
     business_image_url: Optional[HttpUrl] = None
-    business_type: Optional[str] = Field(None, max_length=100)
+    business_type: Optional[str] = Field(None, max_length=50)
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
-    remark: Optional[str] = Field(None, max_length=500)
+    remark: Optional[str] = None
     rm_id: Optional[int] = Field(None, gt=0)
     op_id: Optional[int] = Field(None, gt=0)
     referral_id: Optional[int] = Field(None, gt=0)
     is_active: Optional[bool] = None
+
+    services: Optional[List[str]] = None
 
     # -----------------------------------------------------
     # Normalize email
@@ -119,12 +145,18 @@ class CustomerEditIn(BaseSchema):
     @field_validator("email", mode="before")
     @classmethod
     def normalize_email(cls, v):
-        if v:
-            return v.strip().lower()
-        return v
+        return v.strip().lower() if v else v
 
     # -----------------------------------------------------
-    # Basic XSS sanitation
+    # Normalize mobile
+    # -----------------------------------------------------
+    @field_validator("mobile", mode="before")
+    @classmethod
+    def normalize_mobile(cls, v):
+        return v.strip() if v else v
+
+    # -----------------------------------------------------
+    # Sanitize text fields
     # -----------------------------------------------------
     @field_validator(
         "full_name",
@@ -138,15 +170,35 @@ class CustomerEditIn(BaseSchema):
     )
     @classmethod
     def sanitize_strings(cls, v):
-        if isinstance(v, str):
-            return html.escape(v.strip())
-        return v
+        return html.escape(v.strip()) if isinstance(v, str) else v
 
     # -----------------------------------------------------
-    # Ensure at least one field is provided for update
+    # Normalize Services
+    # -----------------------------------------------------
+    @field_validator("services", mode="before")
+    @classmethod
+    def normalize_services(cls, v):
+        if v is None:
+            return None
+
+        if not isinstance(v, list):
+            raise ValueError("services must be a list of strings")
+
+        cleaned = []
+        for service in v:
+            if not isinstance(service, str):
+                raise ValueError("Each service must be a string")
+            s = service.strip()
+            if s:
+                cleaned.append(s)
+
+        return list(dict.fromkeys(cleaned))
+
+    # -----------------------------------------------------
+    # Ensure at least one field provided
     # -----------------------------------------------------
     @model_validator(mode="after")
     def validate_at_least_one_field(self):
-        if not any(value is not None for value in self.__dict__.values()):
+        if not self.model_fields_set:
             raise ValueError("At least one field must be provided for update")
         return self
