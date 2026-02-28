@@ -28,7 +28,7 @@ class CustomerIn(BaseSchema):
     mobile: Annotated[str, Field(pattern=r"^\d{10}$")]
     business_name: Optional[str] = Field(None, max_length=200)
     business_description: Optional[str] = None
-    business_image_url: Optional[HttpUrl] = None
+    business_image_url: Optional[str] = None
     business_type: Optional[str] = Field(None, max_length=50)
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
@@ -124,10 +124,10 @@ class CustomerOut(BaseSchema):
 class CustomerEditIn(BaseSchema):
     full_name: Optional[str] = Field(None, min_length=2, max_length=150)
     email: Optional[EmailStr] = Field(None, max_length=150)
-    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
+    mobile: Optional[str] = Field(None, pattern=r"^\d{10}$")
     business_name: Optional[str] = Field(None, max_length=200)
     business_description: Optional[str] = None
-    business_image_url: Optional[HttpUrl] = None
+    business_image_url: Optional[str] = None
     business_type: Optional[str] = Field(None, max_length=50)
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
@@ -136,27 +136,29 @@ class CustomerEditIn(BaseSchema):
     op_id: Optional[int] = Field(None, gt=0)
     referral_id: Optional[int] = Field(None, gt=0)
     is_active: Optional[bool] = None
-
     services: Optional[List[str]] = None
 
+
     # -----------------------------------------------------
-    # Normalize email
+    # Normalize Email
     # -----------------------------------------------------
     @field_validator("email", mode="before")
     @classmethod
     def normalize_email(cls, v):
-        return v.strip().lower() if v else v
+        return v.strip().lower() if isinstance(v, str) else v
 
     # -----------------------------------------------------
-    # Normalize mobile
+    # Normalize Mobile (Safe for int or str input)
     # -----------------------------------------------------
     @field_validator("mobile", mode="before")
     @classmethod
     def normalize_mobile(cls, v):
-        return v.strip() if v else v
+        if v is None:
+            return None
+        return str(v).strip()
 
     # -----------------------------------------------------
-    # Sanitize text fields
+    # Sanitize Text Fields
     # -----------------------------------------------------
     @field_validator(
         "full_name",
@@ -173,7 +175,7 @@ class CustomerEditIn(BaseSchema):
         return html.escape(v.strip()) if isinstance(v, str) else v
 
     # -----------------------------------------------------
-    # Normalize Services
+    # Normalize Services (Deduplicate + Clean)
     # -----------------------------------------------------
     @field_validator("services", mode="before")
     @classmethod
@@ -195,7 +197,7 @@ class CustomerEditIn(BaseSchema):
         return list(dict.fromkeys(cleaned))
 
     # -----------------------------------------------------
-    # Ensure at least one field provided
+    # Ensure At Least One Field Provided
     # -----------------------------------------------------
     @model_validator(mode="after")
     def validate_at_least_one_field(self):

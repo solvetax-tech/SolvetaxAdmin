@@ -25,7 +25,6 @@ router = APIRouter(
 
 @router.post(
     "",
-    response_model=CustomerOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create Customer (Production Ready + Audit)",
     responses={
@@ -513,7 +512,6 @@ async def filter_customers(
 # --------------------------------------------------------------
 # EDIT CUSTOMER (FULL ENTERPRISE DYNAMIC PATCH + VERSION AUDIT)
 # --------------------------------------------------------------
-
 @router.post(
     "/{customer_id}/customer-dyn/edit",
     summary="Edit Customer (Dynamic Update + Version Audit - Production Ready)",
@@ -524,22 +522,15 @@ async def edit_customer(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Enterprise-Grade Dynamic Customer Update API
-
-    ✔ DB-aligned schema
     ✔ Safe PATCH-style dynamic update
-    ✔ SELECT ... FOR UPDATE (row locking)
-    ✔ OLD snapshot in versions.json
-    ✔ NEW snapshot in versions.updated_json
+    ✔ Row-level locking
+    ✔ Version audit
+    ✔ Strict whitelist
     ✔ Atomic transaction
-    ✔ Whitelist-protected fields
-    ✔ Full asyncpg exception handling
-    ✔ Structured logging
+    ✔ text[] handling
+    ✔ Full asyncpg exception coverage
     """
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
@@ -560,8 +551,8 @@ async def edit_customer(
     # --------------------------------------------------
     try:
         update_data: Dict[str, Any] = payload.model_dump(exclude_unset=True)
-    except Exception as e:
-        log.exception("Payload serialization failed | error=%s", str(e))
+    except Exception:
+        log.exception("Payload serialization failed")
         raise HTTPException(status_code=400, detail="Invalid request payload.")
 
     if not update_data:
@@ -571,7 +562,7 @@ async def edit_customer(
         )
 
     # --------------------------------------------------
-    # Allowed Fields Whitelist (Security Layer)
+    # Whitelist Protection
     # --------------------------------------------------
     allowed_fields = {
         "full_name",
@@ -588,6 +579,7 @@ async def edit_customer(
         "op_id",
         "referral_id",
         "is_active",
+        "services",
     }
 
     invalid_fields = set(update_data.keys()) - allowed_fields
@@ -598,7 +590,35 @@ async def edit_customer(
         )
 
     # --------------------------------------------------
-    # Database Pool
+    # Normalize services for PostgreSQL text[]
+    # --------------------------------------------------
+    if "services" in update_data:
+        services_value = update_data["services"]
+
+        if services_value is None:
+            update_data["services"] = []
+        else:
+            if not isinstance(services_value, list):
+                raise HTTPException(
+                    status_code=400,
+                    detail="services must be a list of strings.",
+                )
+
+            cleaned_services = []
+            for s in services_value:
+                if not isinstance(s, str):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Each service must be a string.",
+                    )
+                s = s.strip()
+                if s:
+                    cleaned_services.append(s)
+
+            update_data["services"] = list(dict.fromkeys(cleaned_services))
+
+    # --------------------------------------------------
+    # Database Transaction
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
@@ -610,9 +630,7 @@ async def edit_customer(
         try:
             async with conn.transaction():
 
-                # --------------------------------------------------
-                # 1️⃣ Lock Existing Row (Prevents Lost Updates)
-                # --------------------------------------------------
+                # 1️⃣ Lock Row
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT *
@@ -629,9 +647,7 @@ async def edit_customer(
                         detail="Customer not found.",
                     )
 
-                # --------------------------------------------------
-                # 2️⃣ Build Dynamic Update Query
-                # --------------------------------------------------
+                # 2️⃣ Build Dynamic Update
                 fields = []
                 values = []
                 param_index = 1
@@ -654,9 +670,13 @@ async def edit_customer(
 
                 new_row = await conn.fetchrow(update_sql, *values)
 
-                # --------------------------------------------------
-                # 3️⃣ Version Audit Insert
-                # --------------------------------------------------
+                if not new_row:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Customer state changed. Please retry.",
+                    )
+
+                # 3️⃣ Version Audit
                 await conn.execute(
                     f"""
                     INSERT INTO {DB_SCHEMA}.versions
@@ -680,10 +700,7 @@ async def edit_customer(
                     json.dumps(dict(new_row), default=str),
                 )
 
-            log.info(
-                "Customer updated successfully | customer_id=%s",
-                customer_id,
-            )
+            log.info("Customer updated successfully | customer_id=%s", customer_id)
 
             return {
                 **dict(new_row),
@@ -692,7 +709,7 @@ async def edit_customer(
             }
 
         # --------------------------------------------------
-        # FULL DATABASE EXCEPTION COVERAGE
+        # Exception Handling
         # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError:
             raise HTTPException(
@@ -709,7 +726,7 @@ async def edit_customer(
         except asyncpg.exceptions.CheckViolationError as e:
             raise HTTPException(
                 status_code=400,
-                detail=str(e),
+                detail=f"Constraint violation: {getattr(e, 'constraint_name', '')}",
             )
 
         except asyncpg.exceptions.NotNullViolationError:
@@ -724,11 +741,11 @@ async def edit_customer(
                 detail="Invalid data format provided.",
             )
 
-        except asyncpg.PostgresError as e:
-            log.exception("Postgres error during update")
+        except asyncpg.PostgresError:
+            log.exception("Database error during update")
             raise HTTPException(
                 status_code=500,
-                detail=str(e),
+                detail="Database error occurred.",
             )
 
         except HTTPException:
@@ -740,16 +757,17 @@ async def edit_customer(
                 status_code=500,
                 detail="Internal server error.",
             )
+
 # =========================================================
-# CONDITIONAL CUSTOMER SOFT DELETE
+# SOFT DELETE CUSTOMER (Customer-First Mode + Conditional Cascade)
 # =========================================================
 
 @router.delete(
     "/{customer_id}/soft_delete",
-    summary="Soft delete customer only if exactly one GST exists",
+    summary="Soft delete customer with conditional GST cascade",
     responses={
-        200: {"description": "Customer and GST deactivated."},
-        400: {"description": "Business rule violation."},
+        200: {"description": "Customer deactivated successfully."},
+        400: {"description": "Business validation failed."},
         404: {"description": "Customer not found."},
         500: {"description": "Internal server error."},
     },
@@ -759,15 +777,20 @@ async def soft_delete_customer(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Soft delete customer ONLY if exactly one GST exists.
+    Soft delete customer conditionally based on ACTIVE GST count.
 
-    ✔ If 1 GST → Full cascade delete
-    ✔ If >1 GST → Reject
+    ✔ If 0 GST → Deactivate customer only
+    ✔ If 1 GST → Full cascade deactivate
+    ✔ If >1 GST → Deactivate customer only + instruct manual GST deactivation
     ✔ Atomic transaction
     ✔ Concurrency safe
     ✔ Version audit (CUSTOMER only)
+    ✔ Structured logging
     """
 
+    # --------------------------------------------------
+    # Request Context
+    # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
@@ -783,6 +806,9 @@ async def soft_delete_customer(
 
     log.info("Incoming customer soft delete | customer_id=%s", customer_id)
 
+    # --------------------------------------------------
+    # DB Pool
+    # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
@@ -813,7 +839,7 @@ async def soft_delete_customer(
                     raise HTTPException(400, "Customer already inactive.")
 
                 # --------------------------------------------------
-                # 2️⃣ Count Active GSTs
+                # 2️⃣ Count ACTIVE GSTs
                 # --------------------------------------------------
                 gst_count = await conn.fetchval(
                     f"""
@@ -825,31 +851,35 @@ async def soft_delete_customer(
                     customer_id,
                 )
 
-                if gst_count == 0:
-                    raise HTTPException(
-                        400,
-                        "Customer has no active GST registrations.",
-                    )
-
-                if gst_count > 1:
-                    raise HTTPException(
-                        400,
-                        "Customer has multiple GST registrations. "
-                        "Please deactivate GST individually.",
-                    )
+                gst_id = None
+                manual_gst_deactivation_required = False
 
                 # --------------------------------------------------
-                # 3️⃣ Fetch Single GST ID
+                # 3️⃣ GST Handling Logic
                 # --------------------------------------------------
-                gst_id = await conn.fetchval(
-                    f"""
-                    SELECT id
-                      FROM {DB_SCHEMA}.gst_registration
-                     WHERE customer_id = $1
-                       AND is_active = TRUE
-                    """,
-                    customer_id,
-                )
+                if gst_count == 1:
+
+                    gst_row = await conn.fetchrow(
+                        f"""
+                        SELECT *
+                          FROM {DB_SCHEMA}.gst_registration
+                         WHERE customer_id = $1
+                           AND is_active = TRUE
+                         FOR UPDATE
+                        """,
+                        customer_id,
+                    )
+
+                    if not gst_row:
+                        raise HTTPException(
+                            409,
+                            "GST state changed. Please retry.",
+                        )
+
+                    gst_id = gst_row["id"]
+
+                elif gst_count > 1:
+                    manual_gst_deactivation_required = True
 
                 # --------------------------------------------------
                 # 4️⃣ Soft Delete Customer
@@ -866,48 +896,47 @@ async def soft_delete_customer(
                 )
 
                 # --------------------------------------------------
-                # 5️⃣ Soft Delete GST
+                # 5️⃣ If Exactly ONE GST → Cascade Deactivation
                 # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.gst_registration
-                       SET is_active = FALSE,
-                           updated_at = NOW()
-                     WHERE id = $1
-                    """,
-                    gst_id,
-                )
+                if gst_id:
+
+                    # Deactivate GST
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.gst_registration
+                           SET is_active = FALSE,
+                               updated_at = NOW()
+                         WHERE id = $1
+                        """,
+                        gst_id,
+                    )
+
+                    # Deactivate Persons
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.registration_persons
+                           SET is_active = FALSE,
+                               updated_at = NOW()
+                         WHERE gst_registration_id = $1
+                        """,
+                        gst_id,
+                    )
+
+                    # Deactivate Documents
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.registration_documents d
+                           SET is_active = FALSE,
+                               updated_at = NOW()
+                          FROM {DB_SCHEMA}.registration_persons p
+                         WHERE d.person_id = p.person_id
+                           AND p.gst_registration_id = $1
+                        """,
+                        gst_id,
+                    )
 
                 # --------------------------------------------------
-                # 6️⃣ Soft Delete Persons
-                # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.registration_persons
-                       SET is_active = FALSE,
-                           updated_at = NOW()
-                     WHERE gst_registration_id = $1
-                    """,
-                    gst_id,
-                )
-
-                # --------------------------------------------------
-                # 7️⃣ Soft Delete Documents
-                # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.registration_documents d
-                       SET is_active = FALSE,
-                           updated_at = NOW()
-                      FROM {DB_SCHEMA}.registration_persons p
-                     WHERE d.person_id = p.person_id
-                       AND p.gst_registration_id = $1
-                    """,
-                    gst_id,
-                )
-
-                # --------------------------------------------------
-                # 8️⃣ Version Audit (CUSTOMER ONLY)
+                # 6️⃣ Version Audit (CUSTOMER ONLY)
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -932,15 +961,32 @@ async def soft_delete_customer(
                     json.dumps(dict(deleted_customer), default=str),
                 )
 
+            # --------------------------------------------------
+            # Response Handling
+            # --------------------------------------------------
+            if gst_id:
+                message = "Customer and associated GST,persons and docs fully deactivated."
+            elif manual_gst_deactivation_required:
+                message = (
+                    "Customer deactivated successfully. "
+                    "Customer has multiple active GST registrations. "
+                    "Please deactivate each GST individually as per requirement."
+                )
+            else:
+                message = "Customer deactivated successfully."
+
             log.info(
-                "Customer and single GST cascade deleted | customer_id=%s",
+                "Customer soft delete completed | customer_id=%s | gst_id=%s | gst_count=%s",
                 customer_id,
+                gst_id,
+                gst_count,
             )
 
             return {
                 "customer_id": customer_id,
                 "gst_id": gst_id,
-                "message": "Customer and associated GST fully deactivated.",
+                "gst_count": gst_count,
+                "message": message,
                 "request_id": request_id,
             }
 
@@ -956,7 +1002,7 @@ async def soft_delete_customer(
             raise HTTPException(status_code=500, detail="Internal server error.")
 
 # =========================================================
-# ACTIVATE CUSTOMER (Conditional + Explicit GST Guidance)
+# ACTIVATE CUSTOMER (Customer-First Mode + Conditional Cascade)
 # =========================================================
 
 @router.post(
@@ -975,12 +1021,13 @@ async def activate_customer(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
-    Activate customer ONLY if exactly one GST exists.
+    Activate customer conditionally based on GST count.
 
+    ✔ If 0 GST → Activate customer only
     ✔ If 1 GST → Full cascade activation
-    ✔ If >1 GST → Reject with explicit instruction to activate GST individually
+    ✔ If >1 GST → Activate customer only + instruct manual GST activation
     ✔ Atomic transaction
-    ✔ Concurrency safe
+    ✔ Concurrency safe (FOR UPDATE locking)
     ✔ Version audit (CUSTOMER only)
     ✔ Structured logging
     """
@@ -1017,7 +1064,7 @@ async def activate_customer(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Lock Customer
+                # 1️⃣ Lock Customer Row
                 # --------------------------------------------------
                 customer = await conn.fetchrow(
                     f"""
@@ -1038,7 +1085,7 @@ async def activate_customer(
                 if customer["is_active"]:
                     raise HTTPException(
                         status_code=400,
-                        detail="Customer already active.",
+                        detail="Customer already active ,If you want to activate from GST go to gst Page and activate",
                     )
 
                 # --------------------------------------------------
@@ -1053,42 +1100,35 @@ async def activate_customer(
                     customer_id,
                 )
 
-                if gst_count == 0:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Customer has no GST registrations to activate.",
-                    )
-
-                if gst_count > 1:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            "Customer has multiple GST registrations. "
-                            "Please activate GST individually using "
-                            f"POST /customers/{customer_id}/gst/{{gst_id}}/activate"
-                        ),
-                    )
+                gst_id = None
+                manual_gst_activation_required = False
 
                 # --------------------------------------------------
-                # 3️⃣ Lock Single GST
+                # 3️⃣ Handle GST Logic
                 # --------------------------------------------------
-                gst_row = await conn.fetchrow(
-                    f"""
-                    SELECT *
-                      FROM {DB_SCHEMA}.gst_registration
-                     WHERE customer_id = $1
-                     FOR UPDATE
-                    """,
-                    customer_id,
-                )
-
-                if not gst_row:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="GST registration not found.",
+                if gst_count == 1:
+                    # Lock the single GST
+                    gst_row = await conn.fetchrow(
+                        f"""
+                        SELECT *
+                          FROM {DB_SCHEMA}.gst_registration
+                         WHERE customer_id = $1
+                         FOR UPDATE
+                        """,
+                        customer_id,
                     )
 
-                gst_id = gst_row["id"]
+                    if not gst_row:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="GST state changed. Please retry.",
+                        )
+
+                    gst_id = gst_row["id"]
+
+                elif gst_count > 1:
+                    # Allow customer activation but require manual GST activation
+                    manual_gst_activation_required = True
 
                 # --------------------------------------------------
                 # 4️⃣ Activate Customer
@@ -1112,48 +1152,47 @@ async def activate_customer(
                     )
 
                 # --------------------------------------------------
-                # 5️⃣ Activate GST
+                # 5️⃣ If Exactly ONE GST → Cascade Activation
                 # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.gst_registration
-                       SET is_active = TRUE,
-                           updated_at = NOW()
-                     WHERE id = $1
-                    """,
-                    gst_id,
-                )
+                if gst_id:
+
+                    # Activate GST
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.gst_registration
+                           SET is_active = TRUE,
+                               updated_at = NOW()
+                         WHERE id = $1
+                        """,
+                        gst_id,
+                    )
+
+                    # Activate Persons
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.registration_persons
+                           SET is_active = TRUE,
+                               updated_at = NOW()
+                         WHERE gst_registration_id = $1
+                        """,
+                        gst_id,
+                    )
+
+                    # Activate Documents
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.registration_documents d
+                           SET is_active = TRUE,
+                               updated_at = NOW()
+                          FROM {DB_SCHEMA}.registration_persons p
+                         WHERE d.person_id = p.person_id
+                           AND p.gst_registration_id = $1
+                        """,
+                        gst_id,
+                    )
 
                 # --------------------------------------------------
-                # 6️⃣ Activate Persons
-                # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.registration_persons
-                       SET is_active = TRUE,
-                           updated_at = NOW()
-                     WHERE gst_registration_id = $1
-                    """,
-                    gst_id,
-                )
-
-                # --------------------------------------------------
-                # 7️⃣ Activate Documents
-                # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.registration_documents d
-                       SET is_active = TRUE,
-                           updated_at = NOW()
-                      FROM {DB_SCHEMA}.registration_persons p
-                     WHERE d.person_id = p.person_id
-                       AND p.gst_registration_id = $1
-                    """,
-                    gst_id,
-                )
-
-                # --------------------------------------------------
-                # 8️⃣ Version Audit (CUSTOMER ONLY)
+                # 6️⃣ Version Audit (CUSTOMER ONLY)
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -1178,21 +1217,40 @@ async def activate_customer(
                     json.dumps(dict(activated_customer), default=str),
                 )
 
+            # --------------------------------------------------
+            # Response
+            # --------------------------------------------------
+            message = None
+
+            if gst_id:
+                message = "Customer and associated GST, Persons and Docs activated successfully."
+            elif manual_gst_activation_required:
+                message = (
+                    "Customer activated successfully. "
+                    "Multiple GST registrations detected. "
+                    "Please activate each GST individually in GST Page"
+                )
+            else:
+                message = "Customer activated successfully."
+
             log.info(
-                "Customer activated successfully | customer_id=%s | gst_id=%s",
+                "Customer activation completed | customer_id=%s | gst_id=%s | gst_count=%s",
                 customer_id,
                 gst_id,
+                gst_count,
             )
 
             return {
                 "customer_id": customer_id,
                 "gst_id": gst_id,
-                "message": (
-                    "Customer and associated GST activated successfully."
-                ),
+                "gst_count": gst_count,
+                "message": message,
                 "request_id": request_id,
             }
 
+        # --------------------------------------------------
+        # Exception Handling
+        # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(
                 status_code=400,

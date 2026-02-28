@@ -396,7 +396,6 @@ async def list_registration_documents(
         log.exception("Unexpected error during registration document filtering")
         raise HTTPException(status_code=500, detail="Internal server error.")
 
-
 @router.post(
     "/{document_id}/edit",
     summary="Edit Registration Document (Flexible Verified + Version Audit)",
@@ -441,17 +440,17 @@ async def edit_registration_document(
     # Flexible verified logic
     # --------------------------------------------------
     if "verified" in update_data:
-        old_verified_status = None  # Will fetch after old_row
         if update_data["verified"]:
-            update_data["verified_by"] = emp_id  # set automatically
+            update_data["verified_by"] = emp_id
         else:
-            update_data["verified_by"] = None  # allow un-verifying
+            update_data["verified_by"] = None
 
     # --------------------------------------------------
     # Normalize strings
     # --------------------------------------------------
     if "document_type" in update_data and update_data["document_type"]:
         update_data["document_type"] = update_data["document_type"].strip().upper()
+
     if "document_url" in update_data and update_data["document_url"]:
         update_data["document_url"] = str(update_data["document_url"]).strip()
 
@@ -467,19 +466,28 @@ async def edit_registration_document(
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
+
+                # --------------------------------------------------
+                # 🔥 FIXED QUERY (JOIN to get customer_id)
+                # --------------------------------------------------
                 old_row = await conn.fetchrow(
                     f"""
-                    SELECT *
-                      FROM {DB_SCHEMA}.registration_documents
-                     WHERE document_id = $1
-                       AND is_active = TRUE
+                    SELECT d.*, rp.customer_id
+                      FROM {DB_SCHEMA}.registration_documents d
+                      JOIN {DB_SCHEMA}.registration_persons rp
+                        ON d.person_id = rp.person_id
+                     WHERE d.document_id = $1
+                       AND d.is_active = TRUE
                      LIMIT 1
                     """,
                     document_id,
                 )
 
                 if not old_row:
-                    raise HTTPException(status_code=404, detail="Registration document not found or inactive.")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Registration document not found or inactive.",
+                    )
 
                 # --------------------------------------------------
                 # Reject if no actual change
@@ -489,25 +497,24 @@ async def edit_registration_document(
                     if k in old_row and old_row[k] != v:
                         no_change = False
                         break
+
                 if no_change:
                     log.info("No changes detected for document_id=%s", document_id)
-                    raise HTTPException(status_code=400, detail="No changes detected to update.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No changes detected to update.",
+                    )
 
-                # Optional: log verified flip
-                if "verified" in update_data:
-                    old_verified_status = old_row["verified"]
-                    if old_verified_status is True and update_data["verified"] is False:
-                        log.warning(
-                            "Document verification flipped from TRUE → FALSE | document_id=%s | emp_id=%s",
-                            document_id, emp_id
-                        )
-
+                # --------------------------------------------------
                 # Build dynamic update
+                # --------------------------------------------------
                 fields, values, idx = [], [], 1
+
                 for k, v in update_data.items():
                     fields.append(f"{k} = ${idx}")
                     values.append(v)
                     idx += 1
+
                 fields.append("updated_at = NOW()")
                 values.append(document_id)
 
@@ -517,16 +524,30 @@ async def edit_registration_document(
                      WHERE document_id = ${idx}
                      RETURNING *
                 """
+
                 new_row = await conn.fetchrow(sql, *values)
 
                 if not new_row:
-                    raise HTTPException(status_code=404, detail="Document became inactive before update.")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Document became inactive before update.",
+                    )
 
-                # Version audit
+                # --------------------------------------------------
+                # Version Audit (CORRECT customer_id now available)
+                # --------------------------------------------------
                 await conn.execute(
                     f"""
                     INSERT INTO {DB_SCHEMA}.versions
-                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
                     VALUES ($1,$2,$3,$4,$5,$6,$7)
                     """,
                     emp_id,
@@ -555,7 +576,10 @@ async def edit_registration_document(
             }
             raise HTTPException(
                 status_code=409,
-                detail=UNIQUE_MAP.get(constraint, "Duplicate field value violates unique constraint."),
+                detail=UNIQUE_MAP.get(
+                    constraint,
+                    "Duplicate field value violates unique constraint.",
+                ),
             )
 
         except asyncpg.exceptions.CheckViolationError as e:
@@ -563,35 +587,50 @@ async def edit_registration_document(
             CHECK_MAP = {
                 "chk_doc_gst_format": "Invalid GSTIN format.",
                 "chk_doc_mobile_format": "Invalid mobile number format. Must be 10 digits.",
-                "chk_verified_active": "Invalid verification logic. Verified documents must have verified_by and verified_at set correctly.",
+                "chk_verified_active": "Invalid verification logic.",
             }
             raise HTTPException(
                 status_code=400,
-                detail=CHECK_MAP.get(constraint, f"Data violates constraint: {constraint}"),
+                detail=CHECK_MAP.get(
+                    constraint,
+                    f"Data violates constraint: {constraint}",
+                ),
             )
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(status_code=400, detail="Invalid foreign key reference provided.")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid foreign key reference provided.",
+            )
 
         except asyncpg.exceptions.NotNullViolationError:
-            raise HTTPException(status_code=400, detail="Missing required field value.")
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required field value.",
+            )
 
         except asyncpg.exceptions.DataError:
-            raise HTTPException(status_code=400, detail="Invalid data format provided.")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid data format provided.",
+            )
 
         except asyncpg.PostgresError:
             log.exception("Database error during document update")
-            raise HTTPException(status_code=500, detail="Database error occurred.")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred.",
+            )
+
+        except HTTPException:
+            raise
 
         except Exception:
             log.exception("Unexpected error during document update")
-            raise HTTPException(status_code=500, detail="Internal server error.")
-
-# -------------------------------------------------------------------
-# SOFT DELETE REGISTRATION DOCUMENT
-# (Enterprise + Version Audit + Concurrency Safe)
-# -------------------------------------------------------------------
-
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 @router.delete(
     "/{document_id}/soft_delete",
     summary="Soft delete Registration Document (Production Ready + Audit)",
@@ -650,16 +689,19 @@ async def soft_delete_registration_document(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Soft Delete (Concurrency Safe)
+                # 🔥 FIX: Use JOIN to get customer_id
                 # --------------------------------------------------
                 delete_sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_documents
+                    UPDATE {DB_SCHEMA}.registration_documents d
                        SET is_active = FALSE,
                            updated_at = NOW()
-                     WHERE document_id = $1
-                       AND is_active = TRUE
-                     RETURNING *
+                      FROM {DB_SCHEMA}.registration_persons rp
+                     WHERE d.document_id = $1
+                       AND d.person_id = rp.person_id
+                       AND d.is_active = TRUE
+                     RETURNING d.*, rp.customer_id
                 """
+
                 deleted_row = await conn.fetchrow(delete_sql, document_id)
 
                 # --------------------------------------------------
@@ -676,12 +718,21 @@ async def soft_delete_registration_document(
                     )
 
                     if not existing_row:
-                        raise HTTPException(status_code=404, detail="Registration document not found.")
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Registration document not found.",
+                        )
 
                     if existing_row["is_active"] is False:
-                        raise HTTPException(status_code=400, detail="Registration document already inactive.")
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Registration document already inactive.",
+                        )
 
-                    raise HTTPException(status_code=409, detail="Document state changed. Please retry.")
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Document state changed. Please retry.",
+                    )
 
                 # --------------------------------------------------
                 # 2️⃣ Business Rule Enforcement (Person must be active)
@@ -695,6 +746,7 @@ async def soft_delete_registration_document(
                         """,
                         deleted_row["person_id"],
                     )
+
                     if person_row and person_row["is_active"] is False:
                         raise HTTPException(
                             status_code=400,
@@ -729,13 +781,16 @@ async def soft_delete_registration_document(
                     emp_id,
                     "REGISTRATION_DOCUMENT",
                     document_id,
-                    deleted_row["customer_id"],
+                    deleted_row["customer_id"],   # ✅ now exists
                     "DELETE",
-                    None,  # json = NULL
-                    json.dumps(dict(deleted_row), default=str),  # updated snapshot
+                    None,
+                    json.dumps(dict(deleted_row), default=str),
                 )
 
-            log.info("Document soft deleted successfully | document_id=%s", document_id)
+            log.info(
+                "Document soft deleted successfully | document_id=%s",
+                document_id,
+            )
 
             return {
                 **dict(deleted_row),
@@ -747,30 +802,40 @@ async def soft_delete_registration_document(
         # Exception Mapping
         # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
+            raise HTTPException(
+                status_code=400,
+                detail="Foreign key constraint violation.",
+            )
 
         except asyncpg.exceptions.CheckViolationError:
-            raise HTTPException(status_code=400, detail="Constraint validation failed.")
+            raise HTTPException(
+                status_code=400,
+                detail="Constraint validation failed.",
+            )
 
         except asyncpg.exceptions.DataError:
-            raise HTTPException(status_code=400, detail="Invalid data format.")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid data format.",
+            )
 
         except asyncpg.PostgresError:
             log.exception("Database error during document soft delete")
-            raise HTTPException(status_code=500, detail="Database error occurred.")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred.",
+            )
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during document soft delete")
-            raise HTTPException(status_code=500, detail="Internal server error.")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-
-# -------------------------------------------------------------------
-# ACTIVATE REGISTRATION DOCUMENT
-# (Enterprise + Version Audit + Concurrency Safe)
-# -------------------------------------------------------------------
 
 @router.post(
     "/{document_id}/activate",
@@ -817,7 +882,7 @@ async def activate_registration_document(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Fetch Document WITH ROW LOCK (Prevents race)
+                # 1️⃣ Fetch Document WITH ROW LOCK
                 # --------------------------------------------------
                 doc_row = await conn.fetchrow(
                     f"""
@@ -867,16 +932,18 @@ async def activate_registration_document(
                         )
 
                 # --------------------------------------------------
-                # 3️⃣ Activate Document (Safe Update)
+                # 3️⃣ Activate Document (JOIN to fetch customer_id)
                 # --------------------------------------------------
                 activated_row = await conn.fetchrow(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_documents
+                    UPDATE {DB_SCHEMA}.registration_documents d
                        SET is_active = TRUE,
                            updated_at = NOW()
-                     WHERE document_id = $1
-                       AND is_active = FALSE
-                     RETURNING *
+                      FROM {DB_SCHEMA}.registration_persons rp
+                     WHERE d.document_id = $1
+                       AND d.person_id = rp.person_id
+                       AND d.is_active = FALSE
+                     RETURNING d.*, rp.customer_id
                     """,
                     document_id,
                 )
@@ -914,7 +981,7 @@ async def activate_registration_document(
                     emp_id,
                     "REGISTRATION_DOCUMENT",
                     document_id,
-                    activated_row["customer_id"],
+                    activated_row["customer_id"],   # ✅ now exists
                     "ACTIVATE",
                     None,
                     json.dumps(dict(activated_row), default=str),

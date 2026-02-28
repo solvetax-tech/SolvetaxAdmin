@@ -1019,7 +1019,7 @@ async def soft_delete_registration_person(
 
 # -------------------------------------------------------------------
 # ACTIVATE REGISTRATION PERSON
-# (Enterprise + Version Audit + Cascade Docs + GST & Customer Active Check)
+# (Enterprise + Version Audit + Cascade Docs + Primary Enforcement)
 # -------------------------------------------------------------------
 
 @router.post(
@@ -1044,10 +1044,12 @@ async def activate_registration_person(
     ✔ Concurrency safe
     ✔ GST must be active
     ✔ Customer must be active
+    ✔ Primary enforcement per GST
     ✔ Cascade activation of person's documents
-    ✔ Version audit for person only (documents audit skipped)
+    ✔ Version audit for person only
     ✔ Structured logging
     """
+
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
@@ -1060,6 +1062,7 @@ async def activate_registration_person(
             "api": "activate_registration_person",
         },
     )
+
     log.info("Incoming registration person activation | person_id=%s", person_id)
 
     try:
@@ -1073,8 +1076,7 @@ async def activate_registration_person(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Fetch Existing Person + GST + Customer Status
-                # 🔥 IMPROVED: Join using gst_registration_id (ID-based architecture)
+                # 1️⃣ Fetch Person + GST + Customer Status (LOCK ROW)
                 # --------------------------------------------------
                 person_row = await conn.fetchrow(
                     f"""
@@ -1087,16 +1089,22 @@ async def activate_registration_person(
                       JOIN {DB_SCHEMA}.gst_registration gst
                         ON rp.gst_registration_id = gst.id
                      WHERE rp.person_id = $1
-                     LIMIT 1
+                     FOR UPDATE
                     """,
                     person_id,
                 )
 
                 if not person_row:
-                    raise HTTPException(status_code=404, detail="Registration person not found.")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Registration person not found.",
+                    )
 
                 if person_row["is_active"]:
-                    raise HTTPException(status_code=400, detail="Registration person already active.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Registration person already active.",
+                    )
 
                 if not person_row["gst_active"]:
                     raise HTTPException(
@@ -1110,11 +1118,46 @@ async def activate_registration_person(
                         detail="Cannot activate person: associated customer is inactive.",
                     )
 
-                # Store customer_id once for audit
+                gst_registration_id = person_row["gst_registration_id"]
                 customer_id = person_row["customer_id"]
+                is_primary = person_row["is_primary_customer"]
 
                 # --------------------------------------------------
-                # 2️⃣ Activate Person (Concurrency Safe)
+                # 2️⃣ Fetch Active Primary Person for this GST
+                # --------------------------------------------------
+                primary_person = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                      FROM {DB_SCHEMA}.registration_persons
+                     WHERE gst_registration_id = $1
+                       AND is_primary_customer = TRUE
+                       AND is_active = TRUE
+                     LIMIT 1
+                    """,
+                    gst_registration_id,
+                )
+
+                # --------------------------------------------------
+                # 3️⃣ Primary Enforcement Logic
+                # --------------------------------------------------
+
+                # ❌ If NO active primary exists
+                if not primary_person:
+
+                    # If this person is NOT primary → BLOCK
+                    if not is_primary:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                "Please activate the primary person first. "
+                                "If you want to make another person primary, "
+                                "activate the current primary person, change the primary designation "
+                                "to the desired person, and then proceed."
+                            ),
+                        )
+
+                # --------------------------------------------------
+                # 4️⃣ Activate Person (Concurrency Safe)
                 # --------------------------------------------------
                 activate_person_sql = f"""
                     UPDATE {DB_SCHEMA}.registration_persons
@@ -1124,7 +1167,12 @@ async def activate_registration_person(
                        AND is_active = FALSE
                      RETURNING *
                 """
-                activated_person = await conn.fetchrow(activate_person_sql, person_id)
+
+                activated_person = await conn.fetchrow(
+                    activate_person_sql,
+                    person_id,
+                )
+
                 if not activated_person:
                     raise HTTPException(
                         status_code=409,
@@ -1132,7 +1180,7 @@ async def activate_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Cascade Activate Person's Documents
+                # 5️⃣ Cascade Activate Person's Documents
                 # --------------------------------------------------
                 activated_docs = await conn.fetch(
                     f"""
@@ -1147,34 +1195,7 @@ async def activate_registration_person(
                 )
 
                 # --------------------------------------------------
-                # 4️⃣ Version Audit for Documents (SKIPPED)
-                # --------------------------------------------------
-                # for doc in activated_docs:
-                #     await conn.execute(
-                #         f"""
-                #         INSERT INTO {DB_SCHEMA}.versions
-                #         (
-                #             emp_id,
-                #             entity_type,
-                #             entity_id,
-                #             customer_id,
-                #             action,
-                #             json,
-                #             updated_json
-                #         )
-                #         VALUES ($1,$2,$3,$4,$5,$6,$7)
-                #         """,
-                #         emp_id,
-                #         "REGISTRATION_DOCUMENT",
-                #         doc["document_id"],
-                #         customer_id,
-                #         "ACTIVATE",
-                #         None,
-                #         json.dumps(dict(doc), default=str),
-                #     )
-
-                # --------------------------------------------------
-                # 5️⃣ Version Audit for Person
+                # 6️⃣ Version Audit for Person
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -1216,22 +1237,37 @@ async def activate_registration_person(
         # Exception Handling
         # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
+            raise HTTPException(
+                status_code=400,
+                detail="Foreign key constraint violation.",
+            )
 
         except asyncpg.exceptions.CheckViolationError as e:
             log.exception("CHECK ERROR")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(
+                status_code=400,
+                detail=str(e),
+            )
 
         except asyncpg.exceptions.DataError:
-            raise HTTPException(status_code=400, detail="Invalid data format.")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid data format.",
+            )
 
         except asyncpg.PostgresError as e:
             log.exception("Database error during person activation")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(
+                status_code=500,
+                detail=str(e),
+            )
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during registration person activation")
-            raise HTTPException(status_code=500, detail="Internal server error.")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )

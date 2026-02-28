@@ -540,7 +540,7 @@ async def edit_gst_registration(
                 if not old_row:
                     raise HTTPException(
                         404,
-                        "GST registration not found or inactive.",
+                        "GST registration not found or inactive,First Activate the GST to edit",
                     )
 
                 # --------------------------------------------------
@@ -735,7 +735,7 @@ async def soft_delete_gst_registration(
                 if gst_row["is_active"] is False:
                     raise HTTPException(
                         status_code=400,
-                        detail="GST registration already inactive.",
+                        detail="GST registration already inactive.confirm associated persons and docs are inactivate state or not.",
                     )
 
                 # --------------------------------------------------

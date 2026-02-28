@@ -178,7 +178,7 @@ async def signup(
                     version_sql,
                     emp_id,            # actor performing signup
                     "SIGNUP",          # entity_type
-                    2,                 # entity_id
+                    created_id,                 # entity_id
                     None,              # customer_id
                     "CREATE",          # action
                     json.dumps(employee_dict, default=str),
