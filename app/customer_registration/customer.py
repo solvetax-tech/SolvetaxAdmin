@@ -781,7 +781,7 @@ async def soft_delete_customer(
 
     ✔ If 0 GST → Deactivate customer only
     ✔ If 1 GST → Full cascade deactivate
-    ✔ If >1 GST → Deactivate customer only + instruct manual GST deactivation
+    ✔ If >1 GST → DO NOT deactivate customer (block operation)
     ✔ Atomic transaction
     ✔ Concurrency safe
     ✔ Version audit (CUSTOMER only)
@@ -852,7 +852,6 @@ async def soft_delete_customer(
                 )
 
                 gst_id = None
-                manual_gst_deactivation_required = False
 
                 # --------------------------------------------------
                 # 3️⃣ GST Handling Logic
@@ -879,7 +878,12 @@ async def soft_delete_customer(
                     gst_id = gst_row["id"]
 
                 elif gst_count > 1:
-                    manual_gst_deactivation_required = True
+                    # 🔥 NEW RULE: BLOCK CUSTOMER DEACTIVATION
+                    raise HTTPException(
+                        400,
+                        "Cannot deactivate customer. Customer has multiple active GST registrations. "
+                        "Please deactivate GSTs individually from GST Registration page first.",
+                    )
 
                 # --------------------------------------------------
                 # 4️⃣ Soft Delete Customer
@@ -965,13 +969,7 @@ async def soft_delete_customer(
             # Response Handling
             # --------------------------------------------------
             if gst_id:
-                message = "Customer and associated GST,persons and docs fully deactivated."
-            elif manual_gst_deactivation_required:
-                message = (
-                    "Customer deactivated successfully. "
-                    "Customer has multiple active GST registrations. "
-                    "Please deactivate each GST individually as per requirement."
-                )
+                message = "Customer and associated GST, persons and documents fully deactivated."
             else:
                 message = "Customer deactivated successfully."
 
@@ -1033,7 +1031,7 @@ async def activate_customer(
     """
 
     # --------------------------------------------------
-    # Request Context
+    # 1️⃣ Request Context
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
@@ -1051,7 +1049,7 @@ async def activate_customer(
     log.info("Incoming customer activation | customer_id=%s", customer_id)
 
     # --------------------------------------------------
-    # DB Pool
+    # 2️⃣ DB Pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
@@ -1064,7 +1062,7 @@ async def activate_customer(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Lock Customer Row
+                # 3️⃣ Lock Customer Row (Concurrency Safe)
                 # --------------------------------------------------
                 customer = await conn.fetchrow(
                     f"""
@@ -1085,11 +1083,15 @@ async def activate_customer(
                 if customer["is_active"]:
                     raise HTTPException(
                         status_code=400,
-                        detail="Customer already active ,If you want to activate from GST go to gst Page and activate",
+                        detail=(
+                            "Customer is already active. "
+                            "If you want to activate a specific GST registration, "
+                            "please navigate to the GST Registration page and activate it there."
+                        ),
                     )
 
                 # --------------------------------------------------
-                # 2️⃣ Count GST Registrations
+                # 4️⃣ Count GST Registrations
                 # --------------------------------------------------
                 gst_count = await conn.fetchval(
                     f"""
@@ -1104,10 +1106,10 @@ async def activate_customer(
                 manual_gst_activation_required = False
 
                 # --------------------------------------------------
-                # 3️⃣ Handle GST Logic
+                # 5️⃣ GST Handling Logic
                 # --------------------------------------------------
                 if gst_count == 1:
-                    # Lock the single GST
+
                     gst_row = await conn.fetchrow(
                         f"""
                         SELECT *
@@ -1127,11 +1129,10 @@ async def activate_customer(
                     gst_id = gst_row["id"]
 
                 elif gst_count > 1:
-                    # Allow customer activation but require manual GST activation
                     manual_gst_activation_required = True
 
                 # --------------------------------------------------
-                # 4️⃣ Activate Customer
+                # 6️⃣ Activate Customer
                 # --------------------------------------------------
                 activated_customer = await conn.fetchrow(
                     f"""
@@ -1152,7 +1153,7 @@ async def activate_customer(
                     )
 
                 # --------------------------------------------------
-                # 5️⃣ If Exactly ONE GST → Cascade Activation
+                # 7️⃣ If Exactly ONE GST → Cascade Activation
                 # --------------------------------------------------
                 if gst_id:
 
@@ -1192,7 +1193,7 @@ async def activate_customer(
                     )
 
                 # --------------------------------------------------
-                # 6️⃣ Version Audit (CUSTOMER ONLY)
+                # 8️⃣ Version Audit (CUSTOMER ONLY)
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -1218,17 +1219,19 @@ async def activate_customer(
                 )
 
             # --------------------------------------------------
-            # Response
+            # 9️⃣ Response
             # --------------------------------------------------
-            message = None
-
             if gst_id:
-                message = "Customer and associated GST, Persons and Docs activated successfully."
+                message = (
+                    "Customer and associated GST, persons, and documents "
+                    "activated successfully."
+                )
             elif manual_gst_activation_required:
                 message = (
                     "Customer activated successfully. "
                     "Multiple GST registrations detected. "
-                    "Please activate each GST individually in GST Page"
+                    "Please activate the required GST registrations individually "
+                    "from the GST Registration page."
                 )
             else:
                 message = "Customer activated successfully."
