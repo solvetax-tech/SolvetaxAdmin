@@ -18,6 +18,8 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
 router = APIRouter(prefix="/app/v1", tags=["Login"])
+from fastapi.responses import JSONResponse
+
 @router.post(
     "/login",
     responses={
@@ -83,7 +85,7 @@ async def login(
             )
 
             if not employee:
-                hash_password(password)  # prevent timing attack
+                hash_password(password)
                 log.warning("[login] Invalid credentials")
                 raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -130,7 +132,6 @@ async def login(
             raw_refresh_token = generate_refresh_token()
             refresh_hash = hash_refresh_token(raw_refresh_token)
 
-            # 🔥 FIX: DO NOT remove timezone
             await conn.execute(
                 f"""
                 INSERT INTO {DB_SCHEMA}.session_token
@@ -150,28 +151,38 @@ async def login(
                 emp_id,
                 access_token,
                 refresh_hash,
-                access_expiry,      # ✅ timezone aware
-                refresh_expiry,     # ✅ timezone aware
+                access_expiry,
+                refresh_expiry,
                 device_info,
                 ip_address
             )
 
             log.info("[login] Session created successfully")
 
-            return {
-                "access_token": access_token,
-                "refresh_token": raw_refresh_token,
-                "expires_in_minutes": JWT_EXPIRE_MINUTES
-            }
+            response = JSONResponse(
+                content={
+                    "access_token": access_token,
+                    "expires_in_minutes": JWT_EXPIRE_MINUTES
+                }
+            )
+
+            # 🔐 HttpOnly Secure Refresh Cookie
+            response.set_cookie(
+                key="refresh_token",
+                value=raw_refresh_token,
+                httponly=True,
+                secure=True,       # MUST be True in production (HTTPS)
+                samesite="Strict", # or "Lax" depending on frontend
+                max_age=14 * 24 * 60 * 60
+            )
+
+            return response
 
     except HTTPException:
         raise
     except Exception:
         log.exception("[login] Unexpected error")
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
 
 @router.post(
     "/refresh",
@@ -184,12 +195,11 @@ class RefreshRequest(BaseModel):
 )
 async def refresh_token_endpoint(
     request: Request,
-    payload: RefreshRequest = Body(...),
 ):
     request_id = generate_uuid()
     log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": "-"})
 
-    raw_refresh_token = (payload.refresh_token or "").strip()
+    raw_refresh_token = request.cookies.get("refresh_token")
     ip_address = request.client.host if request.client else "Unknown"
     device_info = request.headers.get("User-Agent", "Unknown Device")
 
@@ -253,7 +263,6 @@ async def refresh_token_endpoint(
                     """,
                     session["id"]
                 )
-                log.warning("[refresh] Employee disabled, session revoked")
                 raise HTTPException(status_code=401, detail="Employee account inactive.")
 
             new_refresh_raw = generate_refresh_token()
@@ -278,7 +287,6 @@ async def refresh_token_endpoint(
                 algorithm=JWT_ALGORITHM
             )
 
-            # 🔥 FIX: DO NOT remove timezone
             await conn.execute(
                 f"""
                 UPDATE {DB_SCHEMA}.session_token
@@ -292,8 +300,8 @@ async def refresh_token_endpoint(
                 """,
                 new_access_token,
                 new_refresh_hash,
-                access_expiry,          # ✅ timezone aware
-                refresh_expiry_new,     # ✅ timezone aware
+                access_expiry,
+                refresh_expiry_new,
                 ip_address,
                 device_info,
                 session["id"]
@@ -301,11 +309,23 @@ async def refresh_token_endpoint(
 
             log.info("[refresh] Token rotated successfully")
 
-            return {
-                "access_token": new_access_token,
-                "refresh_token": new_refresh_raw,
-                "expires_in_minutes": JWT_EXPIRE_MINUTES
-            }
+            response = JSONResponse(
+                content={
+                    "access_token": new_access_token,
+                    "expires_in_minutes": JWT_EXPIRE_MINUTES
+                }
+            )
+
+            response.set_cookie(
+                key="refresh_token",
+                value=new_refresh_raw,
+                httponly=True,
+                secure=True,
+                samesite="Strict",
+                max_age=14 * 24 * 60 * 60
+            )
+
+            return response
 
 class LogoutRequest(BaseModel):
     session_token: str
