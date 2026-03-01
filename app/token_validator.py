@@ -36,6 +36,7 @@ def _get_client_ip(request: Request | None) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "Unknown"
+
 async def validate_token(token: str, request: Request | None = None):
     try:
         if not JWT_SECRET or not JWT_ALGORITHM:
