@@ -70,10 +70,10 @@ from app.sign_up.employee_edit import router as employee_edit_router
 from app.customer_registration.customer import router as customer_router
 from app.gst_registration.gst_registration import router as gst_registration_router
 from app.gst_registration.gst_people import router as gst_people_router
-from app.gst_registration.gst_people import router as gst_people_config_router
 from app.gst_registration.gst_documents import router as gst_documents_router
 from app.gst_registration.gst_registration_config import router as gst_registration_config_router
 from app.Dashboard.dashboard import router as dashboard_router
+from app.version.version import router as version_router
 
 
 
@@ -97,17 +97,17 @@ if employee_edit_router:
     app.include_router(employee_edit_router)
 if gst_registration_config_router:
     app.include_router(gst_registration_config_router)
-if gst_people_config_router:
-    app.include_router(gst_people_config_router)
 if gst_documents_router:
     app.include_router(gst_documents_router)
 if dashboard_router:
     app.include_router(dashboard_router)
+if version_router:
+    app.include_router(version_router)
 
 
 
 
-
+    
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}

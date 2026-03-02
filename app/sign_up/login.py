@@ -329,13 +329,11 @@ async def refresh_token_endpoint(
 
 class LogoutRequest(BaseModel):
     session_token: str
-
 @router.post(
     "/logout",
     response_model=None,
     responses={
         200: {"description": "Session revoked successfully."},
-        400: {"description": "Invalid session token."},
         401: {"description": "Unauthorized."},
         503: {"description": "Service temporarily unavailable."},
     },
@@ -343,18 +341,17 @@ class LogoutRequest(BaseModel):
 )
 async def logout(
     request: Request,
-    payload: LogoutRequest = Body(..., example={"session_token": "example-session-token"}),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     request_id = generate_uuid()
-    emp_id = current_user.get("sub")  # from JWT
+    emp_id = current_user.get("sub")
+
     try:
         emp_id = int(emp_id)
     except (TypeError, ValueError):
         emp_id = "-"
-    log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
 
-    session_token = payload.session_token
+    log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
     log.info("[logout] Received logout request")
 
     try:
@@ -363,43 +360,61 @@ async def logout(
         log.error("[logout] DB pool init failed: %s", e, exc_info=True)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
 
-    if not JWT_SECRET:
-        log.error("[logout] JWT_SECRET missing in environment")
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
+    raw_refresh_token = request.cookies.get("refresh_token")
+
+    if not raw_refresh_token:
+        raise HTTPException(status_code=401, detail="No active session found.")
+
+    refresh_hash = hash_refresh_token(raw_refresh_token)
+    ip_address = request.client.host if request.client else "Unknown"
 
     async with pool.acquire() as conn:
         try:
-            auth_header = request.headers.get("Authorization")
-            if not auth_header or not auth_header.startswith("Bearer "):
-                raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
-            jwt_token = auth_header.split(" ", 1)[1]
-            jwt_payload = jwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-            emp_id = int(jwt_payload["sub"])
-            ip_address = request.client.host if request.client else "Unknown"
-
             result = await conn.execute(
                 f"""
                 UPDATE {DB_SCHEMA}.session_token
                 SET is_active = false
-                WHERE emp_id = $1 AND session_token = $2 AND is_active = true
+                WHERE emp_id = $1
+                AND refresh_token = $2
+                AND is_active = true
                 """,
-                emp_id, session_token
+                emp_id,
+                refresh_hash
             )
-            if result == "UPDATE 1":
-                await conn.execute(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.session_audit_log (emp_id, session_token, action, action_time, action_details, ip_address)
-                    VALUES ($1, $2, $3, NOW(), $4, $5)
-                    """,
-                    emp_id, session_token, "LOGOUT", "Session logout successful", ip_address
-                )
-                log.info("[logout] Session revoked successfully for emp_id=%s ip=%s", emp_id, ip_address)
-                return {
-                    "message": "Session is revoked",
-                    "session_token": session_token
-                }
 
-            raise HTTPException(status_code=400, detail="Session token is already inactive or does not exist.")
+            if result != "UPDATE 1":
+                raise HTTPException(status_code=401, detail="Session already inactive or invalid.")
+
+            # 🔐 Audit log
+            await conn.execute(
+                f"""
+                INSERT INTO {DB_SCHEMA}.session_audit_log
+                (emp_id, session_token, action, action_time, action_details, ip_address)
+                VALUES ($1, $2, $3, NOW(), $4, $5)
+                """,
+                emp_id,
+                refresh_hash,
+                "LOGOUT",
+                "Session logout successful",
+                ip_address
+            )
+
+            log.info("[logout] Session revoked successfully")
+
+            response = JSONResponse(
+                content={"message": "Session revoked successfully."}
+            )
+
+            # 🧹 Clear cookie
+            response.delete_cookie(
+                key="refresh_token",
+                httponly=True,
+                secure=True,
+                samesite="Strict"
+            )
+
+            return response
+
         except HTTPException:
             raise
         except Exception as e:

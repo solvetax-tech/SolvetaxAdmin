@@ -11,6 +11,7 @@ from typing import Dict, Any
 from asyncpg.exceptions import PostgresError
 from dotenv import load_dotenv
 from typing import Optional
+from azure.storage.blob import BlobServiceClient
 
 
 # Load .env from project root
@@ -192,3 +193,36 @@ def hash_refresh_token(refresh_token: str) -> str:
     hash_obj = hashlib.sha256()
     hash_obj.update(refresh_token.encode("utf-8"))
     return hash_obj.hexdigest()
+
+# --------------------------------------------------
+# Azure Blob Storage Configuration
+# --------------------------------------------------
+
+from azure.storage.blob import BlobServiceClient
+
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+AZURE_STORAGE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER")
+
+if not AZURE_STORAGE_CONNECTION_STRING:
+    raise RuntimeError("AZURE_STORAGE_CONNECTION_STRING is missing in .env")
+
+if not AZURE_STORAGE_CONTAINER:
+    raise RuntimeError("AZURE_STORAGE_CONTAINER is missing in .env")
+
+
+# --------------------------------------------------
+# Lazy Singleton Blob Client
+# --------------------------------------------------
+
+_blob_service_client = None
+
+
+def get_blob_service_client() -> BlobServiceClient:
+    global _blob_service_client
+
+    if _blob_service_client is None:
+        _blob_service_client = BlobServiceClient.from_connection_string(
+            AZURE_STORAGE_CONNECTION_STRING
+        )
+
+    return _blob_service_client

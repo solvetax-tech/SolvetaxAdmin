@@ -73,6 +73,22 @@ async def validate_token(token: str, request: Request | None = None):
             )
 
             if not session:
+
+                # 🔐 Minimal Audit Log (Failure Only)
+                if request:
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.session_audit_log
+                        (emp_id, session_token, action, action_details, ip_address)
+                        VALUES ($1,$2,$3,$4,$5)
+                        """,
+                        emp_id,
+                        token,
+                        "VALIDATION_FAILED",
+                        "Session not active",
+                        request.client.host if request.client else None
+                    )
+
                 return False, "Session not active"
 
             # --------------------------------------------------
@@ -89,10 +105,26 @@ async def validate_token(token: str, request: Request | None = None):
                     """,
                     session["id"]
                 )
+
+                # 🔐 Minimal Audit Log
+                if request:
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.session_audit_log
+                        (emp_id, session_token, action, action_details, ip_address)
+                        VALUES ($1,$2,$3,$4,$5)
+                        """,
+                        emp_id,
+                        token,
+                        "VALIDATION_FAILED",
+                        "Session expired",
+                        request.client.host if request.client else None
+                    )
+
                 return False, "Session expired"
 
             # --------------------------------------------------
-            # 3️⃣ 🔥 EMPLOYEE ACTIVE RE-CHECK (ADD THIS)
+            # 3️⃣ 🔥 EMPLOYEE ACTIVE RE-CHECK
             # --------------------------------------------------
             employee = await conn.fetchrow(
                 f"SELECT is_active FROM {DB_SCHEMA}.employees WHERE emp_id=$1",
@@ -108,14 +140,33 @@ async def validate_token(token: str, request: Request | None = None):
                     """,
                     session["id"]
                 )
+
+                # 🔐 Minimal Audit Log
+                if request:
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.session_audit_log
+                        (emp_id, session_token, action, action_details, ip_address)
+                        VALUES ($1,$2,$3,$4,$5)
+                        """,
+                        emp_id,
+                        token,
+                        "VALIDATION_FAILED",
+                        "Employee account inactive",
+                        request.client.host if request.client else None
+                    )
+
                 return False, "Employee account inactive"
 
+        # ✅ SUCCESS → NO LOG (Prevents log explosion)
         return True, "Valid"
 
     except jwt.ExpiredSignatureError:
         return False, "Token expired"
+
     except jwt.InvalidTokenError:
         return False, "Invalid token"
+
     except Exception:
         return False, "Token validation failed"
 

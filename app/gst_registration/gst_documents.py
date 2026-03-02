@@ -1,24 +1,126 @@
 import logging
 import asyncpg
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query, Depends,status
+from fastapi import APIRouter, HTTPException, Query, Depends,status,UploadFile, File
 from typing import Optional, List
-
 from app.security.rbac import require_permission
 from app.gst_registration.schemas import (
     RegistrationDocumentIn,
     RegistrationDocumentEditIn,
 )
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, get_blob_service_client, AZURE_STORAGE_CONTAINER
 from app.logger import logger
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
+import os
 
 router = APIRouter(
     prefix="/api/v1/gst-documents",
     tags=["GST Registration Documents"],
 )
+
+# -------------------------------------------------------------------
+# UPLOAD REGISTRATION DOCUMENT FILE (Blob Only - No DB)
+# -------------------------------------------------------------------
+
+@router.post(
+    "/upload",
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload Registration Document File (Blob Only)",
+    responses={
+        201: {"description": "File uploaded successfully."},
+        400: {"description": "Invalid file."},
+        500: {"description": "Blob upload failed."},
+    },
+)
+async def upload_registration_document_file(
+    file: UploadFile = File(...),
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    """
+    ✔ Azure Blob upload only
+    ✔ File validation
+    ✔ Uses singleton blob client from utils
+    ✔ No DB interaction
+    ✔ Production structured logging
+    """
+
+    # --------------------------------------------------
+    # Local Upload Helper (Scoped to This API Only)
+    # --------------------------------------------------
+    def upload_file_to_blob(file_bytes: bytes, filename: str, folder: str = "gst-documents") -> str:
+        """
+        Upload file to Azure Blob Storage.
+        Returns blob URL.
+        """
+
+        blob_service_client = get_blob_service_client()
+
+        unique_filename = f"{generate_uuid()}_{filename}"
+        blob_path = f"{folder}/{unique_filename}"
+
+        blob_client = blob_service_client.get_blob_client(
+            container=AZURE_STORAGE_CONTAINER,
+            blob=blob_path,
+        )
+
+        blob_client.upload_blob(file_bytes, overwrite=True)
+
+        return blob_client.url
+
+    # --------------------------------------------------
+    # Request Context
+    # --------------------------------------------------
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id},
+    )
+
+    log.info("Incoming document file upload | filename=%s", file.filename)
+
+    # --------------------------------------------------
+    # File Validation
+    # --------------------------------------------------
+    ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"]
+    MAX_FILE_SIZE = 2*5 * 1024 * 1024  # 10MB
+
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Allowed: PDF, JPG, PNG.",
+        )
+
+    contents = await file.read()
+
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail="File size exceeds 10MB limit.",
+        )
+
+    try:
+        blob_url = upload_file_to_blob(contents, file.filename)
+
+    except Exception:
+        log.exception("Azure blob upload failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Blob upload failed.",
+        )
+
+    log.info("File uploaded successfully | blob_url=%s", blob_url)
+
+    return {
+        "blob_url": blob_url,
+        "filename": file.filename,
+        "message": "File uploaded successfully.",
+        "request_id": request_id,
+    }
 
 # -------------------------------------------------------------------
 # CREATE REGISTRATION DOCUMENT (Production Standard + Version Audit + IST)
