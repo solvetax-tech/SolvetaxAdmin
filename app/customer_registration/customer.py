@@ -519,7 +519,7 @@ async def filter_customers(
 async def edit_customer(
     customer_id: int,
     payload: CustomerEditIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
     """
     ✔ Safe PATCH-style dynamic update

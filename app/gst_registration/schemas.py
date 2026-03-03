@@ -44,8 +44,8 @@ class GSTRegistrationIn(BaseModel):
     # Identity
     # ----------------------------
     customer_id: int = Field(..., gt=0)
-    username: Optional[str] = Field(None, min_length=3, max_length=100)
-    password: Optional[str] = Field(None, min_length=8, max_length=128)
+    username: Annotated[str, Field(..., min_length=3, max_length=100)]
+    password: Annotated[str, Field(..., min_length=8, max_length=128)]
 
     pan: Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
     gstin: Optional[
@@ -57,12 +57,12 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     # Business
     # ----------------------------
-    business_name: Optional[str] = Field(None, max_length=200)
-    registration_type: Optional[str] = Field(None, max_length=50)
-    ownership_category: Optional[str] = Field(None, max_length=100)
+    business_name: Annotated[str, Field(..., max_length=200)]
+    registration_type: Annotated[str, Field(..., max_length=50)]
+    ownership_category: Annotated[str, Field(..., max_length=100)]
     business_type: Optional[str] = Field(None, max_length=100)
-    state: Optional[str] = Field(None, max_length=100)
-    turnover_details: Optional[str] = Field(None, max_length=50)
+    state: Annotated[str, Field(..., max_length=100)]
+    turnover_details: Annotated[str, Field(..., max_length=50)]
 
     # ----------------------------
     # Workflow Status
@@ -80,8 +80,8 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     # Assignment
     # ----------------------------
-    created_by: Optional[int] = Field(None, gt=0)
-    rm_id: Optional[int] = Field(None, gt=0)
+    created_by: Annotated[int, Field(..., gt=0)]
+    rm_id: Annotated[int, Field(..., gt=0)]
 
     # ----------------------------
     # Flags
@@ -92,9 +92,9 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     # Contact
     # ----------------------------
-    mobile: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
-    email: Optional[EmailStr] = None
-    secondary_email: Optional[EmailStr] = None
+    mobile: Annotated[str, Field(pattern=r"^\d{10}$")]
+    email: Annotated[EmailStr, Field(..., max_length=150)]
+    secondary_email: Optional[Annotated[EmailStr, Field(None, max_length=150)]] 
 
     # =====================================================
     # Normalization
