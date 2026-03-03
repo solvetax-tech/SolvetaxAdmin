@@ -918,7 +918,7 @@ async def soft_delete_customer(
                     # Deactivate Persons
                     await conn.execute(
                         f"""
-                        UPDATE {DB_SCHEMA}.registration_persons
+                        UPDATE {DB_SCHEMA}.gst_registration_persons
                            SET is_active = FALSE,
                                updated_at = NOW()
                          WHERE gst_registration_id = $1
@@ -929,10 +929,10 @@ async def soft_delete_customer(
                     # Deactivate Documents
                     await conn.execute(
                         f"""
-                        UPDATE {DB_SCHEMA}.registration_documents d
+                        UPDATE {DB_SCHEMA}.gst_registration_documents d
                            SET is_active = FALSE,
                                updated_at = NOW()
-                          FROM {DB_SCHEMA}.registration_persons p
+                          FROM {DB_SCHEMA}.gst_registration_persons p
                          WHERE d.person_id = p.person_id
                            AND p.gst_registration_id = $1
                         """,
@@ -1171,7 +1171,7 @@ async def activate_customer(
                     # Activate Persons
                     await conn.execute(
                         f"""
-                        UPDATE {DB_SCHEMA}.registration_persons
+                        UPDATE {DB_SCHEMA}.gst_registration_persons
                            SET is_active = TRUE,
                                updated_at = NOW()
                          WHERE gst_registration_id = $1
@@ -1182,10 +1182,10 @@ async def activate_customer(
                     # Activate Documents
                     await conn.execute(
                         f"""
-                        UPDATE {DB_SCHEMA}.registration_documents d
+                        UPDATE {DB_SCHEMA}.gst_registration_documents d
                            SET is_active = TRUE,
                                updated_at = NOW()
-                          FROM {DB_SCHEMA}.registration_persons p
+                          FROM {DB_SCHEMA}.gst_registration_persons p
                          WHERE d.person_id = p.person_id
                            AND p.gst_registration_id = $1
                         """,

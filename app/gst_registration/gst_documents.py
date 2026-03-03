@@ -178,7 +178,7 @@ async def create_registration_document(
                     SELECT gst_registration_id,
                            mobile,
                            is_active
-                      FROM {DB_SCHEMA}.registration_persons
+                      FROM {DB_SCHEMA}.gst_registration_persons
                      WHERE person_id = $1
                      LIMIT 1
                     """,
@@ -222,7 +222,7 @@ async def create_registration_document(
                 # --------------------------------------------------
                 document_row = await conn.fetchrow(
                     f"""
-                    INSERT INTO {DB_SCHEMA}.registration_documents (
+                    INSERT INTO {DB_SCHEMA}.gst_registration_documents (
                         gstin,
                         person_id,
                         document_type,
@@ -465,7 +465,7 @@ async def list_registration_documents(
 
         sql = f"""
             SELECT *
-              FROM {DB_SCHEMA}.registration_documents
+              FROM {DB_SCHEMA}.gst_registration_documents
               {where_clause}
              ORDER BY created_at DESC, document_id DESC
              LIMIT ${param_index} OFFSET ${param_index + 1}
@@ -575,8 +575,8 @@ async def edit_registration_document(
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT d.*, rp.customer_id
-                      FROM {DB_SCHEMA}.registration_documents d
-                      JOIN {DB_SCHEMA}.registration_persons rp
+                      FROM {DB_SCHEMA}.gst_registration_documents d
+                      JOIN {DB_SCHEMA}.gst_registration_persons rp
                         ON d.person_id = rp.person_id
                      WHERE d.document_id = $1
                        AND d.is_active = TRUE
@@ -621,7 +621,7 @@ async def edit_registration_document(
                 values.append(document_id)
 
                 sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_documents
+                    UPDATE {DB_SCHEMA}.gst_registration_documents
                        SET {', '.join(fields)}
                      WHERE document_id = ${idx}
                      RETURNING *
@@ -794,10 +794,10 @@ async def soft_delete_registration_document(
                 # 🔥 FIX: Use JOIN to get customer_id
                 # --------------------------------------------------
                 delete_sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_documents d
+                    UPDATE {DB_SCHEMA}.gst_registration_documents d
                        SET is_active = FALSE,
                            updated_at = NOW()
-                      FROM {DB_SCHEMA}.registration_persons rp
+                      FROM {DB_SCHEMA}.gst_registration_persons rp
                      WHERE d.document_id = $1
                        AND d.person_id = rp.person_id
                        AND d.is_active = TRUE
@@ -813,7 +813,7 @@ async def soft_delete_registration_document(
                     existing_row = await conn.fetchrow(
                         f"""
                         SELECT document_id, is_active
-                          FROM {DB_SCHEMA}.registration_documents
+                          FROM {DB_SCHEMA}.gst_registration_documents
                          WHERE document_id = $1
                         """,
                         document_id,
@@ -843,7 +843,7 @@ async def soft_delete_registration_document(
                     person_row = await conn.fetchrow(
                         f"""
                         SELECT is_active
-                          FROM {DB_SCHEMA}.registration_persons
+                          FROM {DB_SCHEMA}.gst_registration_persons
                          WHERE person_id = $1
                         """,
                         deleted_row["person_id"],
@@ -989,7 +989,7 @@ async def activate_registration_document(
                 doc_row = await conn.fetchrow(
                     f"""
                     SELECT *
-                      FROM {DB_SCHEMA}.registration_documents
+                      FROM {DB_SCHEMA}.gst_registration_documents
                      WHERE document_id = $1
                      FOR UPDATE
                     """,
@@ -1015,7 +1015,7 @@ async def activate_registration_document(
                     person_row = await conn.fetchrow(
                         f"""
                         SELECT is_active
-                          FROM {DB_SCHEMA}.registration_persons
+                          FROM {DB_SCHEMA}.gst_registration_persons
                          WHERE person_id = $1
                         """,
                         doc_row["person_id"],
@@ -1038,10 +1038,10 @@ async def activate_registration_document(
                 # --------------------------------------------------
                 activated_row = await conn.fetchrow(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_documents d
+                    UPDATE {DB_SCHEMA}.gst_registration_documents d
                        SET is_active = TRUE,
                            updated_at = NOW()
-                      FROM {DB_SCHEMA}.registration_persons rp
+                      FROM {DB_SCHEMA}.gst_registration_persons rp
                      WHERE d.document_id = $1
                        AND d.person_id = rp.person_id
                        AND d.is_active = FALSE

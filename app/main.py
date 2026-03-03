@@ -74,6 +74,7 @@ from app.gst_registration.gst_documents import router as gst_documents_router
 from app.gst_registration.gst_registration_config import router as gst_registration_config_router
 from app.Dashboard.dashboard import router as dashboard_router
 from app.version.version import router as version_router
+from app.payments.registration_payments import router as registration_payments_router
 
 
 
@@ -103,11 +104,13 @@ if dashboard_router:
     app.include_router(dashboard_router)
 if version_router:
     app.include_router(version_router)
+if registration_payments_router:
+    app.include_router(registration_payments_router)
 
 
 
 
-    
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}

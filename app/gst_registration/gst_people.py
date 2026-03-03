@@ -126,7 +126,7 @@ async def create_registration_person(
                 # --------------------------------------------------
                 person_row = await conn.fetchrow(
                     f"""
-                    INSERT INTO {DB_SCHEMA}.registration_persons (
+                    INSERT INTO {DB_SCHEMA}.gst_registration_persons (
                         customer_id,
                         gstin,
                         full_name,
@@ -312,7 +312,7 @@ async def list_registration_persons(
     """
     Enterprise Registration Person Filtering
 
-    ✔ Filters only from registration_persons table
+    ✔ Filters only from gst_registration_persons table
     ✔ Supports gst_registration_id (FK safe)
     ✔ Supports GSTIN null filtering
     ✔ Trim + uppercase safe
@@ -464,13 +464,13 @@ async def list_registration_persons(
 
         count_sql = f"""
             SELECT COUNT(*)
-              FROM {DB_SCHEMA}.registration_persons
+              FROM {DB_SCHEMA}.gst_registration_persons
               {where_clause}
         """
 
         data_sql = f"""
             SELECT *
-              FROM {DB_SCHEMA}.registration_persons
+              FROM {DB_SCHEMA}.gst_registration_persons
               {where_clause}
              ORDER BY created_at DESC, person_id DESC
              LIMIT ${param_index} OFFSET ${param_index + 1}
@@ -542,7 +542,7 @@ async def edit_registration_person(
     ------------------------
     ✔ Dynamic update of only provided fields
     ✔ Only active persons can be updated
-    ✔ Mobile update propagates to registration_documents
+    ✔ Mobile update propagates to gst_registration_documents
     ✔ Primary logic aligned with gst_registration_id (ID-based)
     ✔ Version audit created
     ✔ Fully NULL safe
@@ -618,7 +618,7 @@ async def edit_registration_person(
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT *
-                      FROM {DB_SCHEMA}.registration_persons
+                      FROM {DB_SCHEMA}.gst_registration_persons
                      WHERE person_id = $1
                        AND is_active = TRUE
                      LIMIT 1
@@ -641,7 +641,7 @@ async def edit_registration_person(
                 ):
                     await conn.execute(
                         f"""
-                        UPDATE {DB_SCHEMA}.registration_persons
+                        UPDATE {DB_SCHEMA}.gst_registration_persons
                            SET is_primary_customer = FALSE,
                                updated_at = NOW()
                          WHERE gst_registration_id = $1
@@ -652,7 +652,7 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Build dynamic UPDATE for registration_persons
+                # 3️⃣ Build dynamic UPDATE for gst_registration_persons
                 # --------------------------------------------------
                 fields, values, idx = [], [], 1
 
@@ -665,7 +665,7 @@ async def edit_registration_person(
                 values.append(person_id)
 
                 sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_persons
+                    UPDATE {DB_SCHEMA}.gst_registration_persons
                        SET {', '.join(fields)}
                      WHERE person_id = ${idx}
                        AND is_active = TRUE
@@ -681,12 +681,12 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 4️⃣ Propagate mobile change to registration_documents
+                # 4️⃣ Propagate mobile change to gst_registration_documents
                 # --------------------------------------------------
                 if "mobile" in update_data and update_data["mobile"]:
                     await conn.execute(
                         f"""
-                        UPDATE {DB_SCHEMA}.registration_documents
+                        UPDATE {DB_SCHEMA}.gst_registration_documents
                            SET mobile = $1,
                                updated_at = NOW()
                          WHERE person_id = $2
@@ -860,7 +860,7 @@ async def soft_delete_registration_person(
                 person_row = await conn.fetchrow(
                     f"""
                     SELECT *
-                      FROM {DB_SCHEMA}.registration_persons
+                      FROM {DB_SCHEMA}.gst_registration_persons
                      WHERE person_id = $1
                      LIMIT 1
                     """,
@@ -880,7 +880,7 @@ async def soft_delete_registration_person(
                     other_active_count = await conn.fetchval(
                         f"""
                         SELECT COUNT(*)
-                          FROM {DB_SCHEMA}.registration_persons
+                          FROM {DB_SCHEMA}.gst_registration_persons
                          WHERE customer_id = $1
                            AND is_active = TRUE
                            AND person_id <> $2
@@ -900,7 +900,7 @@ async def soft_delete_registration_person(
                 # 3️⃣ Concurrency-Safe Soft Delete (Person)
                 # --------------------------------------------------
                 delete_person_sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_persons
+                    UPDATE {DB_SCHEMA}.gst_registration_persons
                        SET is_active = FALSE,
                            updated_at = NOW()
                      WHERE person_id = $1
@@ -917,7 +917,7 @@ async def soft_delete_registration_person(
                 # --------------------------------------------------
                 deleted_docs = await conn.fetch(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_documents
+                    UPDATE {DB_SCHEMA}.gst_registration_documents
                        SET is_active = FALSE,
                            updated_at = NOW()
                      WHERE person_id = $1
@@ -1083,7 +1083,7 @@ async def activate_registration_person(
                     SELECT rp.*, 
                            c.is_active AS customer_active, 
                            gst.is_active AS gst_active
-                      FROM {DB_SCHEMA}.registration_persons rp
+                      FROM {DB_SCHEMA}.gst_registration_persons rp
                       JOIN {DB_SCHEMA}.customers c
                         ON rp.customer_id = c.customer_id
                       JOIN {DB_SCHEMA}.gst_registration gst
@@ -1128,7 +1128,7 @@ async def activate_registration_person(
                 primary_person = await conn.fetchrow(
                     f"""
                     SELECT *
-                      FROM {DB_SCHEMA}.registration_persons
+                      FROM {DB_SCHEMA}.gst_registration_persons
                      WHERE gst_registration_id = $1
                        AND is_primary_customer = TRUE
                        AND is_active = TRUE
@@ -1160,7 +1160,7 @@ async def activate_registration_person(
                 # 4️⃣ Activate Person (Concurrency Safe)
                 # --------------------------------------------------
                 activate_person_sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_persons
+                    UPDATE {DB_SCHEMA}.gst_registration_persons
                        SET is_active = TRUE,
                            updated_at = NOW()
                      WHERE person_id = $1
@@ -1184,7 +1184,7 @@ async def activate_registration_person(
                 # --------------------------------------------------
                 activated_docs = await conn.fetch(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_documents
+                    UPDATE {DB_SCHEMA}.gst_registration_documents
                        SET is_active = TRUE,
                            updated_at = NOW()
                      WHERE person_id = $1

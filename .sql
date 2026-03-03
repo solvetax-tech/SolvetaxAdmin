@@ -532,3 +532,182 @@ VALUES
 ('PRIVATE_LIMITED', 'DOCUMENT', 'ELECTRICITY_BILL', 'Electricity Bill', 'Registered office address proof', 'COMPANY', false, 30),
 ('PRIVATE_LIMITED', 'DOCUMENT', 'RENTAL_AGREEMENT', 'Rental Agreement', 'Office rental agreement', 'COMPANY', false, 31),
 ('PRIVATE_LIMITED', 'DOCUMENT', 'NOC', 'No Objection Certificate', 'NOC from property owner', 'COMPANY', false, 32);
+
+
+-- -------------------------------------------------------------
+-- SERVICE / REGISTRATION PAYMENTS
+-- -------------------------------------------------------------
+CREATE TABLE solvetax.registration_payments (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    -- Business Reference (Shown to customer)
+    transaction_id VARCHAR(100) NOT NULL UNIQUE,
+    -- Example: REG-2026-0001
+
+    customer_id BIGINT NOT NULL,
+    -- FK -> solvetax.customers(customer_id)
+
+    entity_id BIGINT NOT NULL,
+    -- ID of GST registration / Income tax / Company etc.
+
+    entity_type VARCHAR(50) NOT NULL,
+    -- GST_REGISTRATION
+    -- INCOME_TAX
+    -- COMPANY_REGISTRATION
+    -- TRADEMARK
+    -- OTHER_SERVICE
+
+    -- Amount Section
+    amount NUMERIC(12,2) NOT NULL,
+    -- Base service amount (Example: 1500.00)
+
+    discount NUMERIC(12,2) DEFAULT 0,
+    -- Example: 200.00
+
+    net_amount NUMERIC(12,2) GENERATED ALWAYS AS (amount - discount) STORED,
+    -- Final payable amount (1300.00)
+
+    paid_amount NUMERIC(12,2) DEFAULT 0,
+    -- Amount received so far
+
+    payment_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    -- PENDING
+    -- PARTIAL_PAID
+    -- PAID
+    -- FAILED
+    -- CANCELLED
+    -- REFUNDED
+
+    payment_mode VARCHAR(30),
+    -- CASH | UPI | BANK_TRANSFER | CARD | GATEWAY
+
+    payment_date TIMESTAMPTZ,
+    -- Set when fully paid
+
+    remarks TEXT,
+
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT fk_registration_payments_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES solvetax.customers(customer_id),
+
+    CONSTRAINT chk_amount_positive CHECK (amount >= 0),
+    CONSTRAINT chk_discount_positive CHECK (discount >= 0),
+    CONSTRAINT chk_paid_amount_positive CHECK (paid_amount >= 0)
+
+);
+
+
+-- -------------------------------------------------------------
+-- REGISTRATION / SERVICE PAYMENTS
+-- -------------------------------------------------------------
+CREATE TABLE solvetax.registration_payments (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    -- Business Reference (can be generated later)
+    transaction_id VARCHAR(100) UNIQUE,
+    -- Example: REG-2026-0001
+
+    customer_id BIGINT NOT NULL,
+    -- FK -> solvetax.customers(customer_id)
+
+    entity_id BIGINT NOT NULL,
+    -- Example: GST registration ID / Income tax ID
+
+    entity_type VARCHAR(50) NOT NULL,
+    -- GST_REGISTRATION
+    -- INCOME_TAX
+    -- COMPANY_REGISTRATION
+    -- TRADEMARK
+    -- OTHER_SERVICE
+
+    -- Amount Section
+    amount NUMERIC(12,2) NOT NULL,
+    -- Base service amount (Example: 1500.00)
+
+    discount NUMERIC(12,2) DEFAULT 0,
+    -- Example: 200.00
+
+    net_amount NUMERIC(12,2) NOT NULL,
+    -- Calculated by trigger (amount - discount)
+
+    paid_amount NUMERIC(12,2) DEFAULT 0,
+    -- Amount received so far
+
+    payment_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    -- PENDING
+    -- PARTIAL_PAID
+    -- PAID
+    -- FAILED
+    -- CANCELLED
+    -- REFUNDED
+
+    payment_mode VARCHAR(30),
+    -- CASH | UPI | BANK_TRANSFER | CARD | GATEWAY
+
+    payment_date TIMESTAMPTZ,
+    -- Last payment activity timestamp
+
+    remarks TEXT,
+
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    -- Foreign Key
+    CONSTRAINT fk_registration_payments_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES solvetax.customers(customer_id),
+
+    -- Safety Checks
+    CONSTRAINT chk_amount_positive CHECK (amount >= 0),
+    CONSTRAINT chk_discount_positive CHECK (discount >= 0),
+    CONSTRAINT chk_paid_amount_positive CHECK (paid_amount >= 0)
+
+);
+
+CREATE OR REPLACE FUNCTION solvetax.fn_registration_payment_logic()
+RETURNS TRIGGER AS $$
+BEGIN
+
+    -- Auto calculate net amount
+    NEW.net_amount := NEW.amount - COALESCE(NEW.discount, 0);
+
+    -- Prevent overpayment (optional but recommended)
+    IF NEW.paid_amount > NEW.net_amount THEN
+        RAISE EXCEPTION 'Paid amount cannot exceed net amount';
+    END IF;
+
+    -- Status Logic
+    IF NEW.paid_amount IS NULL OR NEW.paid_amount = 0 THEN
+        NEW.payment_status := 'PENDING';
+        NEW.payment_date := NULL;
+
+    ELSIF NEW.paid_amount > 0 AND NEW.paid_amount < NEW.net_amount THEN
+        NEW.payment_status := 'PARTIAL_PAID';
+        NEW.payment_date := NOW();
+
+    ELSIF NEW.paid_amount >= NEW.net_amount THEN
+        NEW.payment_status := 'PAID';
+        NEW.payment_date := NOW();
+    END IF;
+
+    NEW.updated_at := NOW();
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_registration_payment_logic
+BEFORE INSERT OR UPDATE
+ON solvetax.registration_payments
+FOR EACH ROW
+EXECUTE FUNCTION solvetax.fn_registration_payment_logic();

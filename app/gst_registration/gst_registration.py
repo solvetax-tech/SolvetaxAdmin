@@ -470,7 +470,7 @@ async def list_gst_registrations(
 async def edit_gst_registration(
     gst_id: int,
     payload: GSTRegistrationEditIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
     """
     ✔ Dynamic update
@@ -764,7 +764,7 @@ async def soft_delete_gst_registration(
                 # --------------------------------------------------
                 deleted_persons = await conn.fetch(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_persons
+                    UPDATE {DB_SCHEMA}.gst_registration_persons
                        SET is_active = FALSE,
                            updated_at = NOW()
                      WHERE gst_registration_id = $1
@@ -779,10 +779,10 @@ async def soft_delete_gst_registration(
                 # --------------------------------------------------
                 deleted_documents = await conn.fetch(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_documents d
+                    UPDATE {DB_SCHEMA}.gst_registration_documents d
                        SET is_active = FALSE,
                            updated_at = NOW()
-                      FROM {DB_SCHEMA}.registration_persons p
+                      FROM {DB_SCHEMA}.gst_registration_persons p
                      WHERE d.person_id = p.person_id
                        AND p.gst_registration_id = $1
                        AND d.is_active = TRUE
@@ -963,7 +963,7 @@ async def activate_gst_registration(
                 # --------------------------------------------------
                 activated_persons = await conn.fetch(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_persons
+                    UPDATE {DB_SCHEMA}.gst_registration_persons
                        SET is_active = TRUE,
                            updated_at = NOW()
                      WHERE gst_registration_id = $1
@@ -978,10 +978,10 @@ async def activate_gst_registration(
                 # --------------------------------------------------
                 activated_documents = await conn.fetch(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_documents d
+                    UPDATE {DB_SCHEMA}.gst_registration_documents d
                        SET is_active = TRUE,
                            updated_at = NOW()
-                      FROM {DB_SCHEMA}.registration_persons p
+                      FROM {DB_SCHEMA}.gst_registration_persons p
                      WHERE d.person_id = p.person_id
                        AND p.gst_registration_id = $1
                        AND d.is_active = FALSE
