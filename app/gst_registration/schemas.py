@@ -484,7 +484,7 @@ class RegistrationPersonOut(BaseSchema):
     customer_id: Optional[int]
     gstin: str
     full_name: str
-    role: str
+    designation: str
     pan: Optional[str]
     aadhaar: Optional[str]
     email: Optional[EmailStr]
