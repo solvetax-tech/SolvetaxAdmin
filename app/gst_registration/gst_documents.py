@@ -464,10 +464,12 @@ async def list_registration_documents(
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.gst_registration_documents
+            SELECT d.*, 
+                   e.first_name as verified_by_name
+              FROM {DB_SCHEMA}.gst_registration_documents d
+              LEFT JOIN {DB_SCHEMA}.employees e ON d.verified_by = e.emp_id
               {where_clause}
-             ORDER BY created_at DESC, document_id DESC
+             ORDER BY d.created_at DESC, d.document_id DESC
              LIMIT ${param_index} OFFSET ${param_index + 1}
         """
 

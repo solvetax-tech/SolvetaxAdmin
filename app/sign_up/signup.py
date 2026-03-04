@@ -198,8 +198,10 @@ async def signup(
                 err = {"error": "Email already exists"}
             elif constraint == "employees_username_key":
                 err = {"error": "Username already exists"}
+            elif constraint == "uq_employees_phone":
+                err = {"error": "Phone number already exists"}
             else:
-                err = {"error": "Username or email already exists"}
+                err = {"error": "Username, email, or phone already exists"}
 
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

@@ -344,6 +344,7 @@ class GSTRegistrationOut(BaseSchema):
     secondary_email: Optional[EmailStr]
     created_by: Optional[int]
     rm_id: Optional[int]
+    rm_name: Optional[str] = None
     approved_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
@@ -557,6 +558,7 @@ class RegistrationDocumentOut(BaseSchema):
     ownership_category: Optional[str]
     verified: bool
     verified_by: Optional[int]
+    verified_by_name: Optional[str] = None
     verified_at: Optional[datetime]
     mobile: Optional[str]
     created_at: datetime

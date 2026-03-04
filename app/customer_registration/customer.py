@@ -461,8 +461,8 @@ async def filter_customers(
 
         count_sql = f"""
             SELECT COUNT(*)
-              FROM {DB_SCHEMA}.customers
-              {where_clause}
+              FROM {DB_SCHEMA}.customers c
+              {where_clause.replace('WHERE ', 'WHERE c.').replace(' AND ', ' AND c.') if where_clause else ""}
         """
 
         # --------------------------------------------------
@@ -470,10 +470,14 @@ async def filter_customers(
         # --------------------------------------------------
 
         main_sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.customers
-              {where_clause}
-             ORDER BY created_at DESC
+            SELECT c.*, 
+                   e_rm.first_name as rm_name,
+                   e_op.first_name as op_name
+              FROM {DB_SCHEMA}.customers c
+              LEFT JOIN {DB_SCHEMA}.employees e_rm ON c.rm_id = e_rm.emp_id
+              LEFT JOIN {DB_SCHEMA}.employees e_op ON c.op_id = e_op.emp_id
+              {where_clause.replace('WHERE ', 'WHERE c.').replace(' AND ', ' AND c.') if where_clause else ""}
+             ORDER BY c.created_at DESC
              LIMIT ${idx} OFFSET ${idx + 1}
         """
 

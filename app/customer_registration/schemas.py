@@ -110,7 +110,9 @@ class CustomerOut(BaseSchema):
     city: Optional[str]
     remark: Optional[str]
     rm_id: Optional[int]
+    rm_name: Optional[str] = None
     op_id: Optional[int]
+    op_name: Optional[str] = None
     referral_id: Optional[int]
     created_at: datetime
     updated_at: datetime

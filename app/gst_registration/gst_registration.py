@@ -405,15 +405,17 @@ async def list_gst_registrations(
 
         count_sql = f"""
             SELECT COUNT(*)
-              FROM {DB_SCHEMA}.gst_registration
-              {where_clause}
+              FROM {DB_SCHEMA}.gst_registration g
+              {where_clause.replace('WHERE ', 'WHERE g.').replace(' AND ', ' AND g.') if where_clause else ""}
         """
 
         data_sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.gst_registration
-              {where_clause}
-             ORDER BY created_at DESC, id DESC
+            SELECT g.*, 
+                   e.first_name as rm_name
+              FROM {DB_SCHEMA}.gst_registration g
+              LEFT JOIN {DB_SCHEMA}.employees e ON g.rm_id = e.emp_id
+              {where_clause.replace('WHERE ', 'WHERE g.').replace(' AND ', ' AND g.') if where_clause else ""}
+             ORDER BY g.created_at DESC, g.id DESC
              LIMIT ${param_index} OFFSET ${param_index + 1}
         """
 
