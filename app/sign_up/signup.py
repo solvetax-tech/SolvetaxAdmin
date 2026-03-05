@@ -74,8 +74,8 @@ async def signup(
 
     log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
 
-    normalized_email = payload.email
-    username = payload.username
+    normalized_email = payload.email.strip().lower() if payload.email else None
+    username = payload.username.strip() if payload.username else None
 
     log.info("[signup] Incoming request username=%s email=%s", username, normalized_email)
 
@@ -119,7 +119,54 @@ async def signup(
                 )
 
         password_hash = hash_password(payload.password)
-        phone_number = payload.phone_number
+        phone_number = payload.phone_number.strip() if payload.phone_number else None
+
+        # --------------------------------------------------
+        # Pre-check duplicates so all conflicting fields can be returned
+        # --------------------------------------------------
+        field_errors = {}
+
+        duplicate_row = await conn.fetchrow(
+            f"""
+            SELECT
+                EXISTS (
+                    SELECT 1 FROM {DB_SCHEMA}.employees
+                    WHERE lower(trim(username)) = lower(trim($1))
+                ) AS username_match,
+
+                EXISTS (
+                    SELECT 1 FROM {DB_SCHEMA}.employees
+                    WHERE lower(trim(email)) = lower(trim($2))
+                ) AS email_match,
+
+                EXISTS (
+                    SELECT 1 FROM {DB_SCHEMA}.employees
+                    WHERE trim(phone_number) = trim($3)
+                ) AS phone_match
+            """,
+            username,
+            normalized_email,
+            phone_number
+        )
+
+        if duplicate_row:
+            if duplicate_row["username_match"]:
+                field_errors["username"] = "Username already exists"
+
+            if duplicate_row["email_match"]:
+                field_errors["email"] = "Email already exists"
+
+            if duplicate_row["phone_match"]:
+                field_errors["phoneNumber"] = "Phone number already exists"
+
+        if field_errors:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "Validation failed",
+                    "fields": field_errors
+                }
+            )
 
         user_data = {
             "username": username,
@@ -194,9 +241,9 @@ async def signup(
                 if constraint_match:
                     constraint = constraint_match.group(1)
 
-            if constraint == "employees_email_key":
+            if constraint == "uq_employees_email":
                 err = {"error": "Email already exists"}
-            elif constraint == "employees_username_key":
+            elif constraint == "uq_employees_username":
                 err = {"error": "Username already exists"}
             elif constraint == "uq_employees_phone":
                 err = {"error": "Phone number already exists"}

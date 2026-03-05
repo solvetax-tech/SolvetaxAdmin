@@ -427,21 +427,23 @@ async def get_employee(
     # --------------------------------------------------
     sql = f"""
         SELECT 
-            emp_id,
-            username,
-            email,
-            first_name,
-            last_name,
-            phone_number,
-            role,
-            is_active,
-            created_at,
-            updated_at,
-            manager_emp_id,
-            employee_image_url
-        FROM {DB_SCHEMA}.employees
-        WHERE emp_id = $1
-          AND is_active = TRUE
+            e.emp_id,
+            e.username,
+            e.email,
+            e.first_name,
+            e.last_name,
+            e.phone_number,
+            e.role,
+            e.is_active,
+            e.created_at,
+            e.updated_at,
+            e.manager_emp_id,
+            e.employee_image_url,
+            m.username as manager_username,
+            m.role as manager_role
+        FROM {DB_SCHEMA}.employees e
+        LEFT JOIN {DB_SCHEMA}.employees m ON e.manager_emp_id = m.emp_id
+        WHERE e.emp_id = $1
         LIMIT 1
     """
 
