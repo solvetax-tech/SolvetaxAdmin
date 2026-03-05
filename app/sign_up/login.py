@@ -322,7 +322,8 @@ async def refresh_token_endpoint(
                 httponly=True,
                 secure=True,
                 samesite="Strict",
-                max_age=14 * 24 * 60 * 60
+                max_age=14 * 24 * 60 * 60,
+                path = "/app/v1"
             )
 
             return response

@@ -3,6 +3,7 @@ import os
 import uuid
 import re
 import asyncpg
+import asyncio
 import ssl
 import logging
 import logging
@@ -20,6 +21,13 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # Make DB_SCHEMA available at module level
 DB_SCHEMA = os.getenv("DB_SCHEMA", "solvetax")
+
+# --------------------------------------------------
+# Asyncpg pool (singleton per process)
+# Keep pool sizes small for Azure Postgres connection limits.
+# --------------------------------------------------
+_db_pool = None
+_db_pool_lock = asyncio.Lock()
 
 
 def hash_password(password: str) -> str:
@@ -62,19 +70,36 @@ async def get_db_pool():
     if not DB_HOST or not DB_NAME or not DB_USER:
         raise RuntimeError("Database environment variables are not loaded")
 
-    if not hasattr(get_db_pool, "pool"):
-        ssl_context = ssl.create_default_context()
-        get_db_pool.pool = await asyncpg.create_pool(
-            host=DB_HOST,
-            port=DB_PORT,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            ssl=ssl_context,
-            command_timeout=60,
-        )
+    global _db_pool
+    if _db_pool is None:
+        async with _db_pool_lock:
+            if _db_pool is None:
+                ssl_context = ssl.create_default_context()
+                pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
+                pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
+                app_name = os.getenv("DB_APP_NAME", "slovetax-api")
+                _db_pool = await asyncpg.create_pool(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    database=DB_NAME,
+                    user=DB_USER,
+                    password=DB_PASSWORD,
+                    ssl=ssl_context,
+                    command_timeout=60,
+                    min_size=pool_min_size,
+                    max_size=pool_max_size,
+                    max_inactive_connection_lifetime=60,
+                    server_settings={"application_name": app_name},
+                )
 
-    return get_db_pool.pool
+    return _db_pool
+
+
+async def close_db_pool() -> None:
+    global _db_pool
+    if _db_pool is not None:
+        await _db_pool.close()
+        _db_pool = None
 
 
 def mask_sensitive_data(data: Optional[str]) -> str:
@@ -226,3 +251,58 @@ def get_blob_service_client() -> BlobServiceClient:
         )
 
     return _blob_service_client
+
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from dotenv import load_dotenv
+from app.logger import logger
+
+load_dotenv()
+
+async def send_email_otp(email: str, otp: str):
+
+    smtp_server = os.getenv("SMTP_SERVER")
+    smtp_port = int(os.getenv("SMTP_PORT"))
+    smtp_email = os.getenv("SMTP_EMAIL")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+
+    if not all([smtp_server, smtp_port, smtp_email, smtp_password]):
+        raise RuntimeError("SMTP configuration missing")
+
+    subject = "SolveTax Password Reset OTP"
+
+    body = f"""
+Hello,
+
+Your OTP for resetting your SolveTax account password is:
+
+{otp}
+
+This OTP will expire in 10 minutes.
+
+If you did not request this, please ignore this email.
+
+Regards,
+SolveTax Security Team
+"""
+
+    message = MIMEMultipart()
+    message["From"] = smtp_email
+    message["To"] = email
+    message["Subject"] = subject
+    message.attach(MIMEText(body, "plain"))
+
+    try:
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_email, smtp_password)
+            server.sendmail(smtp_email, email, message.as_string())
+
+        logger.info("OTP email sent successfully to %s", email)
+
+    except Exception as e:
+        logger.error("Email sending failed for %s | Error: %s", email, str(e))
+        raise

@@ -21,6 +21,19 @@ from fastapi.security import HTTPBearer
 
 app = FastAPI(title="Slove Tax", version="1.0.0")
 
+# Ensure DB pool is created once per process and closed on shutdown.
+from app.utils import get_db_pool, close_db_pool
+
+
+@app.on_event("startup")
+async def _startup_init_db_pool():
+    await get_db_pool()
+
+
+@app.on_event("shutdown")
+async def _shutdown_close_db_pool():
+    await close_db_pool()
+
 # Add middleware in correct order (they execute in reverse order)
 # First add TokenValidator, then CORS - so CORS runs before TokenValidator
 app.add_middleware(TokenValidatorMiddleware)
@@ -119,8 +132,9 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
 
-    # Get number of workers - defaults to CPU count
-    workers = int(os.getenv("WORKERS", multiprocessing.cpu_count()))
+    # IMPORTANT: Each worker is a separate process and will create its own DB pool.
+    # Keep this low for Azure Postgres connection limits; override via WORKERS env var.
+    workers = int(os.getenv("WORKERS", "1"))
 
     # Get host and port from environment or use defaults
     host = os.getenv("HOST", "127.0.0.1")
@@ -128,7 +142,7 @@ if __name__ == "__main__":
 
     # Production configuration
     uvicorn.run(
-        "api.main:app",
+        "app.main:app",
         host=host,
         port=port,
         workers=workers,
