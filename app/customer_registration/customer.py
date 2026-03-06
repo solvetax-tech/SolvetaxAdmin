@@ -533,6 +533,7 @@ async def edit_customer(
     ✔ Atomic transaction
     ✔ text[] handling
     ✔ Full asyncpg exception coverage
+    ✔ Prevent editing inactive customers
     """
 
     request_id = generate_uuid()
@@ -651,6 +652,19 @@ async def edit_customer(
                         detail="Customer not found.",
                     )
 
+                # --------------------------------------------------
+                # Prevent Editing Inactive Customers
+                # --------------------------------------------------
+                if not old_row.get("is_active"):
+                    log.warning(
+                        "Edit blocked because customer is inactive | customer_id=%s",
+                        customer_id,
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Customer is inactive. Activate the customer first and then edit.",
+                    )
+
                 # 2️⃣ Build Dynamic Update
                 fields = []
                 values = []
@@ -761,7 +775,6 @@ async def edit_customer(
                 status_code=500,
                 detail="Internal server error.",
             )
-
 # =========================================================
 # SOFT DELETE CUSTOMER (Customer-First Mode + Conditional Cascade)
 # =========================================================
@@ -886,7 +899,7 @@ async def soft_delete_customer(
                     raise HTTPException(
                         400,
                         "Cannot deactivate customer. Customer has multiple active GST registrations. "
-                        "Please deactivate GSTs individually from GST Registration page first.",
+                        "Please deactivate GSTs individually from GST Registration page first.Only customers with no gstin and customers with 1 gstin are allowed to deactiavte from here",
                     )
 
                 # --------------------------------------------------
@@ -1089,8 +1102,7 @@ async def activate_customer(
                         status_code=400,
                         detail=(
                             "Customer is already active. "
-                            "If you want to activate a specific GST registration, "
-                            "please navigate to the GST Registration page and activate it there."
+                            "Check GST Registration and activate it there if there are two gstins to this customer."
                         ),
                     )
 
