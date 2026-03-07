@@ -22,7 +22,6 @@ PUBLIC_PATHS = [
     "/favicon.ico",
     "/health",
     "/app/v1/login",
-    "/app/v1/signup",
     "/app/v1/forgot-password/request",
     "/app/v1/forgot-password/verify",
 ]

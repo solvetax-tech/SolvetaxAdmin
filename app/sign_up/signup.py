@@ -9,14 +9,18 @@ import os
 import asyncpg
 import logging
 import re
-import json   # ✅ ADDED FOR VERSIONING
+import json   # ✅ VERSION AUDIT
 
-# Load environment variables from api/.env
+# Load environment variables
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 router = APIRouter(prefix="/app/v1", tags=["Signup"])
 
-# --- DB Helper Functions ---
+
+# --------------------------------------------------
+# DB Helper Functions
+# --------------------------------------------------
+
 async def get_role_id(conn: asyncpg.Connection, role_code: str) -> Optional[int]:
     row = await conn.fetchrow(
         f"SELECT id FROM {DB_SCHEMA}.roles WHERE role_code = $1",
@@ -26,6 +30,7 @@ async def get_role_id(conn: asyncpg.Connection, role_code: str) -> Optional[int]
         return None
     return row["id"]
 
+
 async def assign_role_to_employee(conn: asyncpg.Connection, emp_id: int, role_id: int) -> None:
     await conn.execute(
         f"""
@@ -33,8 +38,10 @@ async def assign_role_to_employee(conn: asyncpg.Connection, emp_id: int, role_id
         VALUES ($1, $2, true, NOW(), NOW())
         ON CONFLICT DO NOTHING
         """,
-        emp_id, role_id
+        emp_id,
+        role_id
     )
+
 
 async def create_user(conn: asyncpg.Connection, user_data: dict) -> Optional[int]:
     row = await conn.fetchrow(
@@ -44,17 +51,27 @@ async def create_user(conn: asyncpg.Connection, user_data: dict) -> Optional[int
         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, NOW(), NOW())
         RETURNING emp_id
         """,
-        user_data["username"], user_data["email"], user_data["password_hash"], user_data["first_name"],
-        user_data["last_name"], user_data["phone_number"], user_data["role"], user_data["manager_emp_id"]
+        user_data["username"],
+        user_data["email"],
+        user_data["password_hash"],
+        user_data["first_name"],
+        user_data["last_name"],
+        user_data["phone_number"],
+        user_data["role"],
+        user_data["manager_emp_id"]
     )
+
     return row["emp_id"] if row else None
 
+
+# --------------------------------------------------
+# Signup API
+# --------------------------------------------------
 
 @router.post(
     "/signup",
     status_code=status.HTTP_201_CREATED,
     response_model=SignupResponse,
-    dependencies=[Depends(require_permission("USER_ACCESS", "WRITE"))],
     responses={
         400: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
@@ -65,7 +82,9 @@ async def signup(
     payload: SignupRequest,
     current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
+
     request_id = generate_uuid()
+
     emp_id = current_user.get("sub", "-")
     try:
         emp_id = int(emp_id)
@@ -74,30 +93,73 @@ async def signup(
 
     log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
 
+    # --------------------------------------------------
+    # Normalize Inputs
+    # --------------------------------------------------
+
     normalized_email = payload.email.strip().lower() if payload.email else None
-    username = payload.username.strip() if payload.username else None
+    username = payload.username.strip().lower() if payload.username else None
+
+    first_name = payload.first_name.strip() if payload.first_name else None
+    last_name = payload.last_name.strip() if payload.last_name else None
+    phone_number = payload.phone_number.strip() if payload.phone_number else None
 
     log.info("[signup] Incoming request username=%s email=%s", username, normalized_email)
 
+    # --------------------------------------------------
+    # Password Strength Validation
+    # --------------------------------------------------
+
     if not is_password_strong(payload.password):
-        log.warning("[signup] Weak password for username=%s, email=%s", username, normalized_email)
+        log.warning("[signup] Weak password for username=%s email=%s", username, normalized_email)
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "Validation failed", "fields": {"password": "Password is not secure enough"}}
+            detail={
+                "error": "Validation failed",
+                "fields": {
+                    "password": "Password is not secure enough"
+                }
+            }
         )
-    
-    pool = await get_db_pool()
+
+    # --------------------------------------------------
+    # DB Connection
+    # --------------------------------------------------
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.error("[signup] DB pool initialization failed", exc_info=True)
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service temporarily unavailable."
+        )
+
     async with pool.acquire() as conn:
+
+        # --------------------------------------------------
+        # Validate Role
+        # --------------------------------------------------
+
         role_code = payload.role
         role_id = await get_role_id(conn, role_code)
+
         if not role_id:
             log.warning("[signup] Invalid role code provided: %s", role_code)
+
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"error": f"Invalid role code: {role_code}"}
             )
-        
+
+        # --------------------------------------------------
+        # Validate Manager Role
+        # --------------------------------------------------
+
         if payload.manager_emp_id is not None:
+
             manager_valid = await conn.fetchval(
                 f"""
                 SELECT EXISTS (
@@ -111,19 +173,21 @@ async def signup(
                 """,
                 payload.manager_emp_id
             )
+
             if not manager_valid:
-                log.warning("[signup] Invalid, inactive, or unauthorized role for manager_emp_id: %s", payload.manager_emp_id)
+                log.warning("[signup] Invalid manager_emp_id: %s", payload.manager_emp_id)
+
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={"error": "Invalid or unauthorized manager_emp_id"}
                 )
 
         password_hash = hash_password(payload.password)
-        phone_number = payload.phone_number.strip() if payload.phone_number else None
 
         # --------------------------------------------------
-        # Pre-check duplicates so all conflicting fields can be returned
+        # Duplicate Check
         # --------------------------------------------------
+
         field_errors = {}
 
         duplicate_row = await conn.fetchrow(
@@ -150,6 +214,7 @@ async def signup(
         )
 
         if duplicate_row:
+
             if duplicate_row["username_match"]:
                 field_errors["username"] = "Username already exists"
 
@@ -160,6 +225,7 @@ async def signup(
                 field_errors["phoneNumber"] = "Phone number already exists"
 
         if field_errors:
+
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -172,34 +238,43 @@ async def signup(
             "username": username,
             "email": normalized_email,
             "password_hash": password_hash,
-            "first_name": payload.first_name,
-            "last_name": payload.last_name,
+            "first_name": first_name,
+            "last_name": last_name,
             "phone_number": phone_number,
             "role": role_code,
             "manager_emp_id": payload.manager_emp_id
         }
-        
-        log.info("[signup] Creating user with username=%s, email=%s", username, normalized_email)
+
+        log.info("[signup] Creating user username=%s email=%s", username, normalized_email)
 
         try:
+
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Create employee
+                # 1️⃣ Create Employee
                 # --------------------------------------------------
+
                 created_id = await create_user(conn, user_data)
+
                 if not created_id:
-                    log.error("[signup] Failed to create user in DB for username=%s", username)
+                    log.error("[signup] Failed to create employee")
+
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail="Could not create employee"
                     )
-                
+
+                # --------------------------------------------------
+                # 2️⃣ Assign Role
+                # --------------------------------------------------
+
                 await assign_role_to_employee(conn, created_id, role_id)
 
                 # --------------------------------------------------
-                # 2️⃣ Fetch Created Employee Snapshot
+                # 3️⃣ Fetch Employee Snapshot
                 # --------------------------------------------------
+
                 employee_row = await conn.fetchrow(
                     f"""
                     SELECT *
@@ -210,11 +285,14 @@ async def signup(
                 )
 
                 employee_dict = dict(employee_row)
-                employee_dict.pop("password_hash", None)  # 🔐 remove sensitive data
+
+                # Remove sensitive data
+                employee_dict.pop("password_hash", None)
 
                 # --------------------------------------------------
-                # 3️⃣ Insert Version Audit
+                # 4️⃣ Insert Version Audit
                 # --------------------------------------------------
+
                 version_sql = f"""
                     INSERT INTO {DB_SCHEMA}.versions
                     (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
@@ -223,19 +301,21 @@ async def signup(
 
                 await conn.execute(
                     version_sql,
-                    emp_id,            # actor performing signup
-                    "SIGNUP",          # entity_type
-                    created_id,                 # entity_id
-                    None,              # customer_id
-                    "CREATE",          # action
+                    emp_id,
+                    "SIGNUP",
+                    created_id,
+                    None,
+                    "CREATE",
                     json.dumps(employee_dict, default=str),
-                    None               # updated_json must be NULL
+                    None
                 )
 
         except asyncpg.exceptions.UniqueViolationError as e:
-            log.error("[signup] Duplicate key error: %s", e)
+
+            log.error("[signup] Duplicate constraint violation: %s", e)
 
             constraint = getattr(e, "constraint_name", None)
+
             if not constraint:
                 constraint_match = re.search(r'constraint ["\'](.+?)["\']', str(e))
                 if constraint_match:
@@ -243,10 +323,13 @@ async def signup(
 
             if constraint == "uq_employees_email":
                 err = {"error": "Email already exists"}
+
             elif constraint == "uq_employees_username":
                 err = {"error": "Username already exists"}
+
             elif constraint == "uq_employees_phone":
                 err = {"error": "Phone number already exists"}
+
             else:
                 err = {"error": "Username, email, or phone already exists"}
 
@@ -256,7 +339,9 @@ async def signup(
             )
 
         except asyncpg.exceptions.ForeignKeyViolationError as e:
-            log.error("[signup] Foreign key error on manager_emp_id: %s", e)
+
+            log.error("[signup] Foreign key violation: %s", e)
+
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"error": "Invalid manager_emp_id"}
@@ -266,13 +351,15 @@ async def signup(
             raise
 
         except Exception as e:
-            log.error("[signup] Unexpected exception during user creation: %s", e, exc_info=True)
+
+            log.error("[signup] Unexpected error: %s", e, exc_info=True)
+
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={"error": "Service temporarily unavailable. Please try again later."}
             )
-        
-        log.info("[signup] Employee created successfully with audit: id=%s", created_id)
+
+        log.info("[signup] Employee created successfully id=%s", created_id)
 
         return SignupResponse(
             emp_id=created_id,

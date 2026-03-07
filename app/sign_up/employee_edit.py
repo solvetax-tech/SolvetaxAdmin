@@ -208,7 +208,6 @@ async def edit_employee(
 # -------------------------------------------------------------------
 # FILTER EMPLOYEES (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
-
 @router.get(
     "/filter",
     summary="Filter Employees",
@@ -223,7 +222,10 @@ async def filter_employees(
     full_name: Optional[str] = None,
     email: Optional[str] = None,
     phone_number: Optional[str] = None,
-    role: Optional[str] = None,
+
+    # UPDATED: allow multiple roles
+    role: Optional[List[str]] = Query(None),
+
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
     from_date: Optional[datetime] = None,
@@ -301,10 +303,16 @@ async def filter_employees(
             values.append(phone_number.strip())
             param_index += 1
 
+        # --------------------------------------------------
+        # ROLE FILTERING (IMPROVED FOR MULTIPLE ROLES)
+        # --------------------------------------------------
+
         if role:
-            conditions.append(f"role = ${param_index}")
-            values.append(role)
-            param_index += 1
+            cleaned_roles = [r.strip() for r in role if r and r.strip()]
+            if cleaned_roles:
+                conditions.append(f"role = ANY(${param_index})")
+                values.append(cleaned_roles)
+                param_index += 1
 
         # --------------------------------------------------
         # Status Filtering
@@ -348,7 +356,6 @@ async def filter_employees(
 
         log.info("Employees filtered successfully count=%s", len(rows))
 
-        # Return raw dicts with message, bypassing Pydantic validation
         return [
             {**dict(row), "message": "Employees filtered successfully."}
             for row in rows
@@ -371,9 +378,6 @@ async def filter_employees(
             status_code=500,
             detail="Internal server error.",
         )
-
-
-
 @router.get(
     "/employee/{emp_id}",
     summary="Get Employee",

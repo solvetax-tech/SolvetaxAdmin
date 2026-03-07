@@ -44,8 +44,9 @@ class GSTRegistrationIn(BaseModel):
     # Identity
     # ----------------------------
     customer_id: int = Field(..., gt=0)
-    username: Annotated[str, Field(..., min_length=3, max_length=100)]
-    password: Annotated[str, Field(..., min_length=8, max_length=128)]
+
+    username: Optional[Annotated[str, Field(min_length=0, max_length=100)]] = None
+    password: Optional[Annotated[str, Field(min_length=0, max_length=128)]] = None
 
     pan: Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
     gstin: Optional[
@@ -189,8 +190,8 @@ class GSTRegistrationEditIn(BaseModel):
         )]
     ] = None
 
-    username: Optional[str] = Field(None, min_length=3, max_length=100)
-    password: Optional[str] = Field(None, min_length=8, max_length=128)
+    username: Optional[str] = Field(None, min_length=0, max_length=100)
+    password: Optional[str] = Field(None, min_length=0, max_length=128)
 
     pan: Optional[
         Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]

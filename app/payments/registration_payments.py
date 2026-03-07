@@ -31,7 +31,7 @@ router = APIRouter(
 )
 async def create_registration_payment(
     payload: RegistrationPaymentIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
     Create Registration Payment
@@ -39,9 +39,8 @@ async def create_registration_payment(
     ✔ Atomic transaction (Payment + Version)
     ✔ GST must exist & active
     ✔ Customer derived from GST (source of truth)
-    ✔ Amount system controlled
+    ✔ Amount now comes from payload
     ✔ Status auto-controlled by DB trigger
-    ✔ Unique constraint enforced (customer_id + entity_id)
     ✔ Enterprise-grade structured logging
     """
 
@@ -114,9 +113,9 @@ async def create_registration_payment(
                 derived_customer_id = gst_row["customer_id"]
 
                 # --------------------------------------------------
-                # 3️⃣ System Controlled Amount
+                # 3️⃣ Amount From Payload
                 # --------------------------------------------------
-                FIXED_AMOUNT = 1500.00  # Replace with pricing table in future
+                amount_value = payload.amount
 
                 # --------------------------------------------------
                 # 4️⃣ Insert Registration Payment
@@ -143,7 +142,7 @@ async def create_registration_payment(
                     derived_customer_id,
                     payload.entity_id,
                     "GST_REGISTRATION",
-                    FIXED_AMOUNT,
+                    amount_value,
                     payload.discount or 0,
                     payload.paid_amount or 0,
                     payload.remarks,
@@ -202,8 +201,6 @@ async def create_registration_payment(
             UNIQUE_MAP = {
                 "registration_payments_transaction_id_key":
                     "Transaction ID already exists.",
-                "uq_registration_payment_customer_entity":
-                    "Payment already exists for this customer and registration. Please edit instead.",
             }
 
             log.warning(
@@ -283,6 +280,15 @@ async def list_registration_payments(
     payment_mode: Optional[str] = None,
     min_amount: Optional[float] = None,
     max_amount: Optional[float] = None,
+
+    # --------------------------------------------------
+    # NEW FILTER PARAMETERS (ADDED)
+    # --------------------------------------------------
+    amount: Optional[float] = None,
+    amount_operator: Optional[str] = None,
+    remaining_amount: Optional[float] = None,
+    remaining_amount_operator: Optional[str] = None,
+
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
     from_date: Optional[datetime] = None,
@@ -303,6 +309,8 @@ async def list_registration_payments(
     ✔ Structured logging
     ✔ Enum validation added
     ✔ Range validation added
+    ✔ NEW: amount comparison filters
+    ✔ NEW: remaining_amount comparison filters
     """
 
     # --------------------------------------------------
@@ -342,6 +350,23 @@ async def list_registration_payments(
         raise HTTPException(
             status_code=400,
             detail="min_amount cannot be greater than max_amount.",
+        )
+
+    # --------------------------------------------------
+    # Operator Validation (NEW)
+    # --------------------------------------------------
+    ALLOWED_OPERATORS = {">", "<", "="}
+
+    if amount_operator and amount_operator not in ALLOWED_OPERATORS:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid amount_operator. Allowed values are > < =",
+        )
+
+    if remaining_amount_operator and remaining_amount_operator not in ALLOWED_OPERATORS:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid remaining_amount_operator. Allowed values are > < =",
         )
 
     # --------------------------------------------------
@@ -445,6 +470,26 @@ async def list_registration_payments(
         if max_amount is not None:
             conditions.append(f"net_amount <= ${param_index}")
             values.append(max_amount)
+            param_index += 1
+
+        # --------------------------------------------------
+        # NEW: Amount Operator Filtering
+        # --------------------------------------------------
+
+        if amount is not None:
+            operator = amount_operator if amount_operator else "="
+            conditions.append(f"amount {operator} ${param_index}")
+            values.append(amount)
+            param_index += 1
+
+        # --------------------------------------------------
+        # NEW: Remaining Amount Operator Filtering
+        # --------------------------------------------------
+
+        if remaining_amount is not None:
+            operator = remaining_amount_operator if remaining_amount_operator else "="
+            conditions.append(f"remaining_amount {operator} ${param_index}")
+            values.append(remaining_amount)
             param_index += 1
 
         # --------------------------------------------------
@@ -636,6 +681,28 @@ async def edit_registration_payment(
                     )
 
                 # --------------------------------------------------
+                # 🔹 NEW VALIDATION IMPROVEMENTS
+                # --------------------------------------------------
+
+                if "discount" in update_data and update_data["discount"] is not None:
+                    if update_data["discount"] > old_row["amount"]:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Discount cannot exceed original amount.",
+                        )
+
+                if "paid_amount" in update_data and update_data["paid_amount"] is not None:
+                    net_amount_after_discount = (
+                        old_row["amount"] - update_data.get("discount", old_row["discount"])
+                    )
+
+                    if update_data["paid_amount"] > net_amount_after_discount:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Paid amount cannot exceed net amount.",
+                        )
+
+                # --------------------------------------------------
                 # 2️⃣ Reject if No Actual Change
                 # --------------------------------------------------
                 no_change = True
@@ -775,7 +842,6 @@ async def edit_registration_payment(
                 status_code=500,
                 detail="Internal server error.",
             )
-
 # -------------------------------------------------------------------
 # SOFT DELETE REGISTRATION PAYMENT (Production Ready + Audit)
 # -------------------------------------------------------------------
