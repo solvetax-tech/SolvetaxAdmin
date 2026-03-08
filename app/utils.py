@@ -13,7 +13,7 @@ from asyncpg.exceptions import PostgresError
 from dotenv import load_dotenv
 from typing import Optional
 from azure.storage.blob import BlobServiceClient
-
+from urllib.parse import urlparse
 
 # Load .env from project root
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -306,3 +306,58 @@ SolveTax Security Team
     except Exception as e:
         logger.error("Email sending failed for %s | Error: %s", email, str(e))
         raise
+
+AZURE_SAS_EXPIRY_MINUTES=15
+
+# --------------------------------------------------
+# Generate Secure SAS URL for Blob
+# --------------------------------------------------
+
+from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+from datetime import datetime, timedelta
+
+AZURE_SAS_EXPIRY_MINUTES = int(os.getenv("AZURE_SAS_EXPIRY_MINUTES", 15))
+
+
+def generate_blob_sas_url(blob_path: str) -> str:
+    """
+    Generate temporary SAS URL for viewing/downloading blob
+    """
+
+    blob_service_client = get_blob_service_client()
+
+    account_name = blob_service_client.account_name
+    account_key = blob_service_client.credential.account_key
+
+    sas_token = generate_blob_sas(
+        account_name=account_name,
+        container_name=AZURE_STORAGE_CONTAINER,
+        blob_name=blob_path,
+        account_key=account_key,
+        permission=BlobSasPermissions(read=True),
+        expiry=datetime.utcnow() + timedelta(minutes=AZURE_SAS_EXPIRY_MINUTES),
+    )
+
+    url = (
+        f"https://{account_name}.blob.core.windows.net/"
+        f"{AZURE_STORAGE_CONTAINER}/{blob_path}?{sas_token}"
+    )
+
+    return url
+
+def extract_blob_path(blob_url: str) -> str:
+    """
+    Extract blob path safely from Azure blob URL.
+    """
+
+    parsed_url = urlparse(blob_url)
+
+    if not parsed_url.path:
+        raise ValueError("Invalid blob URL")
+
+    blob_path = parsed_url.path.replace(f"/{AZURE_STORAGE_CONTAINER}/", "")
+
+    if not blob_path:
+        raise ValueError("Blob path could not be extracted")
+
+    return blob_path
