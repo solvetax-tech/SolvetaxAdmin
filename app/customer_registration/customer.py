@@ -18,11 +18,9 @@ router = APIRouter(
     prefix="/api/v1/customers",
     tags=["Customers"]
 )
-
 # -------------------------------------------------------------------
 # CREATE CUSTOMER (Enterprise Production + Version Audit + Services)
 # -------------------------------------------------------------------
-
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -43,7 +41,7 @@ async def create_customer(
     ✔ entity_type = 'CUSTOMER'
     ✔ entity_id = customer_id
     ✔ action = 'CREATE'
-    ✔ services (text[]) supported
+    ✔ service_required / service_provided supported
     ✔ json populated (NEW snapshot)
     ✔ updated_json = NULL
     ✔ Structured logging
@@ -66,10 +64,11 @@ async def create_customer(
     masked_mobile = mask_sensitive_data(payload.mobile)
 
     log.info(
-        "Incoming create customer request | email=%s mobile=%s services=%s",
+        "Incoming create customer request | email=%s mobile=%s service_required=%s service_provided=%s",
         masked_email,
         masked_mobile,
-        payload.services,
+        payload.service_required,
+        payload.service_provided,
     )
 
     # --------------------------------------------------
@@ -89,8 +88,16 @@ async def create_customer(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Insert Customer (WITH SERVICES)
+                # Normalize Service Arrays
                 # --------------------------------------------------
+
+                service_required = payload.service_required or []
+                service_provided = payload.service_provided or []
+
+                # --------------------------------------------------
+                # 1️⃣ Insert Customer
+                # --------------------------------------------------
+
                 insert_sql = f"""
                     INSERT INTO {DB_SCHEMA}.customers
                     (
@@ -107,10 +114,11 @@ async def create_customer(
                         rm_id,
                         op_id,
                         referral_id,
-                        services
+                        service_required,
+                        service_provided
                     )
                     VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
                     )
                     RETURNING *
                 """
@@ -132,7 +140,8 @@ async def create_customer(
                     payload.rm_id,
                     payload.op_id,
                     payload.referral_id,
-                    payload.services if payload.services else [],
+                    service_required,
+                    service_provided,
                 )
 
                 if not customer_row:
@@ -147,6 +156,7 @@ async def create_customer(
                 # --------------------------------------------------
                 # 2️⃣ Version Audit
                 # --------------------------------------------------
+
                 await conn.execute(
                     f"""
                     INSERT INTO {DB_SCHEMA}.versions
@@ -171,7 +181,7 @@ async def create_customer(
                 )
 
             log.info(
-                "Customer created successfully with services | customer_id=%s",
+                "Customer created successfully | customer_id=%s",
                 customer_id,
             )
 
@@ -185,10 +195,12 @@ async def create_customer(
         # UNIQUE CONSTRAINT HANDLING
         # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError as e:
+
             constraint = getattr(e, "constraint_name", "")
 
             UNIQUE_MAP = {
-                # Add future mappings here
+                "uq_customers_mobile": "Mobile number already exists.",
+                "uq_customers_email": "Email already exists.",
             }
 
             raise HTTPException(
@@ -203,12 +215,12 @@ async def create_customer(
         # FOREIGN KEY HANDLING
         # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError as e:
+
             constraint = getattr(e, "constraint_name", "")
 
             FK_MAP = {
                 "customers_rm_id_fkey": "Invalid rm_id provided.",
                 "customers_op_id_fkey": "Invalid op_id provided.",
-                "customers_referral_id_fkey": "Invalid referral_id provided.",
             }
 
             raise HTTPException(
@@ -259,10 +271,31 @@ async def create_customer(
                 status_code=500,
                 detail="Internal server error.",
             )
-
 # -------------------------------------------------------------------
 # LIST CUSTOMERS (Enterprise Filter + Pagination + Services Support)
 # -------------------------------------------------------------------
+
+STANDARD_FILTERS = {
+    "customer_id": ("customer_id =", lambda v: v),
+    "full_name": ("full_name ILIKE", lambda v: f"%{v.strip()}%"),
+    "email": ("email ILIKE", lambda v: f"%{v.strip().lower()}%"),
+    "mobile": ("mobile =", lambda v: v.strip()),
+    "business_type": ("business_type =", lambda v: v),
+    "state": ("state =", lambda v: v),
+    "city": ("city =", lambda v: v),
+    "rm_id": ("rm_id =", lambda v: v),
+    "op_id": ("op_id =", lambda v: v),
+}
+
+ARRAY_FILTERS = {
+    "service_required": ("service_required", "ANY"),
+    "services_required_all": ("service_required", "@>"),
+    "services_required_any": ("service_required", "&&"),
+
+    "service_provided": ("service_provided", "ANY"),
+    "services_provided_all": ("service_provided", "@>"),
+    "services_provided_any": ("service_provided", "&&"),
+}
 
 from fastapi import Query
 from datetime import datetime
@@ -289,32 +322,31 @@ async def filter_customers(
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
 
-    # 👇 NEW SERVICES FILTERS
-    service: Optional[str] = None,                    # single service
-    services_all: Optional[List[str]] = Query(None), # must contain all
-    services_any: Optional[List[str]] = Query(None), # overlap
+    # service filters
+    service_required: Optional[str] = None,
+    services_required_all: Optional[List[str]] = Query(None),
+    services_required_any: Optional[List[str]] = Query(None),
 
+    service_provided: Optional[str] = None,
+    services_provided_all: Optional[List[str]] = Query(None),
+    services_provided_any: Optional[List[str]] = Query(None),
+
+    # date filters
     from_date: Optional[datetime] = None,
     to_date: Optional[datetime] = None,
+
+    # pagination
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+
+    # NEW: cursor pagination
+    cursor: Optional[datetime] = None,
+
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-    """
-    ✔ Dynamic filtering
-    ✔ Services array filtering
-    ✔ Pagination
-    ✔ Total count metadata
-    ✔ Active filtering logic
-    ✔ Clean date handling
-    ✔ Structured logging
-    ✔ DB-safe parameter binding
-    """
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
+
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
@@ -324,24 +356,18 @@ async def filter_customers(
     )
 
     log.info(
-        "Incoming customer filter | limit=%s offset=%s service=%s",
+        "Incoming customer filter | limit=%s offset=%s cursor=%s",
         limit,
         offset,
-        service,
+        cursor,
     )
 
-    # --------------------------------------------------
-    # Date Validation
-    # --------------------------------------------------
     if from_date and to_date and from_date > to_date:
         raise HTTPException(
             status_code=400,
             detail="from_date cannot be greater than to_date.",
         )
 
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
@@ -352,93 +378,65 @@ async def filter_customers(
         )
 
     try:
+
+        params = locals()
         conditions = []
         values = []
         idx = 1
 
         # --------------------------------------------------
-        # Standard Filters
+        # STANDARD FILTERS
         # --------------------------------------------------
+        for key, (sql_op, formatter) in STANDARD_FILTERS.items():
 
-        if customer_id is not None:
-            conditions.append(f"customer_id = ${idx}")
-            values.append(customer_id)
-            idx += 1
+            value = params.get(key)
 
-        if full_name:
-            conditions.append(f"full_name ILIKE ${idx}")
-            values.append(f"%{full_name.strip()}%")
-            idx += 1
+            if value is not None:
+                conditions.append(f"{sql_op} ${idx}")
+                values.append(formatter(value))
+                idx += 1
 
-        if email:
-            conditions.append(f"email ILIKE ${idx}")
-            values.append(f"%{email.strip().lower()}%")
-            idx += 1
+        # --------------------------------------------------
+        # ARRAY FILTERS
+        # --------------------------------------------------
+        for key, (column, operator) in ARRAY_FILTERS.items():
 
-        if mobile:
-            conditions.append(f"mobile = ${idx}")
-            values.append(mobile.strip())
-            idx += 1
+            value = params.get(key)
 
-        if business_type:
-            conditions.append(f"business_type = ${idx}")
-            values.append(business_type)
-            idx += 1
+            if not value:
+                continue
 
-        if state:
-            conditions.append(f"state = ${idx}")
-            values.append(state)
-            idx += 1
+            if isinstance(value, list):
+                cleaned = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+                if not cleaned:
+                    continue
+                value = cleaned
 
-        if city:
-            conditions.append(f"city = ${idx}")
-            values.append(city)
-            idx += 1
+            elif isinstance(value, str):
+                value = value.strip()
 
-        if rm_id is not None:
-            conditions.append(f"rm_id = ${idx}")
-            values.append(rm_id)
-            idx += 1
+            if operator == "ANY":
+                conditions.append(f"${idx} = ANY({column})")
+            else:
+                conditions.append(f"{column} {operator} ${idx}")
 
-        if op_id is not None:
-            conditions.append(f"op_id = ${idx}")
-            values.append(op_id)
+            values.append(value)
             idx += 1
 
         # --------------------------------------------------
-        # SERVICES FILTERING
+        # STATUS FILTER
         # --------------------------------------------------
-
-        if service:
-            conditions.append(f"${idx} = ANY(services)")
-            values.append(service.strip())
-            idx += 1
-
-        if services_all:
-            conditions.append(f"services @> ${idx}")
-            values.append(services_all)
-            idx += 1
-
-        if services_any:
-            conditions.append(f"services && ${idx}")
-            values.append(services_any)
-            idx += 1
-
-        # --------------------------------------------------
-        # Status Filtering
-        # --------------------------------------------------
-
         if is_active is not None:
             conditions.append(f"is_active = ${idx}")
             values.append(is_active)
             idx += 1
+
         elif not include_inactive:
             conditions.append("is_active = TRUE")
 
         # --------------------------------------------------
-        # Date Filtering
+        # DATE FILTER
         # --------------------------------------------------
-
         if from_date:
             conditions.append(f"created_at >= ${idx}")
             values.append(from_date)
@@ -450,42 +448,62 @@ async def filter_customers(
             idx += 1
 
         # --------------------------------------------------
-        # WHERE Clause
+        # CURSOR PAGINATION
         # --------------------------------------------------
+        if cursor:
+            conditions.append(f"created_at < ${idx}")
+            values.append(cursor)
+            idx += 1
 
+        # --------------------------------------------------
+        # WHERE CLAUSE
+        # --------------------------------------------------
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        # --------------------------------------------------
-        # COUNT Query
-        # --------------------------------------------------
+        where_clause_c = (
+            where_clause.replace("WHERE ", "WHERE c.")
+            .replace(" AND ", " AND c.")
+            if where_clause
+            else ""
+        )
 
         count_sql = f"""
             SELECT COUNT(*)
-              FROM {DB_SCHEMA}.customers c
-              {where_clause.replace('WHERE ', 'WHERE c.').replace(' AND ', ' AND c.') if where_clause else ""}
+            FROM {DB_SCHEMA}.customers c
+            {where_clause_c}
         """
 
         # --------------------------------------------------
-        # Main Query
+        # PAGINATION LOGIC
         # --------------------------------------------------
+        if cursor:
+            pagination_sql = f"LIMIT ${idx}"
+            values_with_pagination = values + [limit]
+        else:
+            pagination_sql = f"LIMIT ${idx} OFFSET ${idx + 1}"
+            values_with_pagination = values + [limit, offset]
 
         main_sql = f"""
-            SELECT c.*, 
-                   e_rm.first_name as rm_name,
-                   e_op.first_name as op_name
-              FROM {DB_SCHEMA}.customers c
-              LEFT JOIN {DB_SCHEMA}.employees e_rm ON c.rm_id = e_rm.emp_id
-              LEFT JOIN {DB_SCHEMA}.employees e_op ON c.op_id = e_op.emp_id
-              {where_clause.replace('WHERE ', 'WHERE c.').replace(' AND ', ' AND c.') if where_clause else ""}
-             ORDER BY c.created_at DESC
-             LIMIT ${idx} OFFSET ${idx + 1}
+            SELECT c.*,
+                   e_rm.first_name AS rm_name,
+                   e_op.first_name AS op_name
+            FROM {DB_SCHEMA}.customers c
+            LEFT JOIN {DB_SCHEMA}.employees e_rm
+                   ON c.rm_id = e_rm.emp_id
+            LEFT JOIN {DB_SCHEMA}.employees e_op
+                   ON c.op_id = e_op.emp_id
+            {where_clause_c}
+            ORDER BY c.created_at DESC
+            {pagination_sql}
         """
 
-        values_with_pagination = values + [limit, offset]
-
         async with pool.acquire() as conn:
+
             total_count = await conn.fetchval(count_sql, *values)
+
             rows = await conn.fetch(main_sql, *values_with_pagination)
+
+        next_cursor = rows[-1]["created_at"] if rows else None
 
         log.info(
             "Customer filter success | total=%s returned=%s",
@@ -494,11 +512,14 @@ async def filter_customers(
         )
 
         return {
-            "data": [dict(row) for row in rows]    
+            "data": [dict(row) for row in rows],
+            "next_cursor": next_cursor
         }
 
     except asyncpg.PostgresError:
+
         log.exception("Database error during customer filtering")
+
         raise HTTPException(
             status_code=500,
             detail="Database error occurred.",
@@ -508,123 +529,75 @@ async def filter_customers(
         raise
 
     except Exception:
+
         log.exception("Unexpected error during customer filtering")
+
         raise HTTPException(
             status_code=500,
             detail="Internal server error.",
         )
-# --------------------------------------------------------------
-# EDIT CUSTOMER (FULL ENTERPRISE DYNAMIC PATCH + VERSION AUDIT)
-# --------------------------------------------------------------
+# -------------------------------------------------------------------
+# EDIT CUSTOMER (Dynamic PATCH + Services Support + Version Audit)
+# -------------------------------------------------------------------
+
 @router.post(
-    "/{customer_id}/customer-dyn/edit",
-    summary="Edit Customer (Dynamic Update + Version Audit - Production Ready)",
+    "/{customer_id}/edit",
+    summary="Edit Customer (Dynamic PATCH + Audit)",
+    responses={
+        200: {"description": "Customer updated successfully."},
+        400: {"description": "Validation failed."},
+        404: {"description": "Customer not found."},
+        409: {"description": "Duplicate value violation."},
+        500: {"description": "Database or internal error."},
+    },
 )
 async def edit_customer(
     customer_id: int,
     payload: CustomerEditIn,
-    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    ✔ Safe PATCH-style dynamic update
-    ✔ Row-level locking
-    ✔ Version audit
-    ✔ Strict whitelist
-    ✔ Atomic transaction
-    ✔ text[] handling
-    ✔ Full asyncpg exception coverage
-    ✔ Prevent editing inactive customers
-    """
+
+    # --------------------------------------------------
+    # Request Context
+    # --------------------------------------------------
 
     request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
-    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
-        {
-            "request_id": request_id,
-            "emp_id": emp_id,
-            "api": "edit_customer",
-        },
+        {"request_id": request_id, "emp_id": emp_id, "api": "edit_customer"},
     )
 
     log.info("Incoming edit customer request | customer_id=%s", customer_id)
 
     # --------------------------------------------------
-    # Extract Provided Fields
+    # Extract payload fields
     # --------------------------------------------------
+
     try:
-        update_data: Dict[str, Any] = payload.model_dump(exclude_unset=True)
+        update_data = payload.model_dump(exclude_unset=True)
     except Exception:
-        log.exception("Payload serialization failed")
         raise HTTPException(status_code=400, detail="Invalid request payload.")
 
     if not update_data:
-        raise HTTPException(
-            status_code=400,
-            detail="At least one field must be provided for update.",
-        )
+        raise HTTPException(status_code=400, detail="No fields provided for update.")
 
     # --------------------------------------------------
-    # Whitelist Protection
+    # Normalize service arrays
     # --------------------------------------------------
-    allowed_fields = {
-        "full_name",
-        "email",
-        "mobile",
-        "business_name",
-        "business_description",
-        "business_image_url",
-        "business_type",
-        "state",
-        "city",
-        "remark",
-        "rm_id",
-        "op_id",
-        "referral_id",
-        "is_active",
-        "services",
-    }
 
-    invalid_fields = set(update_data.keys()) - allowed_fields
-    if invalid_fields:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid fields provided: {', '.join(invalid_fields)}",
-        )
+    if "service_required" in update_data and update_data["service_required"] is None:
+        update_data["service_required"] = []
+
+    if "service_provided" in update_data and update_data["service_provided"] is None:
+        update_data["service_provided"] = []
 
     # --------------------------------------------------
-    # Normalize services for PostgreSQL text[]
+    # DB Pool
     # --------------------------------------------------
-    if "services" in update_data:
-        services_value = update_data["services"]
 
-        if services_value is None:
-            update_data["services"] = []
-        else:
-            if not isinstance(services_value, list):
-                raise HTTPException(
-                    status_code=400,
-                    detail="services must be a list of strings.",
-                )
-
-            cleaned_services = []
-            for s in services_value:
-                if not isinstance(s, str):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Each service must be a string.",
-                    )
-                s = s.strip()
-                if s:
-                    cleaned_services.append(s)
-
-            update_data["services"] = list(dict.fromkeys(cleaned_services))
-
-    # --------------------------------------------------
-    # Database Transaction
-    # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
@@ -635,13 +608,16 @@ async def edit_customer(
         try:
             async with conn.transaction():
 
-                # 1️⃣ Lock Row
+                # --------------------------------------------------
+                # 1️⃣ Fetch Existing Customer (Row Lock)
+                # --------------------------------------------------
+
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT *
-                      FROM {DB_SCHEMA}.customers
-                     WHERE customer_id = $1
-                     FOR UPDATE
+                    FROM {DB_SCHEMA}.customers
+                    WHERE customer_id = $1
+                    FOR UPDATE
                     """,
                     customer_id,
                 )
@@ -653,38 +629,44 @@ async def edit_customer(
                     )
 
                 # --------------------------------------------------
-                # Prevent Editing Inactive Customers
+                # 2️⃣ Reject if no actual change
                 # --------------------------------------------------
-                if not old_row.get("is_active"):
-                    log.warning(
-                        "Edit blocked because customer is inactive | customer_id=%s",
-                        customer_id,
-                    )
+
+                no_change = True
+                for k, v in update_data.items():
+                    if k in old_row and old_row[k] != v:
+                        no_change = False
+                        break
+
+                if no_change:
                     raise HTTPException(
                         status_code=400,
-                        detail="Customer is inactive. Activate the customer first and then edit.",
+                        detail="No changes detected to update.",
                     )
 
-                # 2️⃣ Build Dynamic Update
+                # --------------------------------------------------
+                # 3️⃣ Build Dynamic Update
+                # --------------------------------------------------
+
                 fields = []
                 values = []
-                param_index = 1
+                idx = 1
 
-                for field_name, value in update_data.items():
-                    fields.append(f"{field_name} = ${param_index}")
+                for key, value in update_data.items():
+                    fields.append(f"{key} = ${idx}")
                     values.append(value)
-                    param_index += 1
+                    idx += 1
 
                 fields.append("updated_at = NOW()")
 
+                values.append(customer_id)
+
                 update_sql = f"""
                     UPDATE {DB_SCHEMA}.customers
-                       SET {', '.join(fields)}
-                     WHERE customer_id = ${param_index}
-                     RETURNING *
+                    SET {', '.join(fields)}
+                    WHERE customer_id = ${idx}
+                    RETURNING *
                 """
-
-                values.append(customer_id)
 
                 new_row = await conn.fetchrow(update_sql, *values)
 
@@ -694,7 +676,10 @@ async def edit_customer(
                         detail="Customer state changed. Please retry.",
                     )
 
-                # 3️⃣ Version Audit
+                # --------------------------------------------------
+                # 4️⃣ Version Audit
+                # --------------------------------------------------
+
                 await conn.execute(
                     f"""
                     INSERT INTO {DB_SCHEMA}.versions
@@ -718,7 +703,10 @@ async def edit_customer(
                     json.dumps(dict(new_row), default=str),
                 )
 
-            log.info("Customer updated successfully | customer_id=%s", customer_id)
+            log.info(
+                "Customer updated successfully | customer_id=%s",
+                customer_id,
+            )
 
             return {
                 **dict(new_row),
@@ -727,24 +715,55 @@ async def edit_customer(
             }
 
         # --------------------------------------------------
-        # Exception Handling
+        # UNIQUE CONSTRAINT HANDLING
         # --------------------------------------------------
-        except asyncpg.exceptions.UniqueViolationError:
+
+        except asyncpg.exceptions.UniqueViolationError as e:
+
+            constraint = getattr(e, "constraint_name", "")
+
+            UNIQUE_MAP = {
+                "uq_customers_mobile": "Mobile number already exists.",
+                "uq_customers_email": "Email already exists.",
+            }
+
             raise HTTPException(
                 status_code=409,
-                detail="Duplicate field value violates unique constraint.",
+                detail=UNIQUE_MAP.get(
+                    constraint,
+                    "Duplicate value violates unique constraint.",
+                ),
             )
 
-        except asyncpg.exceptions.ForeignKeyViolationError:
+        # --------------------------------------------------
+        # FOREIGN KEY HANDLING
+        # --------------------------------------------------
+
+        except asyncpg.exceptions.ForeignKeyViolationError as e:
+
+            constraint = getattr(e, "constraint_name", "")
+
+            FK_MAP = {
+                "customers_rm_id_fkey": "Invalid rm_id provided.",
+                "customers_op_id_fkey": "Invalid op_id provided.",
+            }
+
             raise HTTPException(
                 status_code=400,
-                detail="Invalid foreign key reference.",
+                detail=FK_MAP.get(
+                    constraint,
+                    "Invalid foreign key reference provided.",
+                ),
             )
+
+        # --------------------------------------------------
+        # CHECK / NOT NULL / DATA
+        # --------------------------------------------------
 
         except asyncpg.exceptions.CheckViolationError as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Constraint violation: {getattr(e, 'constraint_name', '')}",
+                detail=f"Data violates constraint: {getattr(e, 'constraint_name', '')}",
             )
 
         except asyncpg.exceptions.NotNullViolationError:
@@ -759,8 +778,12 @@ async def edit_customer(
                 detail="Invalid data format provided.",
             )
 
+        # --------------------------------------------------
+        # GENERIC DB ERROR
+        # --------------------------------------------------
+
         except asyncpg.PostgresError:
-            log.exception("Database error during update")
+            log.exception("Database error during customer update")
             raise HTTPException(
                 status_code=500,
                 detail="Database error occurred.",

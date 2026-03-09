@@ -17,7 +17,6 @@ class BaseSchema(BaseModel):
     }
 
 
-
 # =========================================================
 # Customer Create Schema (DB-Aligned + Services Array)
 # =========================================================
@@ -37,7 +36,12 @@ class CustomerIn(BaseSchema):
     op_id: Optional[int] = Field(None, gt=0)
     referral_id: Optional[int] = Field(None, gt=0)
 
-    services: List[str] = Field(default_factory=list)
+    # -----------------------------------------------------
+    # NEW SERVICE COLUMNS (DB ALIGNED)
+    # -----------------------------------------------------
+
+    service_required: List[str] = Field(default_factory=list)
+    service_provided: List[str] = Field(default_factory=list)
 
     # -----------------------------------------------------
     # Normalize email
@@ -72,27 +76,8 @@ class CustomerIn(BaseSchema):
     def sanitize_strings(cls, v):
         return html.escape(v.strip()) if isinstance(v, str) else v
 
-    # -----------------------------------------------------
-    # Normalize & Deduplicate Services
-    # -----------------------------------------------------
-    @field_validator("services", mode="before")
-    @classmethod
-    def normalize_services(cls, v):
-        if v is None:
-            return []
 
-        if not isinstance(v, list):
-            raise ValueError("services must be a list of strings")
-
-        cleaned = []
-        for service in v:
-            if not isinstance(service, str):
-                raise ValueError("Each service must be a string")
-            s = service.strip()
-            if s:
-                cleaned.append(s)
-
-        return list(dict.fromkeys(cleaned))
+    
 # =========================================================
 # Customer Response Schema
 # =========================================================
@@ -119,6 +104,14 @@ class CustomerOut(BaseSchema):
     message: Optional[str] = None
     is_active: bool
 
+    # -----------------------------------------------------
+    # NEW SERVICE FIELDS
+    # -----------------------------------------------------
+
+    service_required: List[str] = []
+    service_provided: List[str] = []
+
+
 # =========================================================
 # Customer Edit Schema (Safe PATCH + Services Support)
 # =========================================================
@@ -138,7 +131,13 @@ class CustomerEditIn(BaseSchema):
     op_id: Optional[int] = Field(None, gt=0)
     referral_id: Optional[int] = Field(None, gt=0)
     is_active: Optional[bool] = None
-    services: Optional[List[str]] = None
+
+    # -----------------------------------------------------
+    # NEW SERVICE FIELDS
+    # -----------------------------------------------------
+
+    service_required: Optional[List[str]] = None
+    service_provided: Optional[List[str]] = None
 
 
     # -----------------------------------------------------
@@ -176,28 +175,8 @@ class CustomerEditIn(BaseSchema):
     def sanitize_strings(cls, v):
         return html.escape(v.strip()) if isinstance(v, str) else v
 
-    # -----------------------------------------------------
-    # Normalize Services (Deduplicate + Clean)
-    # -----------------------------------------------------
-    @field_validator("services", mode="before")
-    @classmethod
-    def normalize_services(cls, v):
-        if v is None:
-            return None
 
-        if not isinstance(v, list):
-            raise ValueError("services must be a list of strings")
-
-        cleaned = []
-        for service in v:
-            if not isinstance(service, str):
-                raise ValueError("Each service must be a string")
-            s = service.strip()
-            if s:
-                cleaned.append(s)
-
-        return list(dict.fromkeys(cleaned))
-
+    
     # -----------------------------------------------------
     # Ensure At Least One Field Provided
     # -----------------------------------------------------

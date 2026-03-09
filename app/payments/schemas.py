@@ -20,14 +20,14 @@ class BaseSchema(BaseModel):
     }
 
 
-
 class RegistrationPaymentIn(BaseSchema):
 
     entity_id: int = Field(..., example=55)
 
-    amount: condecimal(max_digits=12, decimal_places=2) = Field(
+    ownership_category: str = Field(
         ...,
-        example=1500.00
+        example="PROPRIETOR",
+        description="Ownership category selected from UI (value from payment_config table)"
     )
 
     discount: Optional[condecimal(max_digits=12, decimal_places=2)] = Field(
@@ -44,9 +44,7 @@ class RegistrationPaymentIn(BaseSchema):
         default=None,
         example="Advance collected"
     )
-
-
-
+    
 class RegistrationPaymentEditIn(BaseSchema):
     discount: Optional[condecimal(max_digits=12, decimal_places=2)] = None
     paid_amount: Optional[condecimal(max_digits=12, decimal_places=2)] = None

@@ -14,7 +14,6 @@ router = APIRouter(
     prefix="/api/v1/payments",
     tags=["Registration Payments"]
 )
-
 # -------------------------------------------------------------------
 # CREATE REGISTRATION PAYMENT (Production Standard + Version Audit + IST)
 # -------------------------------------------------------------------
@@ -33,16 +32,6 @@ async def create_registration_payment(
     payload: RegistrationPaymentIn,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-    """
-    Create Registration Payment
-    ---------------------------
-    ✔ Atomic transaction (Payment + Version)
-    ✔ GST must exist & active
-    ✔ Customer derived from GST (source of truth)
-    ✔ Amount now comes from payload
-    ✔ Status auto-controlled by DB trigger
-    ✔ Enterprise-grade structured logging
-    """
 
     # --------------------------------------------------
     # Request Context
@@ -57,8 +46,9 @@ async def create_registration_payment(
     )
 
     log.info(
-        "Incoming Registration Payment create | gst_registration_id=%s",
+        "Incoming Registration Payment create | gst_registration_id=%s | ownership_category=%s",
         payload.entity_id,
+        payload.ownership_category,
     )
 
     # --------------------------------------------------
@@ -108,14 +98,30 @@ async def create_registration_payment(
                     )
 
                 # --------------------------------------------------
-                # 2️⃣ Derive Customer From GST (Source of Truth)
+                # 2️⃣ Derive Customer From GST
                 # --------------------------------------------------
                 derived_customer_id = gst_row["customer_id"]
 
                 # --------------------------------------------------
-                # 3️⃣ Amount From Payload
+                # 3️⃣ Fetch Amount From payment_config
                 # --------------------------------------------------
-                amount_value = payload.amount
+                amount_value = await conn.fetchval(
+                    """
+                    SELECT amount
+                    FROM solvetax.payment_config
+                    WHERE entity_type = 'GST_REGISTRATION'
+                    AND value = $1
+                    AND is_active = TRUE
+                    LIMIT 1
+                    """,
+                    payload.ownership_category,
+                )
+
+                if not amount_value:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Payment configuration not found for selected ownership category.",
+                    )
 
                 # --------------------------------------------------
                 # 4️⃣ Insert Registration Payment
@@ -595,32 +601,17 @@ async def edit_registration_payment(
     payload: RegistrationPaymentEditIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Editable fields:
-    ✔ discount
-    ✔ paid_amount
-    ✔ remarks
 
-    ✔ Row locking (FOR UPDATE)
-    ✔ Concurrency safe
-    ✔ Active-state enforced
-    ✔ Version audit included
-    ✔ Trigger-safe (status auto-calculated in DB)
-    """
-
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
-    log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
-
-    log.info(
-        "Incoming Registration Payment edit | payment_id=%s",
-        payment_id,
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id},
     )
+
+    log.info("Incoming Registration Payment edit | payment_id=%s", payment_id)
 
     # --------------------------------------------------
     # Extract Update Data
@@ -634,7 +625,7 @@ async def edit_registration_payment(
         raise HTTPException(status_code=400, detail="No editable fields provided.")
 
     # --------------------------------------------------
-    # Normalize / Validate Values
+    # Normalize Input
     # --------------------------------------------------
     if "discount" in update_data and update_data["discount"] is not None:
         if update_data["discount"] < 0:
@@ -648,7 +639,7 @@ async def edit_registration_payment(
         update_data["remarks"] = update_data["remarks"].strip()
 
     # --------------------------------------------------
-    # DB Update
+    # DB Pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
@@ -661,15 +652,15 @@ async def edit_registration_payment(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Fetch Existing WITH ROW LOCK (Concurrency Safe)
+                # Fetch Existing Row (Row Lock)
                 # --------------------------------------------------
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT *
-                      FROM {DB_SCHEMA}.registration_payments
-                     WHERE id = $1
-                       AND is_active = TRUE
-                     FOR UPDATE
+                    FROM {DB_SCHEMA}.registration_payments
+                    WHERE id = $1
+                    AND is_active = TRUE
+                    FOR UPDATE
                     """,
                     payment_id,
                 )
@@ -681,29 +672,28 @@ async def edit_registration_payment(
                     )
 
                 # --------------------------------------------------
-                # 🔹 NEW VALIDATION IMPROVEMENTS
+                # Business Validations
                 # --------------------------------------------------
 
-                if "discount" in update_data and update_data["discount"] is not None:
-                    if update_data["discount"] > old_row["amount"]:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Discount cannot exceed original amount.",
-                        )
+                new_discount = update_data.get("discount", old_row["discount"])
+                new_paid = update_data.get("paid_amount", old_row["paid_amount"])
 
-                if "paid_amount" in update_data and update_data["paid_amount"] is not None:
-                    net_amount_after_discount = (
-                        old_row["amount"] - update_data.get("discount", old_row["discount"])
+                if new_discount > old_row["amount"]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Discount cannot exceed original amount.",
                     )
 
-                    if update_data["paid_amount"] > net_amount_after_discount:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Paid amount cannot exceed net amount.",
-                        )
+                new_net_amount = old_row["amount"] - new_discount
+
+                if new_paid > new_net_amount:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Paid amount cannot exceed net amount.",
+                    )
 
                 # --------------------------------------------------
-                # 2️⃣ Reject if No Actual Change
+                # Detect No Change
                 # --------------------------------------------------
                 no_change = True
                 for k, v in update_data.items():
@@ -712,16 +702,17 @@ async def edit_registration_payment(
                         break
 
                 if no_change:
-                    log.info("No changes detected for payment_id=%s", payment_id)
                     raise HTTPException(
                         status_code=400,
                         detail="No changes detected to update.",
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Build Dynamic Update
+                # Build Dynamic Update
                 # --------------------------------------------------
-                fields, values, idx = [], [], 1
+                fields = []
+                values = []
+                idx = 1
 
                 for k, v in update_data.items():
                     fields.append(f"{k} = ${idx}")
@@ -729,17 +720,18 @@ async def edit_registration_payment(
                     idx += 1
 
                 fields.append("updated_at = NOW()")
+
                 values.append(payment_id)
 
-                sql = f"""
+                update_sql = f"""
                     UPDATE {DB_SCHEMA}.registration_payments
-                       SET {', '.join(fields)}
-                     WHERE id = ${idx}
-                       AND is_active = TRUE
-                     RETURNING *
+                    SET {', '.join(fields)}
+                    WHERE id = ${idx}
+                    AND is_active = TRUE
+                    RETURNING *
                 """
 
-                new_row = await conn.fetchrow(sql, *values)
+                new_row = await conn.fetchrow(update_sql, *values)
 
                 if not new_row:
                     raise HTTPException(
@@ -748,7 +740,7 @@ async def edit_registration_payment(
                     )
 
                 # --------------------------------------------------
-                # 4️⃣ Version Audit
+                # Version Audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -784,9 +776,9 @@ async def edit_registration_payment(
                     "request_id": request_id,
                 }
 
-        # -------------------------
-        # DB Error Handling
-        # -------------------------
+        # --------------------------------------------------
+        # Error Handling
+        # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError:
             raise HTTPException(
                 status_code=409,
@@ -795,11 +787,13 @@ async def edit_registration_payment(
 
         except asyncpg.exceptions.CheckViolationError as e:
             constraint = getattr(e, "constraint_name", None)
+
             CHECK_MAP = {
                 "chk_amount_positive": "Amount cannot be negative.",
                 "chk_discount_positive": "Discount cannot be negative.",
                 "chk_paid_amount_positive": "Paid amount cannot be negative.",
             }
+
             raise HTTPException(
                 status_code=400,
                 detail=CHECK_MAP.get(
@@ -860,18 +854,7 @@ async def soft_delete_registration_payment(
     payment_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    ✔ Atomic transaction (Soft Delete + Version Insert)
-    ✔ Concurrency safe (AND is_active = TRUE)
-    ✔ json = NULL (for DELETE)
-    ✔ updated_json = NEW snapshot
-    ✔ Structured logging
-    ✔ Full exception mapping
-    """
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
@@ -887,9 +870,6 @@ async def soft_delete_registration_payment(
 
     log.info("Incoming payment soft delete | payment_id=%s", payment_id)
 
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
@@ -901,23 +881,24 @@ async def soft_delete_registration_payment(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Concurrency-Safe Soft Delete
+                # Soft Delete With Customer Fetch
                 # --------------------------------------------------
                 delete_sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_payments
+                    UPDATE {DB_SCHEMA}.registration_payments p
                        SET is_active = FALSE,
                            updated_at = NOW()
-                     WHERE id = $1
-                       AND is_active = TRUE
-                     RETURNING *
+                     WHERE p.id = $1
+                       AND p.is_active = TRUE
+                     RETURNING p.*
                 """
 
                 deleted_row = await conn.fetchrow(delete_sql, payment_id)
 
                 # --------------------------------------------------
-                # 2️⃣ If nothing updated → determine reason
+                # Determine failure reason
                 # --------------------------------------------------
                 if not deleted_row:
+
                     existing_row = await conn.fetchrow(
                         f"""
                         SELECT id, is_active
@@ -944,8 +925,15 @@ async def soft_delete_registration_payment(
                         detail="Payment state changed. Please retry.",
                     )
 
+                # Optional warning if deleting PAID payment
+                if deleted_row.get("payment_status") == "PAID":
+                    log.warning(
+                        "Soft deleting PAID payment | payment_id=%s",
+                        payment_id,
+                    )
+
                 # --------------------------------------------------
-                # 3️⃣ Version Audit Insert
+                # Version Audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -981,44 +969,25 @@ async def soft_delete_registration_payment(
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # Exception Mapping
-        # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(
-                status_code=400,
-                detail="Foreign key constraint violation.",
-            )
+            raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
 
         except asyncpg.exceptions.CheckViolationError:
-            raise HTTPException(
-                status_code=400,
-                detail="Constraint validation failed.",
-            )
+            raise HTTPException(status_code=400, detail="Constraint validation failed.")
 
         except asyncpg.exceptions.DataError:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid data format.",
-            )
+            raise HTTPException(status_code=400, detail="Invalid data format.")
 
         except asyncpg.PostgresError:
             log.exception("Database error during payment soft delete")
-            raise HTTPException(
-                status_code=500,
-                detail="Database error occurred.",
-            )
+            raise HTTPException(status_code=500, detail="Database error occurred.")
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during payment soft delete")
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error.",
-            )
-
+            raise HTTPException(status_code=500, detail="Internal server error.")
 # -------------------------------------------------------------------
 # ACTIVATE REGISTRATION PAYMENT (Production Ready + Audit)
 # -------------------------------------------------------------------
@@ -1038,9 +1007,6 @@ async def activate_registration_payment(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
@@ -1056,9 +1022,6 @@ async def activate_registration_payment(
 
     log.info("Incoming payment activation | payment_id=%s", payment_id)
 
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
@@ -1070,7 +1033,7 @@ async def activate_registration_payment(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Fetch Payment WITH ROW LOCK
+                # Fetch Payment With Row Lock
                 # --------------------------------------------------
                 payment_row = await conn.fetchrow(
                     f"""
@@ -1095,7 +1058,7 @@ async def activate_registration_payment(
                     )
 
                 # --------------------------------------------------
-                # 2️⃣ Activate Payment (Concurrency Safe)
+                # Activate Payment
                 # --------------------------------------------------
                 activated_row = await conn.fetchrow(
                     f"""
@@ -1115,7 +1078,6 @@ async def activate_registration_payment(
                         detail="Payment state changed. Please retry.",
                     )
 
-                # Optional: log if activating a fully paid payment
                 if activated_row.get("payment_status") == "PAID":
                     log.warning(
                         "Activating fully paid payment | payment_id=%s",
@@ -1123,7 +1085,7 @@ async def activate_registration_payment(
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Version Audit Insert
+                # Version Audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -1159,40 +1121,22 @@ async def activate_registration_payment(
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # Exception Mapping
-        # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(
-                status_code=400,
-                detail="Foreign key constraint violation.",
-            )
+            raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
 
         except asyncpg.exceptions.CheckViolationError:
-            raise HTTPException(
-                status_code=400,
-                detail="Constraint validation failed.",
-            )
+            raise HTTPException(status_code=400, detail="Constraint validation failed.")
 
         except asyncpg.exceptions.DataError:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid data format.",
-            )
+            raise HTTPException(status_code=400, detail="Invalid data format.")
 
         except asyncpg.PostgresError:
             log.exception("Database error during payment activation")
-            raise HTTPException(
-                status_code=500,
-                detail="Database error occurred.",
-            )
+            raise HTTPException(status_code=500, detail="Database error occurred.")
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during payment activation")
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error.",
-            )
+            raise HTTPException(status_code=500, detail="Internal server error.")
