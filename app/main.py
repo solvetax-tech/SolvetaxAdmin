@@ -90,7 +90,7 @@ from app.version.version import router as version_router
 from app.payments.registration_payments import router as registration_payments_router
 from app.payments.payments_config import router as payments_config
 from app.gst_registration.gst_blob import router as gst_blob
-
+from app.gst_registration.document_config import router as document_config
 
 
 
@@ -123,7 +123,8 @@ if payments_config:
     app.include_router(payments_config)
 if gst_blob:
     app.include_router(gst_blob)
-
+if document_config:
+    app.include_router(document_config)
 
 
 
