@@ -18,33 +18,29 @@ class BaseSchema(BaseModel):
         "validate_assignment": True,    # Validate on update
         "from_attributes": True,        # ORM safe
     }
-
-
 class RegistrationPaymentIn(BaseSchema):
 
     entity_id: int = Field(..., example=55)
 
-    ownership_category: str = Field(
+    amount: condecimal(max_digits=12, decimal_places=2) = Field(
         ...,
-        example="PROPRIETOR",
-        description="Ownership category selected from UI (value from payment_config table)"
+        example=699.00
     )
 
     discount: Optional[condecimal(max_digits=12, decimal_places=2)] = Field(
         default=0,
-        example=200.00
+        example=100
     )
 
     paid_amount: Optional[condecimal(max_digits=12, decimal_places=2)] = Field(
         default=0,
-        example=500.00
+        example=500
     )
 
     remarks: Optional[str] = Field(
         default=None,
         example="Advance collected"
     )
-    
 class RegistrationPaymentEditIn(BaseSchema):
     discount: Optional[condecimal(max_digits=12, decimal_places=2)] = None
     paid_amount: Optional[condecimal(max_digits=12, decimal_places=2)] = None

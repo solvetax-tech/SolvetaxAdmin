@@ -14,19 +14,13 @@ router = APIRouter(
     prefix="/api/v1/document-config",
     tags=["Document Config"]
 )
-
-
 @router.get(
     "/gst-registration/{gst_id}/required-documents",
-    summary="Get Required Documents for GST Registration",
-    responses={
-        200: {"description": "Document list fetched successfully"},
-        404: {"description": "GST registration not found"},
-        500: {"description": "Database error"}
-    }
+    summary="Get Required Documents for GST Registration Person",
 )
 async def get_required_documents(
     gst_id: int,
+    person_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
 
@@ -35,14 +29,14 @@ async def get_required_documents(
 
     log = logging.LoggerAdapter(
         logger,
-        {
-            "request_id": request_id,
-            "emp_id": emp_id,
-            "api": "get_required_documents"
-        }
+        {"request_id": request_id, "emp_id": emp_id}
     )
 
-    log.info("Fetching required documents | gst_id=%s", gst_id)
+    log.info(
+        "Fetching required documents | gst_id=%s person_id=%s",
+        gst_id,
+        person_id,
+    )
 
     try:
         pool = await get_db_pool()
@@ -56,56 +50,50 @@ async def get_required_documents(
     async with pool.acquire() as conn:
         try:
 
-            # --------------------------------------------------
-            # 1️⃣ Fetch ownership category from GST
-            # --------------------------------------------------
-            gst_row = await conn.fetchrow(
-                f"""
-                SELECT ownership_category
-                FROM {DB_SCHEMA}.gst_registration
-                WHERE id = $1
-                AND is_active = TRUE
-                """,
-                gst_id,
-            )
-
-            if not gst_row:
-                raise HTTPException(
-                    status_code=404,
-                    detail="GST registration not found."
-                )
-
-            ownership_category = gst_row["ownership_category"]
-
-            # --------------------------------------------------
-            # 2️⃣ Fetch document configuration
-            # --------------------------------------------------
             documents = await conn.fetch(
                 f"""
                 SELECT
-                    value,
-                    display_name,
-                    description,
-                    is_mandatory
-                FROM {DB_SCHEMA}.document_config
-                WHERE entity_type = 'GST_REGISTRATION'
-                AND ownership_category = $1
-                AND is_active = TRUE
-                ORDER BY sort_order
+                    dc.value,
+                    dc.display_name,
+                    dc.description,
+                    dc.is_mandatory
+                FROM {DB_SCHEMA}.gst_registration g
+                JOIN {DB_SCHEMA}.gst_registration_persons p
+                    ON p.gst_registration_id = g.id
+                JOIN {DB_SCHEMA}.document_config dc
+                    ON dc.ownership_category = g.ownership_category
+                    AND dc.registration = 'GST_REGISTRATION'
+                    AND dc.is_active = TRUE
+                WHERE g.id = $1
+                AND p.person_id = $2
+                AND g.is_active = TRUE
+                AND p.is_active = TRUE
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM {DB_SCHEMA}.gst_registration_documents gd
+                    WHERE gd.document_type = dc.value
+                    AND gd.is_active = TRUE
+                    AND (
+                        gd.gstin = g.gstin
+                        OR gd.person_id = p.person_id
+                    )
+                )
+                ORDER BY dc.sort_order
                 """,
-                ownership_category,
+                gst_id,
+                person_id,
             )
 
             log.info(
-                "Document configuration fetched | ownership_category=%s | count=%s",
-                ownership_category,
+                "Documents fetched successfully | count=%s",
                 len(documents),
             )
 
             return {
-                "ownership_category": ownership_category,
+                "gst_id": gst_id,
+                "person_id": person_id,
                 "documents": [dict(d) for d in documents],
-                "request_id": request_id
+                "request_id": request_id,
             }
 
         except asyncpg.PostgresError:
@@ -124,7 +112,6 @@ async def get_required_documents(
                 status_code=500,
                 detail="Internal server error."
             )
-
 @router.get(
     "/document-config",
     summary="Filter Document Configurations",

@@ -161,7 +161,6 @@ async def upload_registration_document_file(
     }
 
 
-
 # --------------------------------------------------
 # VIEW GST DOCUMENT (SAS URL GENERATION)
 # --------------------------------------------------
@@ -180,14 +179,9 @@ def view_registration_document(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
-
     request_id = generate_uuid()
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
@@ -197,18 +191,12 @@ def view_registration_document(
 
     log.info("Generating secure VIEW URL | blob_url=%s", blob_url)
 
-
-    # --------------------------------------------------
-    # Generate Secure SAS URL
-    # --------------------------------------------------
-
     try:
 
-        # Extract blob path safely from full blob URL
         blob_path = extract_blob_path(blob_url)
 
-        # Generate temporary secure SAS URL
-        sas_url = generate_blob_sas_url(blob_path)
+        # inline -> preview in browser
+        sas_url = generate_blob_sas_url(blob_path, disposition="inline")
 
         log.info("View URL generated successfully | blob=%s", blob_path)
 
@@ -230,19 +218,12 @@ def view_registration_document(
             detail="Unable to generate document view link",
         )
 
-
-    # --------------------------------------------------
-    # Response
-    # --------------------------------------------------
-
     return {
         "view_url": sas_url,
         "request_id": request_id,
     }
 
-
-
-# --------------------------------------------------
+    # --------------------------------------------------
 # DOWNLOAD GST DOCUMENT (SAS URL GENERATION)
 # --------------------------------------------------
 
@@ -260,14 +241,9 @@ def download_registration_document(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
-
     request_id = generate_uuid()
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
@@ -277,18 +253,12 @@ def download_registration_document(
 
     log.info("Generating secure DOWNLOAD URL | blob_url=%s", blob_url)
 
-
-    # --------------------------------------------------
-    # Generate Secure SAS URL
-    # --------------------------------------------------
-
     try:
 
-        # Extract blob path safely from full blob URL
         blob_path = extract_blob_path(blob_url)
 
-        # Generate temporary secure SAS URL
-        sas_url = generate_blob_sas_url(blob_path)
+        # attachment -> download
+        sas_url = generate_blob_sas_url(blob_path, disposition="attachment")
 
         log.info("Download URL generated successfully | blob=%s", blob_path)
 
@@ -309,11 +279,6 @@ def download_registration_document(
             status_code=500,
             detail="Unable to generate document download link",
         )
-
-
-    # --------------------------------------------------
-    # Response
-    # --------------------------------------------------
 
     return {
         "download_url": sas_url,

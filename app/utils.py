@@ -307,27 +307,40 @@ SolveTax Security Team
         logger.error("Email sending failed for %s | Error: %s", email, str(e))
         raise
 
-AZURE_SAS_EXPIRY_MINUTES=15
-
 # --------------------------------------------------
 # Generate Secure SAS URL for Blob
 # --------------------------------------------------
 
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
+import os
 
 AZURE_SAS_EXPIRY_MINUTES = int(os.getenv("AZURE_SAS_EXPIRY_MINUTES", 15))
 
 
-def generate_blob_sas_url(blob_path: str) -> str:
+def generate_blob_sas_url(blob_path: str, disposition: str = "inline") -> str:
     """
-    Generate temporary SAS URL for viewing/downloading blob
+    Generate temporary SAS URL for viewing or downloading blob.
+
+    disposition:
+        inline      -> preview in browser
+        attachment  -> force download
     """
 
     blob_service_client = get_blob_service_client()
 
     account_name = blob_service_client.account_name
     account_key = blob_service_client.credential.account_key
+
+    # Extract filename
+    filename = blob_path.split("/")[-1]
+
+    # Set content disposition
+    if disposition == "attachment":
+        content_disposition = f'attachment; filename="{filename}"'
+    else:
+        content_disposition = "inline"
 
     sas_token = generate_blob_sas(
         account_name=account_name,
@@ -336,6 +349,7 @@ def generate_blob_sas_url(blob_path: str) -> str:
         account_key=account_key,
         permission=BlobSasPermissions(read=True),
         expiry=datetime.utcnow() + timedelta(minutes=AZURE_SAS_EXPIRY_MINUTES),
+        content_disposition=content_disposition,
     )
 
     url = (
@@ -344,6 +358,11 @@ def generate_blob_sas_url(blob_path: str) -> str:
     )
 
     return url
+
+
+# --------------------------------------------------
+# Extract Blob Path From URL
+# --------------------------------------------------
 
 def extract_blob_path(blob_url: str) -> str:
     """
