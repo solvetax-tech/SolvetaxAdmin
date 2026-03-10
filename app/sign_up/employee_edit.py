@@ -105,6 +105,64 @@ async def edit_employee(
                     update_data["phone_number"] = update_data["phone_number"].strip()
 
                 # --------------------------------------------------
+                # 1.5️⃣ PROACTIVE DUPLICATE CHECK (MULTI-FIELD)
+                # --------------------------------------------------
+                check_username = update_data.get("username")
+                check_email = update_data.get("email")
+                check_phone = update_data.get("phone_number")
+
+                field_errors = {}
+                if check_username or check_email or check_phone:
+                    duplicate_row = await conn.fetchrow(
+                        f"""
+                        SELECT
+                            EXISTS (
+                                SELECT 1 FROM {DB_SCHEMA}.employees
+                                WHERE lower(trim(username)) = lower(trim($1))
+                                  AND emp_id != $4
+                            ) AS username_match,
+
+                            EXISTS (
+                                SELECT 1 FROM {DB_SCHEMA}.employees
+                                WHERE lower(trim(email)) = lower(trim($2))
+                                  AND emp_id != $4
+                            ) AS email_match,
+
+                            EXISTS (
+                                SELECT 1 FROM {DB_SCHEMA}.employees
+                                WHERE trim(phone_number) = trim($3)
+                                  AND emp_id != $4
+                            ) AS phone_match
+                        """,
+                        check_username or "",
+                        check_email or "",
+                        check_phone or "",
+                        emp_id
+                    )
+
+                    if duplicate_row:
+                        if check_username and duplicate_row["username_match"]:
+                            field_errors["username"] = "Username already exists"
+                        if check_email and duplicate_row["email_match"]:
+                            field_errors["email"] = "Email already exists"
+                        if check_phone and duplicate_row["phone_match"]:
+                            field_errors["phone_number"] = "Phone number already exists"
+
+                if field_errors:
+                    log.warning("Duplicate field validation failed for emp_id=%s: %s", emp_id, field_errors)
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Validation failed",
+                                "fields": field_errors,
+                                "code": "EMPLOYEE_DUPLICATE"
+                            }
+                        }
+                    )
+
+                # --------------------------------------------------
                 # Build dynamic SET clause safely
                 # --------------------------------------------------
                 fields = []
@@ -173,16 +231,38 @@ async def edit_employee(
             if not constraint:
                 match = re.search(r'constraint ["\']?(.+?)["\']', str(e))
                 constraint = match.group(1) if match else ""
-            if constraint == "employees_email_key":
+            
+            log.warning("Unique constraint violation emp_id=%s constraint=%s", emp_id, constraint)
+            
+            if constraint in ["employees_email_key", "uq_employees_email"]:
                 detail = "Email already exists."
-            elif constraint == "employees_username_key":
+            elif constraint in ["employees_username_key", "uq_employees_username"]:
                 detail = "Username already exists."
-            elif "phone" in constraint.lower():
+            elif "phone" in constraint.lower() or constraint == "uq_employees_phone":
                 detail = "Phone number already exists."
             else:
                 detail = "Duplicate field value violates unique constraint."
-            log.warning("Unique constraint violation emp_id=%s constraint=%s", emp_id, constraint)
-            raise HTTPException(status_code=409, detail=detail)
+
+            # return structured error so frontend does not need to guess fields
+            field_map = {}
+            if "Email" in detail:
+                field_map["email"] = detail
+            elif "Username" in detail:
+                field_map["username"] = detail
+            elif "Phone" in detail:
+                field_map["phone_number"] = detail
+
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": field_map,
+                        "code": "EMPLOYEE_DUPLICATE"
+                    }
+                }
+            )
 
         except asyncpg.exceptions.ForeignKeyViolationError:
             log.warning("Invalid foreign key reference (manager_emp_id) emp_id=%s", emp_id)

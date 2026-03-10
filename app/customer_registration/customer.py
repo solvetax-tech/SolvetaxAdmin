@@ -77,14 +77,50 @@ async def create_customer(
     try:
         pool = await get_db_pool()
     except Exception:
-        log.exception("Database pool acquisition failed")
         raise HTTPException(
             status_code=500,
-            detail="Database connection error.",
+            detail={
+                "error": {
+                    "type": "server_error",
+                    "message": "Database connection error.",
+                    "fields": {}
+                }
+            },
         )
 
     async with pool.acquire() as conn:
         try:
+            # --------------------------------------------------
+            # PROACTIVE DUPLICATE CHECK
+            # --------------------------------------------------
+            duplicate_row = await conn.fetchrow(
+                f"""
+                SELECT 
+                    EXISTS (SELECT 1 FROM {DB_SCHEMA}.customers WHERE email = $1) AS email_match,
+                    EXISTS (SELECT 1 FROM {DB_SCHEMA}.customers WHERE mobile = $2) AS mobile_match
+                """,
+                payload.email,
+                payload.mobile
+            )
+
+            field_errors = {}
+            if duplicate_row["email_match"]:
+                field_errors["email"] = "Email already exists."
+            if duplicate_row["mobile_match"]:
+                field_errors["mobile"] = "Mobile number already exists."
+
+            if field_errors:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": {
+                            "type": "validation_error",
+                            "message": "Validation failed",
+                            "fields": field_errors
+                        }
+                    }
+                )
+
             async with conn.transaction():
 
                 # --------------------------------------------------
@@ -148,7 +184,13 @@ async def create_customer(
                     log.error("Customer creation failed - no row returned")
                     raise HTTPException(
                         status_code=500,
-                        detail="Customer creation failed.",
+                        detail={
+                            "error": {
+                                "type": "server_error",
+                                "message": "Customer creation failed.",
+                                "fields": {}
+                            }
+                        },
                     )
 
                 customer_id = customer_row["customer_id"]
@@ -195,61 +237,82 @@ async def create_customer(
         # UNIQUE CONSTRAINT HANDLING
         # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError as e:
-
             constraint = getattr(e, "constraint_name", "")
 
-            UNIQUE_MAP = {
-                "uq_customers_mobile": "Mobile number already exists.",
-                "uq_customers_email": "Email already exists.",
-            }
+            field_errors = {}
+            if constraint == "uq_customers_mobile":
+                field_errors["mobile"] = "Mobile number already exists."
+            elif constraint == "uq_customers_email":
+                field_errors["email"] = "Email already exists."
 
             raise HTTPException(
                 status_code=409,
-                detail=UNIQUE_MAP.get(
-                    constraint,
-                    "Duplicate value violates unique constraint.",
-                ),
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": field_errors or {"non_field_error": "Duplicate value violation."}
+                    }
+                },
             )
 
         # --------------------------------------------------
         # FOREIGN KEY HANDLING
         # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError as e:
-
             constraint = getattr(e, "constraint_name", "")
 
-            FK_MAP = {
-                "customers_rm_id_fkey": "Invalid rm_id provided.",
-                "customers_op_id_fkey": "Invalid op_id provided.",
-            }
+            field_errors = {}
+            if constraint == "customers_rm_id_fkey":
+                field_errors["rm_id"] = "Invalid rm_id provided."
+            elif constraint == "customers_op_id_fkey":
+                field_errors["op_id"] = "Invalid op_id provided."
 
             raise HTTPException(
                 status_code=400,
-                detail=FK_MAP.get(
-                    constraint,
-                    "Invalid foreign key reference provided.",
-                ),
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": field_errors or {"non_field_error": "Invalid foreign key reference."}
+                    }
+                },
             )
 
-        # --------------------------------------------------
-        # CHECK / NOT NULL / DATA
-        # --------------------------------------------------
         except asyncpg.exceptions.CheckViolationError as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Data violates constraint: {getattr(e, 'constraint_name', '')}",
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": f"Data violates constraint: {getattr(e, 'constraint_name', '')}"}
+                    }
+                },
             )
 
         except asyncpg.exceptions.NotNullViolationError:
             raise HTTPException(
                 status_code=400,
-                detail="Missing required field value.",
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": "Missing required field value."}
+                    }
+                },
             )
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid data format provided.",
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": "Invalid data format provided."}
+                    }
+                },
             )
 
         # --------------------------------------------------
@@ -259,7 +322,13 @@ async def create_customer(
             log.exception("Database error during customer creation")
             raise HTTPException(
                 status_code=500,
-                detail="Database error occurred.",
+                detail={
+                    "error": {
+                        "type": "server_error",
+                        "message": "Database error occurred.",
+                        "fields": {}
+                    }
+                },
             )
 
         except HTTPException:
@@ -269,8 +338,96 @@ async def create_customer(
             log.exception("Unexpected error during customer creation")
             raise HTTPException(
                 status_code=500,
-                detail="Internal server error.",
+                detail={
+                    "error": {
+                        "type": "server_error",
+                        "message": "Internal server error.",
+                        "fields": {}
+                    }
+                },
             )
+
+# -------------------------------------------------------------------
+# GET CUSTOMER BY ID (Enterprise Production + Detail Audit)
+# -------------------------------------------------------------------
+@router.get(
+    "/{customer_id}",
+    summary="Get Customer Details (Production Ready)",
+    responses={
+        200: {"description": "Customer details fetched successfully."},
+        404: {"description": "Customer not found."},
+        500: {"description": "Database or internal error."},
+    },
+)
+async def get_customer_by_id(
+    customer_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    ✔ Fetch single customer with RM and OP names
+    ✔ Concurrency safe
+    ✔ Detail audit logging
+    """
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "get_customer_by_id"},
+    )
+
+    log.info("Incoming get customer request | customer_id=%s", customer_id)
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
+    try:
+        query = f"""
+            SELECT c.*,
+                   e_rm.first_name AS rm_name,
+                   e_op.first_name AS op_name
+            FROM {DB_SCHEMA}.customers c
+            LEFT JOIN {DB_SCHEMA}.employees e_rm
+                   ON c.rm_id = e_rm.emp_id
+            LEFT JOIN {DB_SCHEMA}.employees e_op
+                   ON c.op_id = e_op.emp_id
+            WHERE c.customer_id = $1
+        """
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, customer_id)
+
+        if not row:
+            log.warning("Customer not found | customer_id=%s", customer_id)
+            raise HTTPException(
+                status_code=404,
+                detail="Customer not found.",
+            )
+
+        log.info("Customer fetched successfully | customer_id=%s", customer_id)
+        return dict(row)
+
+    except asyncpg.PostgresError:
+        log.exception("Database error during customer fetch")
+        raise HTTPException(
+            status_code=500,
+            detail="Database error occurred.",
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        log.exception("Unexpected error during customer fetch")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+        )
+
 # -------------------------------------------------------------------
 # LIST CUSTOMERS (Enterprise Filter + Pagination + Services Support)
 # -------------------------------------------------------------------
@@ -579,10 +736,34 @@ async def edit_customer(
     try:
         update_data = payload.model_dump(exclude_unset=True)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid request payload.")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "type": "validation_error",
+                    "message": "Invalid request payload.",
+                    "fields": {}
+                }
+            },
+        )
 
     if not update_data:
-        raise HTTPException(status_code=400, detail="No fields provided for update.")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "type": "validation_error",
+                    "message": "No fields provided for update.",
+                    "fields": {}
+                }
+            },
+        )
+
+    # --------------------------------------------------
+    # NOTE: Duplicate validation will be performed after
+    # fetching the existing row so we can exclude the
+    # current customer_id safely.
+    # --------------------------------------------------
 
     # --------------------------------------------------
     # Normalize service arrays
@@ -602,7 +783,16 @@ async def edit_customer(
         pool = await get_db_pool()
     except Exception:
         log.exception("Database pool acquisition failed")
-        raise HTTPException(status_code=500, detail="Database connection error.")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "type": "server_error",
+                    "message": "Database connection error.",
+                    "fields": {}
+                }
+            }
+        )
 
     async with pool.acquire() as conn:
         try:
@@ -625,7 +815,60 @@ async def edit_customer(
                 if not old_row:
                     raise HTTPException(
                         status_code=404,
-                        detail="Customer not found.",
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Customer not found.",
+                                "fields": {}
+                            }
+                        }
+                    )
+
+                # --------------------------------------------------
+                # PROACTIVE DUPLICATE CHECK (Exclude current record)
+                # --------------------------------------------------
+
+                duplicate_checks = []
+                values = []
+                idx = 1
+                field_errors = {}
+
+                if "email" in update_data:
+                    duplicate_checks.append(
+                        f"EXISTS (SELECT 1 FROM {DB_SCHEMA}.customers WHERE lower(trim(email)) = lower(trim(${idx})) AND customer_id != ${idx+1}) AS email_match"
+                    )
+                    values.append(update_data["email"])
+                    values.append(customer_id)
+                    idx += 2
+
+                if "mobile" in update_data:
+                    duplicate_checks.append(
+                        f"EXISTS (SELECT 1 FROM {DB_SCHEMA}.customers WHERE trim(mobile) = trim(${idx}) AND customer_id != ${idx+1}) AS mobile_match"
+                    )
+                    values.append(update_data["mobile"])
+                    values.append(customer_id)
+                    idx += 2
+
+                if duplicate_checks:
+                    dup_sql = f"SELECT {', '.join(duplicate_checks)}"
+                    dup_row = await conn.fetchrow(dup_sql, *values)
+
+                    if dup_row:
+                        if "email_match" in dup_row and dup_row["email_match"]:
+                            field_errors["email"] = "Email already exists."
+                        if "mobile_match" in dup_row and dup_row["mobile_match"]:
+                            field_errors["mobile"] = "Mobile number already exists."
+
+                if field_errors:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Validation failed",
+                                "fields": field_errors
+                            }
+                        }
                     )
 
                 # --------------------------------------------------
@@ -641,7 +884,13 @@ async def edit_customer(
                 if no_change:
                     raise HTTPException(
                         status_code=400,
-                        detail="No changes detected to update.",
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "No changes detected to update.",
+                                "fields": {}
+                            }
+                        }
                     )
 
                 # --------------------------------------------------
@@ -673,7 +922,13 @@ async def edit_customer(
                 if not new_row:
                     raise HTTPException(
                         status_code=409,
-                        detail="Customer state changed. Please retry.",
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Customer state changed. Please retry.",
+                                "fields": {}
+                            }
+                        }
                     )
 
                 # --------------------------------------------------
@@ -719,63 +974,79 @@ async def edit_customer(
         # --------------------------------------------------
 
         except asyncpg.exceptions.UniqueViolationError as e:
-
             constraint = getattr(e, "constraint_name", "")
 
-            UNIQUE_MAP = {
-                "uq_customers_mobile": "Mobile number already exists.",
-                "uq_customers_email": "Email already exists.",
-            }
+            field_errors = {}
+            if constraint == "uq_customers_mobile":
+                field_errors["mobile"] = "Mobile number already exists."
+            elif constraint == "uq_customers_email":
+                field_errors["email"] = "Email already exists."
 
             raise HTTPException(
                 status_code=409,
-                detail=UNIQUE_MAP.get(
-                    constraint,
-                    "Duplicate value violates unique constraint.",
-                ),
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": field_errors or {"non_field_error": "Duplicate value violation."}
+                    }
+                },
             )
 
-        # --------------------------------------------------
-        # FOREIGN KEY HANDLING
-        # --------------------------------------------------
-
         except asyncpg.exceptions.ForeignKeyViolationError as e:
-
             constraint = getattr(e, "constraint_name", "")
 
-            FK_MAP = {
-                "customers_rm_id_fkey": "Invalid rm_id provided.",
-                "customers_op_id_fkey": "Invalid op_id provided.",
-            }
+            field_errors = {}
+            if constraint == "customers_rm_id_fkey":
+                field_errors["rm_id"] = "Invalid rm_id provided."
+            elif constraint == "customers_op_id_fkey":
+                field_errors["op_id"] = "Invalid op_id provided."
 
             raise HTTPException(
                 status_code=400,
-                detail=FK_MAP.get(
-                    constraint,
-                    "Invalid foreign key reference provided.",
-                ),
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": field_errors or {"non_field_error": "Invalid foreign key reference."}
+                    }
+                },
             )
-
-        # --------------------------------------------------
-        # CHECK / NOT NULL / DATA
-        # --------------------------------------------------
 
         except asyncpg.exceptions.CheckViolationError as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Data violates constraint: {getattr(e, 'constraint_name', '')}",
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": f"Data violates constraint: {getattr(e, 'constraint_name', '')}"}
+                    }
+                },
             )
 
         except asyncpg.exceptions.NotNullViolationError:
             raise HTTPException(
                 status_code=400,
-                detail="Missing required field value.",
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": "Missing required field value."}
+                    }
+                },
             )
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid data format provided.",
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": "Invalid data format provided."}
+                    }
+                },
             )
 
         # --------------------------------------------------
@@ -853,7 +1124,16 @@ async def soft_delete_customer(
         pool = await get_db_pool()
     except Exception:
         log.exception("Database pool error")
-        raise HTTPException(status_code=500, detail="Database connection error.")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "type": "server_error",
+                    "message": "Database connection error.",
+                    "fields": {}
+                }
+            },
+        )
 
     async with pool.acquire() as conn:
         try:
@@ -873,10 +1153,28 @@ async def soft_delete_customer(
                 )
 
                 if not customer:
-                    raise HTTPException(404, "Customer not found.")
+                    raise HTTPException(
+                        status_code=404,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Customer not found.",
+                                "fields": {}
+                            }
+                        }
+                    )
 
                 if customer["is_active"] is False:
-                    raise HTTPException(400, "Customer already inactive.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Customer already inactive.",
+                                "fields": {}
+                            }
+                        }
+                    )
 
                 # --------------------------------------------------
                 # 2️⃣ Count ACTIVE GSTs
@@ -920,9 +1218,14 @@ async def soft_delete_customer(
                 elif gst_count > 1:
                     # 🔥 NEW RULE: BLOCK CUSTOMER DEACTIVATION
                     raise HTTPException(
-                        400,
-                        "Cannot deactivate customer. Customer has multiple active GST registrations. "
-                        "Please deactivate GSTs individually from GST Registration page first.Only customers with no gstin and customers with 1 gstin are allowed to deactiavte from here",
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Cannot deactivate customer. Multiple active GST registrations detected.",
+                                "fields": {}
+                            }
+                        }
                     )
 
                 # --------------------------------------------------
@@ -1030,14 +1333,32 @@ async def soft_delete_customer(
 
         except asyncpg.PostgresError as e:
             log.exception("Postgres error")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "type": "server_error",
+                        "message": "Database error occurred.",
+                        "fields": {}
+                    }
+                }
+            )
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error")
-            raise HTTPException(status_code=500, detail="Internal server error.")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "type": "server_error",
+                        "message": "Internal server error.",
+                        "fields": {}
+                    }
+                }
+            )
 
 # =========================================================
 # ACTIVATE CUSTOMER (Customer-First Mode + Conditional Cascade)
@@ -1095,7 +1416,16 @@ async def activate_customer(
         pool = await get_db_pool()
     except Exception:
         log.exception("Database pool acquisition failed")
-        raise HTTPException(status_code=500, detail="Database connection error.")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "type": "server_error",
+                    "message": "Database connection error.",
+                    "fields": {}
+                }
+            },
+        )
 
     async with pool.acquire() as conn:
         try:
@@ -1117,17 +1447,27 @@ async def activate_customer(
                 if not customer:
                     raise HTTPException(
                         status_code=404,
-                        detail="Customer not found.",
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Customer not found.",
+                                "fields": {}
+                            }
+                        },
                     )
 
                 if customer["is_active"]:
                     raise HTTPException(
                         status_code=400,
-                        detail=(
-                            "Customer is already active. "
-                            "Check GST Registration and activate it there if there are two gstins to this customer."
-                        ),
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Customer is already active.",
+                                "fields": {}
+                            }
+                        },
                     )
+
 
                 # --------------------------------------------------
                 # 4️⃣ Count GST Registrations
@@ -1162,8 +1502,15 @@ async def activate_customer(
                     if not gst_row:
                         raise HTTPException(
                             status_code=409,
-                            detail="GST state changed. Please retry.",
+                            detail={
+                                "error": {
+                                    "type": "validation_error",
+                                    "message": "GST state changed. Please retry.",
+                                    "fields": {}
+                                }
+                            },
                         )
+
 
                     gst_id = gst_row["id"]
 
@@ -1296,22 +1643,52 @@ async def activate_customer(
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(
                 status_code=400,
-                detail="Foreign key constraint violation.",
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": "Foreign key constraint violation."}
+                    }
+                },
             )
 
         except asyncpg.exceptions.CheckViolationError as e:
             log.exception("CHECK constraint error")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": str(e)}
+                    }
+                },
+            )
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid data format.",
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"non_field_error": "Invalid data format."}
+                    }
+                },
             )
 
         except asyncpg.PostgresError as e:
             log.exception("Database error during activation")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": {
+                        "type": "server_error",
+                        "message": "Database error occurred.",
+                        "fields": {}
+                    }
+                },
+            )
 
         except HTTPException:
             raise

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import json
 import uuid
 from datetime import datetime
+import re
 
 router = APIRouter(
     prefix="/api/v1/gst-registrations",
@@ -72,6 +73,97 @@ async def create_gst_registration(
 
                 if not customer_row["is_active"]:
                     raise HTTPException(400, "Customer is inactive.")
+
+                # --------------------------------------------------
+                # Pre-validation (format + duplicates)
+                # --------------------------------------------------
+                field_errors = {}
+
+                gstin_value = payload.gstin.strip().upper() if payload.gstin else None
+                pan_value = payload.pan.strip().upper() if payload.pan else None
+                mobile_value = payload.mobile.strip() if payload.mobile else None
+                username_value = payload.username.strip() if payload.username else None
+                secondary_email_value = payload.secondary_email.strip().lower() if payload.secondary_email else None
+
+                if gstin_value and not re.fullmatch(r"[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]", gstin_value):
+                    field_errors["gstin"] = "Invalid GSTIN format."
+
+                if pan_value and not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", pan_value):
+                    field_errors["pan"] = "Invalid PAN format."
+
+                if mobile_value and not re.fullmatch(r"[0-9]{10}", mobile_value):
+                    field_errors["mobile"] = "Invalid mobile number format."
+
+                if secondary_email_value:
+                    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", secondary_email_value):
+                        field_errors["secondary_email"] = "Invalid secondary email format."
+
+                if gstin_value and pan_value:
+                    gstin_pan = gstin_value[2:12]
+                    if gstin_pan != pan_value:
+                        field_errors["pan"] = "PAN does not match GSTIN."
+
+                duplicate_row = await conn.fetchrow(
+                    f"""
+                    SELECT
+                        CASE
+                            WHEN $1::text IS NULL OR trim($1::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration
+                                 WHERE gstin IS NOT NULL
+                                   AND upper(trim(gstin)) = upper(trim($1::text))
+                            )
+                        END AS gstin_match,
+                        CASE
+                            WHEN $2::text IS NULL OR trim($2::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration
+                                 WHERE username IS NOT NULL
+                                   AND lower(trim(username)) = lower(trim($2::text))
+                            )
+                        END AS username_match,
+                        CASE
+                            WHEN $3::text IS NULL OR trim($3::text) = '' OR $4::text IS NULL OR trim($4::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration
+                                 WHERE is_active = TRUE
+                                   AND upper(trim(gstin)) = upper(trim($3::text))
+                                   AND mobile = trim($4::text)
+                            )
+                        END AS gstin_mobile_match
+                    """,
+                    gstin_value,
+                    username_value,
+                    gstin_value,
+                    mobile_value,
+                )
+
+                has_duplicate = False
+                if duplicate_row:
+                    if duplicate_row["gstin_match"]:
+                        field_errors["gstin"] = "GSTIN already exists."
+                        has_duplicate = True
+                    if duplicate_row["username_match"]:
+                        field_errors["username"] = "Username already exists."
+                        has_duplicate = True
+                    if duplicate_row["gstin_mobile_match"]:
+                        field_errors["mobile"] = "Mobile already used for this GST."
+                        has_duplicate = True
+
+                if field_errors:
+                    raise HTTPException(
+                        status_code=409 if has_duplicate else 400,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Validation failed",
+                                "fields": field_errors,
+                            }
+                        },
+                    )
 
                 insert_sql = f"""
                     INSERT INTO {DB_SCHEMA}.gst_registration (
@@ -171,17 +263,27 @@ async def create_gst_registration(
             constraint = getattr(e, "constraint_name", None)
 
             UNIQUE_MAP = {
-                "gst_registration_gstin_key": "GSTIN already exists.",
-                "uq_gst_username_lower": "Username already exists.",
-                "uq_gst_gstin_mobile_active": "Mobile already used for this GST (active).",
+                "gst_registration_gstin_key": ("gstin", "GSTIN already exists."),
+                "uq_gst_username_lower": ("username", "Username already exists."),
+                "uq_gst_gstin_mobile_active": ("mobile", "Mobile already used for this GST."),
             }
 
+            field, message = UNIQUE_MAP.get(
+                constraint,
+                ("non_field_error", "Duplicate value violates unique constraint.")
+            )
+
             raise HTTPException(
-                409,
-                UNIQUE_MAP.get(
-                    constraint,
-                    f"Duplicate value violates constraint: {constraint}",
-                ),
+                status_code=409,
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {
+                            field: message
+                        }
+                    }
+                }
             )
 
         except asyncpg.exceptions.ForeignKeyViolationError:
@@ -191,26 +293,41 @@ async def create_gst_registration(
             constraint = getattr(e, "constraint_name", None)
 
             CHECK_MAP = {
-                "chk_gst_format": "Invalid GSTIN format.",
-                "chk_pan_format": "Invalid PAN format.",
-                "chk_mobile_format": "Invalid mobile number format.",
-                "chk_secondary_email_format": "Invalid secondary email format.",
-                "chk_gstin_pan_match": "PAN does not match GSTIN.",
-                "chk_approved_logic": "Invalid approved status logic.",
+                "chk_gst_format": ("gstin", "Invalid GSTIN format."),
+                "chk_pan_format": ("pan", "Invalid PAN format."),
+                "chk_mobile_format": ("mobile", "Invalid mobile number format."),
+                "chk_secondary_email_format": ("secondary_email", "Invalid secondary email format."),
+                "chk_gstin_pan_match": ("pan", "PAN does not match GSTIN."),
+                "chk_approved_logic": ("registration_status", "Invalid approved status logic."),
             }
 
+            field, message = CHECK_MAP.get(
+                constraint,
+                ("non_field_error", f"Data violates constraint: {constraint}")
+            )
+
             raise HTTPException(
-                400,
-                CHECK_MAP.get(
-                    constraint,
-                    f"Data violates constraint: {constraint}",
-                ),
+                status_code=400,
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {
+                            field: message
+                        }
+                    }
+                }
             )
 
         except asyncpg.PostgresError:
+            log.exception("Database error during GST registration create")
             raise HTTPException(500, "Database error.")
 
+        except HTTPException:
+            raise
+
         except Exception:
+            log.exception("Unexpected error during GST registration create")
             raise HTTPException(500, "Internal server error.")
 # -------------------------------------------------------------------
 # LIST GST REGISTRATIONS (DYNAMIC FILTER + PAGINATION)
@@ -546,6 +663,112 @@ async def edit_gst_registration(
                     )
 
                 # --------------------------------------------------
+                # Pre-validation (format + duplicates) for edit
+                # --------------------------------------------------
+                field_errors = {}
+
+                gstin_value = update_data.get("gstin", old_row.get("gstin"))
+                pan_value = update_data.get("pan", old_row.get("pan"))
+                mobile_value = update_data.get("mobile", old_row.get("mobile"))
+                username_value = update_data.get("username", old_row.get("username"))
+                secondary_email_value = update_data.get("secondary_email", old_row.get("secondary_email"))
+
+                if gstin_value:
+                    gstin_value = gstin_value.strip().upper()
+                if pan_value:
+                    pan_value = pan_value.strip().upper()
+                if mobile_value:
+                    mobile_value = mobile_value.strip()
+                if username_value:
+                    username_value = username_value.strip()
+                if secondary_email_value:
+                    secondary_email_value = secondary_email_value.strip().lower()
+
+                if gstin_value and not re.fullmatch(r"[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]", gstin_value):
+                    field_errors["gstin"] = "Invalid GSTIN format."
+
+                if pan_value and not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", pan_value):
+                    field_errors["pan"] = "Invalid PAN format."
+
+                if mobile_value and not re.fullmatch(r"[0-9]{10}", mobile_value):
+                    field_errors["mobile"] = "Invalid mobile number format."
+
+                if secondary_email_value:
+                    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", secondary_email_value):
+                        field_errors["secondary_email"] = "Invalid secondary email format."
+
+                if gstin_value and pan_value:
+                    gstin_pan = gstin_value[2:12]
+                    if gstin_pan != pan_value:
+                        field_errors["pan"] = "PAN does not match GSTIN."
+
+                duplicate_row = await conn.fetchrow(
+                    f"""
+                    SELECT
+                        CASE
+                            WHEN $1::text IS NULL OR trim($1::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration
+                                 WHERE id <> $5
+                                   AND gstin IS NOT NULL
+                                   AND upper(trim(gstin)) = upper(trim($1::text))
+                            )
+                        END AS gstin_match,
+                        CASE
+                            WHEN $2::text IS NULL OR trim($2::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration
+                                 WHERE id <> $5
+                                   AND username IS NOT NULL
+                                   AND lower(trim(username)) = lower(trim($2::text))
+                            )
+                        END AS username_match,
+                        CASE
+                            WHEN $3::text IS NULL OR trim($3::text) = '' OR $4::text IS NULL OR trim($4::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration
+                                 WHERE id <> $5
+                                   AND is_active = TRUE
+                                   AND upper(trim(gstin)) = upper(trim($3::text))
+                                   AND mobile = trim($4::text)
+                            )
+                        END AS gstin_mobile_match
+                    """,
+                    gstin_value,
+                    username_value,
+                    gstin_value,
+                    mobile_value,
+                    gst_id,
+                )
+
+                has_duplicate = False
+                if duplicate_row:
+                    if duplicate_row["gstin_match"]:
+                        field_errors["gstin"] = "GSTIN already exists."
+                        has_duplicate = True
+                    if duplicate_row["username_match"]:
+                        field_errors["username"] = "Username already exists."
+                        has_duplicate = True
+                    if duplicate_row["gstin_mobile_match"]:
+                        field_errors["mobile"] = "Mobile already used for this GST."
+                        has_duplicate = True
+
+                if field_errors:
+                    raise HTTPException(
+                        status_code=409 if has_duplicate else 400,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Validation failed",
+                                "fields": field_errors,
+                            }
+                        },
+                    )
+
+                # --------------------------------------------------
                 # 2️⃣ Dynamic Update
                 # --------------------------------------------------
                 fields, values, idx = [], [], 1
@@ -612,14 +835,27 @@ async def edit_gst_registration(
             constraint = getattr(e, "constraint_name", "")
 
             UNIQUE_MAP = {
-                "gst_registration_gstin_key": "GSTIN already exists.",
-                "uq_gst_username_lower": "Username already exists.",
-                "uq_gst_gstin_mobile_active": "Mobile already assigned to an active GST.",
+                "gst_registration_gstin_key": ("gstin", "GSTIN already exists."),
+                "uq_gst_username_lower": ("username", "Username already exists."),
+                "uq_gst_gstin_mobile_active": ("mobile", "Mobile already assigned to an active GST."),
             }
 
+            field, message = UNIQUE_MAP.get(
+                constraint,
+                ("non_field_error", "Duplicate value violates unique constraint.")
+            )
+
             raise HTTPException(
-                409,
-                UNIQUE_MAP.get(constraint, "Duplicate value violates unique constraint."),
+                status_code=409,
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {
+                            field: message
+                        }
+                    }
+                }
             )
 
         except asyncpg.exceptions.ForeignKeyViolationError:
@@ -629,17 +865,30 @@ async def edit_gst_registration(
             constraint = getattr(e, "constraint_name", None)
 
             CHECK_MAP = {
-                "chk_gst_format": "Invalid GSTIN format.",
-                "chk_pan_format": "Invalid PAN format.",
-                "chk_mobile_format": "Invalid mobile number format.",
-                "chk_secondary_email_format": "Invalid secondary email format.",
-                "chk_gstin_pan_match": "PAN does not match GSTIN.",
-                "chk_approved_logic": "Invalid approved status logic.",
+                "chk_gst_format": ("gstin", "Invalid GSTIN format."),
+                "chk_pan_format": ("pan", "Invalid PAN format."),
+                "chk_mobile_format": ("mobile", "Invalid mobile number format."),
+                "chk_secondary_email_format": ("secondary_email", "Invalid secondary email format."),
+                "chk_gstin_pan_match": ("pan", "PAN does not match GSTIN."),
+                "chk_approved_logic": ("registration_status", "Invalid approved status logic."),
             }
 
+            field, message = CHECK_MAP.get(
+                constraint,
+                ("non_field_error", f"Data violates constraint: {constraint}")
+            )
+
             raise HTTPException(
-                400,
-                CHECK_MAP.get(constraint, f"Data violates constraint: {constraint}"),
+                status_code=400,
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {
+                            field: message
+                        }
+                    }
+                }
             )
 
         except asyncpg.exceptions.NotNullViolationError:

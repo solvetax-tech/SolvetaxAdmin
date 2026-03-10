@@ -116,9 +116,12 @@ async def signup(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "error": "Validation failed",
-                "fields": {
-                    "password": "Password is not secure enough"
+                "error": {
+                    "type": "validation_error",
+                    "message": "Validation failed",
+                    "fields": {
+                        "password": "Password is not secure enough"
+                    }
                 }
             }
         )
@@ -151,7 +154,13 @@ async def signup(
 
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"error": f"Invalid role code: {role_code}"}
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": f"Invalid role code: {role_code}",
+                        "fields": {}
+                    }
+                }
             )
 
         # --------------------------------------------------
@@ -179,7 +188,13 @@ async def signup(
 
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={"error": "Invalid or unauthorized manager_emp_id"}
+                    detail={
+                        "error": {
+                            "type": "validation_error",
+                            "message": "Invalid or unauthorized manager_emp_id",
+                            "fields": {"manager_emp_id": "Invalid or unauthorized manager"}
+                        }
+                    }
                 )
 
         password_hash = hash_password(payload.password)
@@ -222,15 +237,18 @@ async def signup(
                 field_errors["email"] = "Email already exists"
 
             if duplicate_row["phone_match"]:
-                field_errors["phoneNumber"] = "Phone number already exists"
+                field_errors["phone_number"] = "Phone number already exists"
 
         if field_errors:
 
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "error": "Validation failed",
-                    "fields": field_errors
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": field_errors
+                    }
                 }
             )
 
@@ -322,16 +340,40 @@ async def signup(
                     constraint = constraint_match.group(1)
 
             if constraint == "uq_employees_email":
-                err = {"error": "Email already exists"}
+                err = {
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"email": "Email already exists"}
+                    }
+                }
 
             elif constraint == "uq_employees_username":
-                err = {"error": "Username already exists"}
+                err = {
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"username": "Username already exists"}
+                    }
+                }
 
             elif constraint == "uq_employees_phone":
-                err = {"error": "Phone number already exists"}
+                err = {
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {"phone_number": "Phone number already exists"}
+                    }
+                }
 
             else:
-                err = {"error": "Username, email, or phone already exists"}
+                err = {
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {}
+                    }
+                }
 
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -344,7 +386,13 @@ async def signup(
 
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"error": "Invalid manager_emp_id"}
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Invalid manager_emp_id",
+                        "fields": {"manager_emp_id": "Invalid manager"}
+                    }
+                }
             )
 
         except HTTPException:
@@ -356,7 +404,13 @@ async def signup(
 
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"error": "Service temporarily unavailable. Please try again later."}
+                detail={
+                    "error": {
+                        "type": "server_error",
+                        "message": "Service temporarily unavailable. Please try again later.",
+                        "fields": {}
+                    }
+                }
             )
 
         log.info("[signup] Employee created successfully id=%s", created_id)

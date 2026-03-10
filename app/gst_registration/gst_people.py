@@ -12,6 +12,7 @@ from app.logger import logger
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
+import re
 
 router = APIRouter(
     prefix="/api/v1/gst-people",
@@ -122,6 +123,85 @@ async def create_registration_person(
                 derived_ownership = gst_row["ownership_category"]
 
                 # --------------------------------------------------
+                # 2.5 Pre-validation (format + duplicates)
+                # --------------------------------------------------
+                pan_value = payload.pan.strip().upper() if payload.pan else None
+                aadhaar_value = payload.aadhaar.strip() if payload.aadhaar else None
+                mobile_value = payload.mobile.strip() if payload.mobile else None
+
+                field_errors = {}
+
+                if pan_value and not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", pan_value):
+                    field_errors["pan"] = "Invalid PAN format. Expected: ABCDE1234F"
+
+                if aadhaar_value and not re.fullmatch(r"[0-9]{12}", aadhaar_value):
+                    field_errors["aadhaar"] = "Invalid Aadhaar format (12 digits required)."
+
+                if mobile_value and not re.fullmatch(r"[0-9]{10}", mobile_value):
+                    field_errors["mobile"] = "Invalid mobile format (10 digits required)."
+
+                duplicate_row = await conn.fetchrow(
+                    f"""
+                    SELECT
+                        CASE
+                            WHEN $2::text IS NULL OR trim($2::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration_persons
+                                 WHERE gst_registration_id = $1
+                                   AND is_active = TRUE
+                                   AND pan IS NOT NULL
+                                   AND upper(trim(pan)) = upper(trim($2::text))
+                            )
+                        END AS pan_match,
+                        CASE
+                            WHEN $3::text IS NULL OR trim($3::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration_persons
+                                 WHERE gst_registration_id = $1
+                                   AND is_active = TRUE
+                                   AND aadhaar IS NOT NULL
+                                   AND trim(aadhaar) = trim($3::text)
+                            )
+                        END AS aadhaar_match,
+                        CASE
+                            WHEN $4::boolean = TRUE THEN EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration_persons
+                                 WHERE gst_registration_id = $1
+                                   AND is_primary_customer = TRUE
+                                   AND is_active = TRUE
+                            )
+                            ELSE FALSE
+                        END AS primary_match
+                    """,
+                    payload.gst_registration_id,
+                    pan_value,
+                    aadhaar_value,
+                    payload.is_primary_customer,
+                )
+                if duplicate_row:
+                    if duplicate_row["pan_match"]:
+                        field_errors["pan"] = "This PAN already exists for this GST (active)."
+                    if duplicate_row["aadhaar_match"]:
+                        field_errors["aadhaar"] = "This Aadhaar already exists for this GST (active)."
+                    if duplicate_row["primary_match"]:
+                        field_errors["is_primary_customer"] = "Only one active primary person is allowed per GST."
+
+                if field_errors:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Validation failed",
+                                "fields": field_errors,
+                            }
+                        },
+                    )
+
+                # --------------------------------------------------
                 # 3️⃣ Insert Registration Person
                 # --------------------------------------------------
                 person_row = await conn.fetchrow(
@@ -151,10 +231,10 @@ async def create_registration_person(
                     derived_gstin,                     # NULL allowed
                     payload.full_name,
                     payload.designation,
-                    payload.pan,
-                    payload.aadhaar,
+                    pan_value,
+                    aadhaar_value,
                     payload.email,
-                    payload.mobile,
+                    mobile_value,
                     payload.is_primary_customer,
                     now,
                     now,
@@ -633,6 +713,75 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
+                # 1.5 Pre-validation (format + duplicates) for edit
+                # --------------------------------------------------
+                field_errors = {}
+
+                pan_value = update_data.get("pan")
+                aadhaar_value = update_data.get("aadhaar")
+                mobile_value = update_data.get("mobile")
+
+                if pan_value and not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", pan_value):
+                    field_errors["pan"] = "Invalid PAN format. Expected: ABCDE1234F"
+
+                if aadhaar_value and not re.fullmatch(r"[0-9]{12}", aadhaar_value):
+                    field_errors["aadhaar"] = "Invalid Aadhaar format (12 digits required)."
+
+                if mobile_value and not re.fullmatch(r"[0-9]{10}", mobile_value):
+                    field_errors["mobile"] = "Invalid mobile format (10 digits required)."
+
+                duplicate_row = await conn.fetchrow(
+                    f"""
+                    SELECT
+                        CASE
+                            WHEN $2::text IS NULL OR trim($2::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration_persons
+                                 WHERE gst_registration_id = $1
+                                   AND is_active = TRUE
+                                   AND person_id <> $4
+                                   AND pan IS NOT NULL
+                                   AND upper(trim(pan)) = upper(trim($2::text))
+                            )
+                        END AS pan_match,
+                        CASE
+                            WHEN $3::text IS NULL OR trim($3::text) = '' THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                  FROM {DB_SCHEMA}.gst_registration_persons
+                                 WHERE gst_registration_id = $1
+                                   AND is_active = TRUE
+                                   AND person_id <> $4
+                                   AND aadhaar IS NOT NULL
+                                   AND trim(aadhaar) = trim($3::text)
+                            )
+                        END AS aadhaar_match
+                    """,
+                    old_row["gst_registration_id"],
+                    pan_value,
+                    aadhaar_value,
+                    person_id,
+                )
+                if duplicate_row:
+                    if duplicate_row["pan_match"]:
+                        field_errors["pan"] = "PAN already exists for this GST (active)."
+                    if duplicate_row["aadhaar_match"]:
+                        field_errors["aadhaar"] = "Aadhaar already exists for this GST (active)."
+
+                if field_errors:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Validation failed",
+                                "fields": field_errors,
+                            }
+                        },
+                    )
+
+                # --------------------------------------------------
                 # 2️⃣ Handle primary person logic (ID-based)
                 # --------------------------------------------------
                 if (
@@ -761,17 +910,27 @@ async def edit_registration_person(
             constraint = getattr(e, "constraint_name", None)
 
             CHECK_MAP = {
-                "chk_pan_format": "Invalid PAN format. Expected: ABCDE1234F",
-                "chk_person_aadhaar_format": "Invalid Aadhaar format (12 digits required).",
-                "chk_person_mobile_format": "Invalid mobile format (10 digits required).",
+                "chk_pan_format": ("pan", "Invalid PAN format. Expected: ABCDE1234F"),
+                "chk_person_aadhaar_format": ("aadhaar", "Invalid Aadhaar format (12 digits required)."),
+                "chk_person_mobile_format": ("mobile", "Invalid mobile format (10 digits required)."),
             }
+
+            field, message = CHECK_MAP.get(
+                constraint,
+                ("non_field_error", f"Data violates constraint: {constraint}"),
+            )
 
             raise HTTPException(
                 status_code=400,
-                detail=CHECK_MAP.get(
-                    constraint,
-                    f"Data violates constraint: {constraint}",
-                ),
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {
+                            field: message
+                        }
+                    }
+                },
             )
 
         # --------------------------------------------------
