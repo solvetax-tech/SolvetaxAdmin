@@ -36,23 +36,9 @@ async def create_registration_person(
     payload: RegistrationPersonIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Create Registration Person
-    --------------------------
-    ✔ Atomic transaction (Person + Version)
-    ✔ GST must exist & active
-    ✔ gst_registration_id is the source of truth
-    ✔ GSTIN auto-derived (can be NULL)
-    ✔ ownership_category auto-derived from GST
-    ✔ One primary per GST enforced by DB
-    ✔ PAN/Aadhaar uniqueness scoped per GST
-    ✔ Enterprise-grade structured logging
-    """
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
+
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
@@ -67,15 +53,9 @@ async def create_registration_person(
         payload.designation,
     )
 
-    # --------------------------------------------------
-    # IST Timestamp
-    # --------------------------------------------------
     IST = ZoneInfo("Asia/Kolkata")
     now = datetime.now(IST)
 
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
@@ -83,12 +63,14 @@ async def create_registration_person(
         raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
+
         try:
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Validate GST Exists & Active
+                # 1️⃣ Validate GST Exists
                 # --------------------------------------------------
+
                 gst_row = await conn.fetchrow(
                     f"""
                     SELECT id,
@@ -96,9 +78,9 @@ async def create_registration_person(
                            gstin,
                            ownership_category,
                            is_active
-                      FROM {DB_SCHEMA}.gst_registration
-                     WHERE id = $1
-                     LIMIT 1
+                    FROM {DB_SCHEMA}.gst_registration
+                    WHERE id = $1
+                    LIMIT 1
                     """,
                     payload.gst_registration_id,
                 )
@@ -115,21 +97,24 @@ async def create_registration_person(
                         detail="GST registration is inactive.",
                     )
 
-                # --------------------------------------------------
-                # 2️⃣ Derive Values From GST (Source of Truth)
-                # --------------------------------------------------
                 derived_customer_id = gst_row["customer_id"]
-                derived_gstin = gst_row["gstin"]          # Can be NULL ✅
+                derived_gstin = gst_row["gstin"]
                 derived_ownership = gst_row["ownership_category"]
 
                 # --------------------------------------------------
-                # 2.5 Pre-validation (format + duplicates)
+                # 2️⃣ Normalize Inputs
                 # --------------------------------------------------
+
                 pan_value = payload.pan.strip().upper() if payload.pan else None
                 aadhaar_value = payload.aadhaar.strip() if payload.aadhaar else None
+                email_value = payload.email.strip().lower() if payload.email else None
                 mobile_value = payload.mobile.strip() if payload.mobile else None
 
                 field_errors = {}
+
+                # --------------------------------------------------
+                # 3️⃣ Format Validation
+                # --------------------------------------------------
 
                 if pan_value and not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", pan_value):
                     field_errors["pan"] = "Invalid PAN format. Expected: ABCDE1234F"
@@ -140,54 +125,106 @@ async def create_registration_person(
                 if mobile_value and not re.fullmatch(r"[0-9]{10}", mobile_value):
                     field_errors["mobile"] = "Invalid mobile format (10 digits required)."
 
+                if email_value and not re.fullmatch(
+                    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$",
+                    email_value,
+                ):
+                    field_errors["email"] = "Invalid email format."
+
+                # --------------------------------------------------
+                # 4️⃣ Duplicate Check
+                # --------------------------------------------------
+
                 duplicate_row = await conn.fetchrow(
                     f"""
                     SELECT
+
                         CASE
-                            WHEN $2::text IS NULL OR trim($2::text) = '' THEN FALSE
+                            WHEN $2::text IS NULL THEN FALSE
                             ELSE EXISTS(
                                 SELECT 1
-                                  FROM {DB_SCHEMA}.gst_registration_persons
-                                 WHERE gst_registration_id = $1
-                                   AND is_active = TRUE
-                                   AND pan IS NOT NULL
-                                   AND upper(trim(pan)) = upper(trim($2::text))
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_active = TRUE
+                                AND pan IS NOT NULL
+                                AND upper(trim(pan)) = upper(trim($2))
                             )
                         END AS pan_match,
+
                         CASE
-                            WHEN $3::text IS NULL OR trim($3::text) = '' THEN FALSE
+                            WHEN $3::text IS NULL THEN FALSE
                             ELSE EXISTS(
                                 SELECT 1
-                                  FROM {DB_SCHEMA}.gst_registration_persons
-                                 WHERE gst_registration_id = $1
-                                   AND is_active = TRUE
-                                   AND aadhaar IS NOT NULL
-                                   AND trim(aadhaar) = trim($3::text)
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_active = TRUE
+                                AND aadhaar IS NOT NULL
+                                AND trim(aadhaar) = trim($3)
                             )
                         END AS aadhaar_match,
+
                         CASE
-                            WHEN $4::boolean = TRUE THEN EXISTS(
+                            WHEN $4::text IS NULL THEN FALSE
+                            ELSE EXISTS(
                                 SELECT 1
-                                  FROM {DB_SCHEMA}.gst_registration_persons
-                                 WHERE gst_registration_id = $1
-                                   AND is_primary_customer = TRUE
-                                   AND is_active = TRUE
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_active = TRUE
+                                AND email IS NOT NULL
+                                AND lower(trim(email)) = lower(trim($4))
+                            )
+                        END AS email_match,
+
+                        CASE
+                            WHEN $5::text IS NULL THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_active = TRUE
+                                AND mobile IS NOT NULL
+                                AND trim(mobile) = trim($5)
+                            )
+                        END AS mobile_match,
+
+                        CASE
+                            WHEN $6::boolean = TRUE THEN EXISTS(
+                                SELECT 1
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_primary_customer = TRUE
+                                AND is_active = TRUE
                             )
                             ELSE FALSE
                         END AS primary_match
+
                     """,
                     payload.gst_registration_id,
                     pan_value,
                     aadhaar_value,
+                    email_value,
+                    mobile_value,
                     payload.is_primary_customer,
                 )
+
                 if duplicate_row:
+
                     if duplicate_row["pan_match"]:
-                        field_errors["pan"] = "This PAN already exists for this GST (active)."
+                        field_errors["pan"] = "This PAN already exists for this GST."
+
                     if duplicate_row["aadhaar_match"]:
-                        field_errors["aadhaar"] = "This Aadhaar already exists for this GST (active)."
+                        field_errors["aadhaar"] = "This Aadhaar already exists for this GST."
+
+                    if duplicate_row["email_match"]:
+                        field_errors["email"] = "This email already exists for this GST."
+
+                    if duplicate_row["mobile_match"]:
+                        field_errors["mobile"] = "This mobile already exists for this GST."
+
                     if duplicate_row["primary_match"]:
-                        field_errors["is_primary_customer"] = "Only one active primary person is allowed per GST."
+                        field_errors["is_primary_customer"] = (
+                            "Only one active primary person is allowed per GST."
+                        )
 
                 if field_errors:
                     raise HTTPException(
@@ -202,11 +239,13 @@ async def create_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Insert Registration Person
+                # 5️⃣ Insert Registration Person
                 # --------------------------------------------------
+
                 person_row = await conn.fetchrow(
                     f"""
-                    INSERT INTO {DB_SCHEMA}.gst_registration_persons (
+                    INSERT INTO {DB_SCHEMA}.gst_registration_persons
+                    (
                         customer_id,
                         gstin,
                         full_name,
@@ -222,23 +261,24 @@ async def create_registration_person(
                         ownership_category,
                         gst_registration_id
                     )
-                    VALUES (
+                    VALUES
+                    (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10,$11,$12,$13
                     )
                     RETURNING *
                     """,
                     derived_customer_id,
-                    derived_gstin,                     # NULL allowed
+                    derived_gstin,
                     payload.full_name,
                     payload.designation,
                     pan_value,
                     aadhaar_value,
-                    payload.email,
+                    email_value,
                     mobile_value,
                     payload.is_primary_customer,
                     now,
                     now,
-                    derived_ownership,                 # Auto-filled
+                    derived_ownership,
                     payload.gst_registration_id,
                 )
 
@@ -249,11 +289,13 @@ async def create_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 4️⃣ Version Audit Insert
+                # 6️⃣ Version Audit
                 # --------------------------------------------------
+
                 await conn.execute(
                     f"""
-                    INSERT INTO {DB_SCHEMA}.versions (
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
                         emp_id,
                         entity_type,
                         entity_id,
@@ -284,26 +326,22 @@ async def create_registration_person(
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # UNIQUE CONSTRAINT HANDLING
-        # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError as e:
+
             constraint = getattr(e, "constraint_name", None)
 
             UNIQUE_MAP = {
                 "uq_reg_person_gstid_pan_active":
-                    "This PAN already exists for this GST (active).",
+                    "This PAN already exists for this GST.",
                 "uq_reg_person_gstid_aadhaar_active":
-                    "This Aadhaar already exists for this GST (active).",
+                    "This Aadhaar already exists for this GST.",
+                "uq_reg_person_gstid_mobile_active":
+                    "This mobile already exists for this GST.",
+                "uq_reg_person_gstid_email_active":
+                    "This email already exists for this GST.",
                 "uq_reg_primary_per_gstid":
                     "Only one active primary person is allowed per GST.",
             }
-
-            log.warning(
-                "Unique constraint violation | constraint=%s",
-                constraint,
-                exc_info=True,
-            )
 
             raise HTTPException(
                 status_code=409,
@@ -313,19 +351,14 @@ async def create_registration_person(
                 ),
             )
 
-        # --------------------------------------------------
-        # FOREIGN KEY
-        # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid foreign key reference.",
             )
 
-        # --------------------------------------------------
-        # CHECK CONSTRAINT HANDLING
-        # --------------------------------------------------
         except asyncpg.exceptions.CheckViolationError as e:
+
             constraint = getattr(e, "constraint_name", None)
 
             CHECK_MAP = {
@@ -343,9 +376,6 @@ async def create_registration_person(
                 ),
             )
 
-        # --------------------------------------------------
-        # GENERAL DB ERROR
-        # --------------------------------------------------
         except asyncpg.PostgresError as e:
             log.error("Database error | %s", str(e), exc_info=True)
             raise HTTPException(status_code=500, detail="Database error.")
@@ -598,6 +628,7 @@ def mask_gstin(gstin: str) -> str:
     if not gstin or len(gstin) < 6:
         return "****"
     return f"{gstin[:2]}******{gstin[-3:]}"
+
 # -------------------------------------------------------------------
 # EDIT REGISTRATION PERSON (PERSON_ID ONLY + ACTIVE)
 # -------------------------------------------------------------------
@@ -617,21 +648,9 @@ async def edit_registration_person(
     payload: RegistrationPersonEditIn,
     current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
-    """
-    Edit Registration Person
-    ------------------------
-    ✔ Dynamic update of only provided fields
-    ✔ Only active persons can be updated
-    ✔ Mobile update propagates to gst_registration_documents
-    ✔ Primary logic aligned with gst_registration_id (ID-based)
-    ✔ Version audit created
-    ✔ Fully NULL safe
-    """
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
+
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
@@ -639,10 +658,11 @@ async def edit_registration_person(
         logger,
         {"request_id": request_id, "emp_id": emp_id, "api": "edit_registration_person"},
     )
+
     log.info("Incoming edit registration person | person_id=%s", person_id)
 
     # --------------------------------------------------
-    # Extract and normalize update payload
+    # Extract payload
     # --------------------------------------------------
     try:
         update_data = payload.model_dump(exclude_unset=True)
@@ -654,9 +674,10 @@ async def edit_registration_person(
         raise HTTPException(status_code=400, detail="No fields provided for update.")
 
     # --------------------------------------------------
-    # Normalize Fields (DB index safe)
+    # Normalize fields
     # --------------------------------------------------
     try:
+
         if "pan" in update_data and update_data["pan"]:
             update_data["pan"] = update_data["pan"].strip().upper()
 
@@ -680,7 +701,7 @@ async def edit_registration_person(
         raise HTTPException(status_code=400, detail="Invalid field values provided.")
 
     # --------------------------------------------------
-    # DB Pool
+    # DB pool
     # --------------------------------------------------
     try:
         pool = await get_db_pool()
@@ -689,19 +710,20 @@ async def edit_registration_person(
         raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
+
         try:
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Fetch existing person (active only)
+                # 1️⃣ Fetch existing person
                 # --------------------------------------------------
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT *
-                      FROM {DB_SCHEMA}.gst_registration_persons
-                     WHERE person_id = $1
-                       AND is_active = TRUE
-                     LIMIT 1
+                    FROM {DB_SCHEMA}.gst_registration_persons
+                    WHERE person_id = $1
+                    AND is_active = TRUE
+                    LIMIT 1
                     """,
                     person_id,
                 )
@@ -712,13 +734,16 @@ async def edit_registration_person(
                         detail="Registration person not found or inactive.",
                     )
 
+                gst_registration_id = old_row["gst_registration_id"]
+
                 # --------------------------------------------------
-                # 1.5 Pre-validation (format + duplicates) for edit
+                # 2️⃣ Format validation
                 # --------------------------------------------------
                 field_errors = {}
 
                 pan_value = update_data.get("pan")
                 aadhaar_value = update_data.get("aadhaar")
+                email_value = update_data.get("email")
                 mobile_value = update_data.get("mobile")
 
                 if pan_value and not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", pan_value):
@@ -730,44 +755,92 @@ async def edit_registration_person(
                 if mobile_value and not re.fullmatch(r"[0-9]{10}", mobile_value):
                     field_errors["mobile"] = "Invalid mobile format (10 digits required)."
 
+                if email_value and not re.fullmatch(
+                    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$",
+                    email_value,
+                ):
+                    field_errors["email"] = "Invalid email format."
+
+                # --------------------------------------------------
+                # 3️⃣ Duplicate checks
+                # --------------------------------------------------
                 duplicate_row = await conn.fetchrow(
                     f"""
                     SELECT
+
                         CASE
-                            WHEN $2::text IS NULL OR trim($2::text) = '' THEN FALSE
+                            WHEN $2::text IS NULL THEN FALSE
                             ELSE EXISTS(
                                 SELECT 1
-                                  FROM {DB_SCHEMA}.gst_registration_persons
-                                 WHERE gst_registration_id = $1
-                                   AND is_active = TRUE
-                                   AND person_id <> $4
-                                   AND pan IS NOT NULL
-                                   AND upper(trim(pan)) = upper(trim($2::text))
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_active = TRUE
+                                AND person_id <> $6
+                                AND pan IS NOT NULL
+                                AND upper(trim(pan)) = upper(trim($2))
                             )
                         END AS pan_match,
+
                         CASE
-                            WHEN $3::text IS NULL OR trim($3::text) = '' THEN FALSE
+                            WHEN $3::text IS NULL THEN FALSE
                             ELSE EXISTS(
                                 SELECT 1
-                                  FROM {DB_SCHEMA}.gst_registration_persons
-                                 WHERE gst_registration_id = $1
-                                   AND is_active = TRUE
-                                   AND person_id <> $4
-                                   AND aadhaar IS NOT NULL
-                                   AND trim(aadhaar) = trim($3::text)
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_active = TRUE
+                                AND person_id <> $6
+                                AND aadhaar IS NOT NULL
+                                AND trim(aadhaar) = trim($3)
                             )
-                        END AS aadhaar_match
+                        END AS aadhaar_match,
+
+                        CASE
+                            WHEN $4::text IS NULL THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_active = TRUE
+                                AND person_id <> $6
+                                AND email IS NOT NULL
+                                AND lower(trim(email)) = lower(trim($4))
+                            )
+                        END AS email_match,
+
+                        CASE
+                            WHEN $5::text IS NULL THEN FALSE
+                            ELSE EXISTS(
+                                SELECT 1
+                                FROM {DB_SCHEMA}.gst_registration_persons
+                                WHERE gst_registration_id = $1
+                                AND is_active = TRUE
+                                AND person_id <> $6
+                                AND mobile IS NOT NULL
+                                AND trim(mobile) = trim($5)
+                            )
+                        END AS mobile_match
                     """,
-                    old_row["gst_registration_id"],
+                    gst_registration_id,
                     pan_value,
                     aadhaar_value,
+                    email_value,
+                    mobile_value,
                     person_id,
                 )
+
                 if duplicate_row:
+
                     if duplicate_row["pan_match"]:
-                        field_errors["pan"] = "PAN already exists for this GST (active)."
+                        field_errors["pan"] = "PAN already exists for this GST."
+
                     if duplicate_row["aadhaar_match"]:
-                        field_errors["aadhaar"] = "Aadhaar already exists for this GST (active)."
+                        field_errors["aadhaar"] = "Aadhaar already exists for this GST."
+
+                    if duplicate_row["email_match"]:
+                        field_errors["email"] = "Email already exists for this GST."
+
+                    if duplicate_row["mobile_match"]:
+                        field_errors["mobile"] = "Mobile already exists for this GST."
 
                 if field_errors:
                     raise HTTPException(
@@ -782,7 +855,7 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 2️⃣ Handle primary person logic (ID-based)
+                # 4️⃣ Handle primary logic
                 # --------------------------------------------------
                 if (
                     "is_primary_customer" in update_data
@@ -791,17 +864,17 @@ async def edit_registration_person(
                     await conn.execute(
                         f"""
                         UPDATE {DB_SCHEMA}.gst_registration_persons
-                           SET is_primary_customer = FALSE,
-                               updated_at = NOW()
-                         WHERE gst_registration_id = $1
-                           AND is_primary_customer = TRUE
-                           AND is_active = TRUE
+                        SET is_primary_customer = FALSE,
+                            updated_at = NOW()
+                        WHERE gst_registration_id = $1
+                        AND is_primary_customer = TRUE
+                        AND is_active = TRUE
                         """,
-                        old_row["gst_registration_id"],
+                        gst_registration_id,
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Build dynamic UPDATE for gst_registration_persons
+                # 5️⃣ Dynamic update
                 # --------------------------------------------------
                 fields, values, idx = [], [], 1
 
@@ -815,10 +888,10 @@ async def edit_registration_person(
 
                 sql = f"""
                     UPDATE {DB_SCHEMA}.gst_registration_persons
-                       SET {', '.join(fields)}
-                     WHERE person_id = ${idx}
-                       AND is_active = TRUE
-                     RETURNING *
+                    SET {', '.join(fields)}
+                    WHERE person_id = ${idx}
+                    AND is_active = TRUE
+                    RETURNING *
                 """
 
                 new_row = await conn.fetchrow(sql, *values)
@@ -830,23 +903,24 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 4️⃣ Propagate mobile change to gst_registration_documents
+                # 6️⃣ Mobile propagation
                 # --------------------------------------------------
                 if "mobile" in update_data and update_data["mobile"]:
+
                     await conn.execute(
                         f"""
                         UPDATE {DB_SCHEMA}.gst_registration_documents
-                           SET mobile = $1,
-                               updated_at = NOW()
-                         WHERE person_id = $2
-                           AND is_active = TRUE
+                        SET mobile = $1,
+                            updated_at = NOW()
+                        WHERE person_id = $2
+                        AND is_active = TRUE
                         """,
                         update_data["mobile"],
                         person_id,
                     )
 
                 # --------------------------------------------------
-                # 5️⃣ Version Audit
+                # 7️⃣ Version audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -875,44 +949,55 @@ async def edit_registration_person(
             }
 
         # --------------------------------------------------
-        # UNIQUE CONSTRAINT HANDLING (Correct Names)
+        # UNIQUE CONSTRAINT HANDLING
         # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError as e:
+
             constraint_name = getattr(e, "constraint_name", "")
 
-            UNIQUE_MAP = {
-                "uq_reg_person_gstid_aadhaar_active": "Aadhaar already exists for this GST (active).",
-                "uq_reg_person_gstid_pan_active": "PAN already exists for this GST (active).",
-                "uq_reg_primary_per_gstid": "Only one active primary person allowed per GST.",
+            UNIQUE_FIELD_MAP = {
+                "uq_reg_person_gstid_pan_active":
+                    ("pan", "PAN already exists for this GST."),
+                "uq_reg_person_gstid_aadhaar_active":
+                    ("aadhaar", "Aadhaar already exists for this GST."),
+                "uq_reg_person_gstid_mobile_active":
+                    ("mobile", "Mobile already exists for this GST."),
+                "uq_reg_person_gstid_email_active":
+                    ("email", "Email already exists for this GST."),
+                "uq_reg_primary_per_gstid":
+                    ("is_primary_customer", "Only one active primary person allowed per GST."),
             }
+
+            field, message = UNIQUE_FIELD_MAP.get(
+                constraint_name,
+                ("non_field_error", f"Duplicate value violates constraint: {constraint_name}"),
+            )
 
             raise HTTPException(
                 status_code=409,
-                detail=UNIQUE_MAP.get(
-                    constraint_name,
-                    f"Duplicate value violates constraint: {constraint_name}",
-                ),
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Validation failed",
+                        "fields": {field: message},
+                    }
+                },
             )
 
-        # --------------------------------------------------
-        # FOREIGN KEY
-        # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid foreign key reference.",
             )
 
-        # --------------------------------------------------
-        # CHECK CONSTRAINTS
-        # --------------------------------------------------
         except asyncpg.exceptions.CheckViolationError as e:
+
             constraint = getattr(e, "constraint_name", None)
 
             CHECK_MAP = {
-                "chk_pan_format": ("pan", "Invalid PAN format. Expected: ABCDE1234F"),
-                "chk_person_aadhaar_format": ("aadhaar", "Invalid Aadhaar format (12 digits required)."),
-                "chk_person_mobile_format": ("mobile", "Invalid mobile format (10 digits required)."),
+                "chk_pan_format": ("pan", "Invalid PAN format."),
+                "chk_person_aadhaar_format": ("aadhaar", "Invalid Aadhaar format."),
+                "chk_person_mobile_format": ("mobile", "Invalid mobile format."),
             }
 
             field, message = CHECK_MAP.get(
@@ -926,32 +1011,21 @@ async def edit_registration_person(
                     "error": {
                         "type": "validation_error",
                         "message": "Validation failed",
-                        "fields": {
-                            field: message
-                        }
+                        "fields": {field: message},
                     }
                 },
             )
 
-        # --------------------------------------------------
-        # GENERAL DB ERRORS
-        # --------------------------------------------------
         except asyncpg.PostgresError:
             log.exception("Database error during registration person update")
-            raise HTTPException(
-                status_code=500,
-                detail="Database error occurred.",
-            )
+            raise HTTPException(status_code=500, detail="Database error occurred.")
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during registration person update")
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error.",
-            )
+            raise HTTPException(status_code=500, detail="Internal server error.")
 # -------------------------------------------------------------------
 # SOFT DELETE REGISTRATION PERSON (Enterprise + Audit + Cascade Docs)
 # -------------------------------------------------------------------

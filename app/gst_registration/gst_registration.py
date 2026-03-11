@@ -149,9 +149,6 @@ async def create_gst_registration(
                     if duplicate_row["username_match"]:
                         field_errors["username"] = "Username already exists."
                         has_duplicate = True
-                    if duplicate_row["gstin_mobile_match"]:
-                        field_errors["mobile"] = "Mobile already used for this GST."
-                        has_duplicate = True
 
                 if field_errors:
                     raise HTTPException(
@@ -265,7 +262,6 @@ async def create_gst_registration(
             UNIQUE_MAP = {
                 "gst_registration_gstin_key": ("gstin", "GSTIN already exists."),
                 "uq_gst_username_lower": ("username", "Username already exists."),
-                "uq_gst_gstin_mobile_active": ("mobile", "Mobile already used for this GST."),
             }
 
             field, message = UNIQUE_MAP.get(
@@ -752,10 +748,6 @@ async def edit_gst_registration(
                     if duplicate_row["username_match"]:
                         field_errors["username"] = "Username already exists."
                         has_duplicate = True
-                    if duplicate_row["gstin_mobile_match"]:
-                        field_errors["mobile"] = "Mobile already used for this GST."
-                        has_duplicate = True
-
                 if field_errors:
                     raise HTTPException(
                         status_code=409 if has_duplicate else 400,
