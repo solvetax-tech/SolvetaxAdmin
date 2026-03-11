@@ -91,6 +91,8 @@ from app.payments.registration_payments import router as registration_payments_r
 from app.payments.payments_config import router as payments_config
 from app.gst_registration.gst_blob import router as gst_blob
 from app.gst_registration.document_config import router as document_config
+from app.customer_registration.services import router as services
+from app.customer_registration.service_config import router as service_config
 
 
 
@@ -125,7 +127,10 @@ if gst_blob:
     app.include_router(gst_blob)
 if document_config:
     app.include_router(document_config)
-
+if services:
+    app.include_router(services)
+if service_config:
+    app.include_router(service_config)
 
 
 @app.get("/health")

@@ -21,6 +21,7 @@ router = APIRouter(
 # -------------------------------------------------------------------
 # CREATE CUSTOMER (Enterprise Production + Version Audit + Services)
 # -------------------------------------------------------------------
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -36,6 +37,7 @@ async def create_customer(
     payload: CustomerIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
+
     """
     ✔ Atomic transaction (Customer + Version)
     ✔ entity_type = 'CUSTOMER'
@@ -51,8 +53,11 @@ async def create_customer(
     # --------------------------------------------------
     # Request Context
     # --------------------------------------------------
+
     request_id = generate_uuid()
+
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
@@ -61,6 +66,7 @@ async def create_customer(
     )
 
     masked_email = mask_sensitive_data(payload.email)
+
     masked_mobile = mask_sensitive_data(payload.mobile)
 
     log.info(
@@ -72,11 +78,52 @@ async def create_customer(
     )
 
     # --------------------------------------------------
+    # Normalize Service Arrays
+    # --------------------------------------------------
+
+    def normalize_services(values):
+
+        if values is None:
+            return []
+
+        if not isinstance(values, list):
+            raise HTTPException(
+                status_code=400,
+                detail="Services must be a list of strings.",
+            )
+
+        cleaned = []
+
+        for v in values:
+
+            if not isinstance(v, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Service values must be strings.",
+                )
+
+            v = v.strip()
+
+            if v:
+                cleaned.append(v)
+
+        return list(dict.fromkeys(cleaned))
+
+    service_required = normalize_services(payload.service_required)
+
+    service_provided = normalize_services(payload.service_provided)
+
+    # --------------------------------------------------
     # DB Pool
     # --------------------------------------------------
+
     try:
         pool = await get_db_pool()
+
     except Exception:
+
+        log.exception("Database pool acquisition failed")
+
         raise HTTPException(
             status_code=500,
             detail={
@@ -89,10 +136,13 @@ async def create_customer(
         )
 
     async with pool.acquire() as conn:
+
         try:
+
             # --------------------------------------------------
             # PROACTIVE DUPLICATE CHECK
             # --------------------------------------------------
+
             duplicate_row = await conn.fetchrow(
                 f"""
                 SELECT 
@@ -104,8 +154,10 @@ async def create_customer(
             )
 
             field_errors = {}
+
             if duplicate_row["email_match"]:
                 field_errors["email"] = "Email already exists."
+
             if duplicate_row["mobile_match"]:
                 field_errors["mobile"] = "Mobile number already exists."
 
@@ -122,13 +174,6 @@ async def create_customer(
                 )
 
             async with conn.transaction():
-
-                # --------------------------------------------------
-                # Normalize Service Arrays
-                # --------------------------------------------------
-
-                service_required = payload.service_required or []
-                service_provided = payload.service_provided or []
 
                 # --------------------------------------------------
                 # 1️⃣ Insert Customer
@@ -181,7 +226,9 @@ async def create_customer(
                 )
 
                 if not customer_row:
+
                     log.error("Customer creation failed - no row returned")
+
                     raise HTTPException(
                         status_code=500,
                         detail={
@@ -236,12 +283,16 @@ async def create_customer(
         # --------------------------------------------------
         # UNIQUE CONSTRAINT HANDLING
         # --------------------------------------------------
+
         except asyncpg.exceptions.UniqueViolationError as e:
+
             constraint = getattr(e, "constraint_name", "")
 
             field_errors = {}
+
             if constraint == "uq_customers_mobile":
                 field_errors["mobile"] = "Mobile number already exists."
+
             elif constraint == "uq_customers_email":
                 field_errors["email"] = "Email already exists."
 
@@ -259,12 +310,16 @@ async def create_customer(
         # --------------------------------------------------
         # FOREIGN KEY HANDLING
         # --------------------------------------------------
+
         except asyncpg.exceptions.ForeignKeyViolationError as e:
+
             constraint = getattr(e, "constraint_name", "")
 
             field_errors = {}
+
             if constraint == "customers_rm_id_fkey":
                 field_errors["rm_id"] = "Invalid rm_id provided."
+
             elif constraint == "customers_op_id_fkey":
                 field_errors["op_id"] = "Invalid op_id provided."
 
@@ -279,7 +334,12 @@ async def create_customer(
                 },
             )
 
+        # --------------------------------------------------
+        # CHECK / NOT NULL / DATA
+        # --------------------------------------------------
+
         except asyncpg.exceptions.CheckViolationError as e:
+
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -292,6 +352,7 @@ async def create_customer(
             )
 
         except asyncpg.exceptions.NotNullViolationError:
+
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -304,6 +365,7 @@ async def create_customer(
             )
 
         except asyncpg.exceptions.DataError:
+
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -318,8 +380,11 @@ async def create_customer(
         # --------------------------------------------------
         # GENERIC DB ERROR
         # --------------------------------------------------
+
         except asyncpg.PostgresError:
+
             log.exception("Database error during customer creation")
+
             raise HTTPException(
                 status_code=500,
                 detail={
@@ -335,7 +400,9 @@ async def create_customer(
             raise
 
         except Exception:
+
             log.exception("Unexpected error during customer creation")
+
             raise HTTPException(
                 status_code=500,
                 detail={
@@ -346,7 +413,6 @@ async def create_customer(
                     }
                 },
             )
-
 # -------------------------------------------------------------------
 # GET CUSTOMER BY ID (Enterprise Production + Detail Audit)
 # -------------------------------------------------------------------
@@ -719,7 +785,9 @@ async def edit_customer(
     # --------------------------------------------------
 
     request_id = generate_uuid()
+
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
@@ -735,7 +803,9 @@ async def edit_customer(
 
     try:
         update_data = payload.model_dump(exclude_unset=True)
+
     except Exception:
+
         raise HTTPException(
             status_code=400,
             detail={
@@ -748,6 +818,7 @@ async def edit_customer(
         )
 
     if not update_data:
+
         raise HTTPException(
             status_code=400,
             detail={
@@ -760,29 +831,67 @@ async def edit_customer(
         )
 
     # --------------------------------------------------
-    # NOTE: Duplicate validation will be performed after
-    # fetching the existing row so we can exclude the
-    # current customer_id safely.
+    # Service Array Normalization Function
     # --------------------------------------------------
+
+    def normalize_services(values):
+
+        if values is None:
+            return []
+
+        if not isinstance(values, list):
+
+            raise HTTPException(
+                status_code=400,
+                detail="Services must be a list of strings.",
+            )
+
+        cleaned = []
+
+        for v in values:
+
+            if not isinstance(v, str):
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="Service values must be strings.",
+                )
+
+            v = v.strip()
+
+            if v:
+                cleaned.append(v)
+
+        return list(dict.fromkeys(cleaned))
 
     # --------------------------------------------------
     # Normalize service arrays
     # --------------------------------------------------
 
-    if "service_required" in update_data and update_data["service_required"] is None:
-        update_data["service_required"] = []
+    if "service_required" in update_data:
 
-    if "service_provided" in update_data and update_data["service_provided"] is None:
-        update_data["service_provided"] = []
+        update_data["service_required"] = normalize_services(
+            update_data["service_required"]
+        )
+
+    if "service_provided" in update_data:
+
+        update_data["service_provided"] = normalize_services(
+            update_data["service_provided"]
+        )
 
     # --------------------------------------------------
     # DB Pool
     # --------------------------------------------------
 
     try:
+
         pool = await get_db_pool()
+
     except Exception:
+
         log.exception("Database pool acquisition failed")
+
         raise HTTPException(
             status_code=500,
             detail={
@@ -795,7 +904,9 @@ async def edit_customer(
         )
 
     async with pool.acquire() as conn:
+
         try:
+
             async with conn.transaction():
 
                 # --------------------------------------------------
@@ -813,6 +924,7 @@ async def edit_customer(
                 )
 
                 if not old_row:
+
                     raise HTTPException(
                         status_code=404,
                         detail={
@@ -850,16 +962,21 @@ async def edit_customer(
                     idx += 2
 
                 if duplicate_checks:
+
                     dup_sql = f"SELECT {', '.join(duplicate_checks)}"
+
                     dup_row = await conn.fetchrow(dup_sql, *values)
 
                     if dup_row:
+
                         if "email_match" in dup_row and dup_row["email_match"]:
                             field_errors["email"] = "Email already exists."
+
                         if "mobile_match" in dup_row and dup_row["mobile_match"]:
                             field_errors["mobile"] = "Mobile number already exists."
 
                 if field_errors:
+
                     raise HTTPException(
                         status_code=409,
                         detail={
@@ -876,12 +993,16 @@ async def edit_customer(
                 # --------------------------------------------------
 
                 no_change = True
+
                 for k, v in update_data.items():
+
                     if k in old_row and old_row[k] != v:
+
                         no_change = False
                         break
 
                 if no_change:
+
                     raise HTTPException(
                         status_code=400,
                         detail={
@@ -902,8 +1023,11 @@ async def edit_customer(
                 idx = 1
 
                 for key, value in update_data.items():
+
                     fields.append(f"{key} = ${idx}")
+
                     values.append(value)
+
                     idx += 1
 
                 fields.append("updated_at = NOW()")
@@ -920,6 +1044,7 @@ async def edit_customer(
                 new_row = await conn.fetchrow(update_sql, *values)
 
                 if not new_row:
+
                     raise HTTPException(
                         status_code=409,
                         detail={
@@ -969,92 +1094,10 @@ async def edit_customer(
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # UNIQUE CONSTRAINT HANDLING
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.UniqueViolationError as e:
-            constraint = getattr(e, "constraint_name", "")
-
-            field_errors = {}
-            if constraint == "uq_customers_mobile":
-                field_errors["mobile"] = "Mobile number already exists."
-            elif constraint == "uq_customers_email":
-                field_errors["email"] = "Email already exists."
-
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": field_errors or {"non_field_error": "Duplicate value violation."}
-                    }
-                },
-            )
-
-        except asyncpg.exceptions.ForeignKeyViolationError as e:
-            constraint = getattr(e, "constraint_name", "")
-
-            field_errors = {}
-            if constraint == "customers_rm_id_fkey":
-                field_errors["rm_id"] = "Invalid rm_id provided."
-            elif constraint == "customers_op_id_fkey":
-                field_errors["op_id"] = "Invalid op_id provided."
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": field_errors or {"non_field_error": "Invalid foreign key reference."}
-                    }
-                },
-            )
-
-        except asyncpg.exceptions.CheckViolationError as e:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"non_field_error": f"Data violates constraint: {getattr(e, 'constraint_name', '')}"}
-                    }
-                },
-            )
-
-        except asyncpg.exceptions.NotNullViolationError:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"non_field_error": "Missing required field value."}
-                    }
-                },
-            )
-
-        except asyncpg.exceptions.DataError:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"non_field_error": "Invalid data format provided."}
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # GENERIC DB ERROR
-        # --------------------------------------------------
-
         except asyncpg.PostgresError:
+
             log.exception("Database error during customer update")
+
             raise HTTPException(
                 status_code=500,
                 detail="Database error occurred.",
@@ -1064,7 +1107,9 @@ async def edit_customer(
             raise
 
         except Exception:
+
             log.exception("Unexpected error during customer update")
+
             raise HTTPException(
                 status_code=500,
                 detail="Internal server error.",

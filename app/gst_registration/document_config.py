@@ -123,7 +123,7 @@ async def get_required_documents(
 )
 async def list_document_configs(
     id: Optional[int] = None,
-    entity_type: Optional[str] = None,
+    registration: Optional[str] = None,
     ownership_category: Optional[str] = None,
     config_type: Optional[str] = None,
     value: Optional[str] = None,
@@ -181,9 +181,9 @@ async def list_document_configs(
             values.append(id)
             param_index += 1
 
-        if entity_type and entity_type.strip():
-            conditions.append(f"upper(entity_type) = ${param_index}")
-            values.append(entity_type.strip().upper())
+        if registration and registration.strip():
+            conditions.append(f"upper(registration) = ${param_index}")
+            values.append(registration.strip().upper())
             param_index += 1
 
         if ownership_category and ownership_category.strip():
@@ -233,7 +233,7 @@ async def list_document_configs(
             SELECT *
             FROM {DB_SCHEMA}.document_config
             {where_clause}
-            ORDER BY entity_type, ownership_category, sort_order, id
+            ORDER BY registration, ownership_category, sort_order, id
             LIMIT ${param_index} OFFSET ${param_index + 1}
         """
 
