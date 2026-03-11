@@ -338,6 +338,7 @@ async def create_gst_registration(
     },
 )
 async def list_gst_registrations(
+    gst_registration_id: Optional[int] = None,
     customer_id: Optional[int] = None,
     gstin: Optional[str] = None,
     gstin_is_null: Optional[bool] = None,
@@ -400,6 +401,11 @@ async def list_gst_registrations(
         # --------------------------------------------------
         # Indexed Exact Match Filters
         # --------------------------------------------------
+
+        if gst_registration_id is not None:
+            conditions.append(f"id = ${param_index}")
+            values.append(gst_registration_id)
+            param_index += 1
 
         if customer_id is not None:
             conditions.append(f"customer_id = ${param_index}")
