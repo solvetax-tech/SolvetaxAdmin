@@ -4,7 +4,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from pydantic import constr, validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.utils import get_db_pool, DB_SCHEMA
 from app.security.rbac import require_permission
 from app.logger import logger
@@ -20,8 +20,6 @@ router = APIRouter(
     tags=["services"]
 )
 
-from fastapi import Query
-from datetime import datetime
 
 @router.get(
     "/customer-services/filter",
@@ -510,31 +508,75 @@ async def deactivate_customer_service(
     summary="Service Dashboard Stats",
 )
 async def get_service_dashboard_stats(
+    filter_type: Optional[str] = Query(
+        None,
+        description="today | yesterday | last_7_days | last_1_month | last_2_months"
+    ),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-
+    """
+    Get Service Dashboard Statistics with dynamic filtering.
+    """
     request_id = generate_uuid()
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "api": "get_service_dashboard_stats"},
+    )
+
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
+    start_dt = None
+    end_dt = None
+
+    if filter_type:
+        if filter_type == "today":
+            start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_dt = now
+        elif filter_type == "yesterday":
+            yesterday = now - timedelta(days=1)
+            start_dt = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_dt = start_dt + timedelta(days=1)
+        elif filter_type == "last_7_days":
+            start_dt = now - timedelta(days=7)
+            end_dt = now
+        elif filter_type == "last_1_month":
+            start_dt = now - timedelta(days=30)
+            end_dt = now
+        elif filter_type == "last_2_months":
+            start_dt = now - timedelta(days=60)
+            end_dt = now
 
     try:
         pool = await get_db_pool()
     except Exception:
+        log.exception("Database pool acquisition failed")
         raise HTTPException(status_code=500, detail="Database connection error.")
 
-    query = f"""
-        SELECT
-            COUNT(*) FILTER (WHERE service_status = 'PENDING') AS pending_services,
-            COUNT(*) FILTER (WHERE service_status = 'PROVIDED') AS provided_services,
-            COUNT(*) AS total_services
-        FROM {DB_SCHEMA}.customer_services
-    """
-
     async with pool.acquire() as conn:
-        stats = await conn.fetchrow(query)
+        try:
+            where_clause = ""
+            params = []
+            if start_dt and end_dt:
+                where_clause = "WHERE created_at >= $1 AND created_at <= $2"
+                params = [start_dt, end_dt]
 
-    return {
-        "data": dict(stats),
-        "request_id": request_id,
-    }
+            query = f"""
+                SELECT
+                    COUNT(*) FILTER (WHERE service_status = 'PENDING') AS pending_services,
+                    COUNT(*) FILTER (WHERE service_status = 'PROVIDED') AS provided_services,
+                    COUNT(*) AS total_services
+                FROM {DB_SCHEMA}.customer_services
+                {where_clause}
+            """
+            row = await conn.fetchrow(query, *params)
+            return {
+                "data": dict(row) if row else {"pending_services": 0, "provided_services": 0, "total_services": 0},
+                "request_id": request_id
+            }
+        except Exception as e:
+            log.error(f"Error fetching service dashboard stats: {e}")
+            raise HTTPException(status_code=500, detail="Database internal error.")
 
 
 @router.get(

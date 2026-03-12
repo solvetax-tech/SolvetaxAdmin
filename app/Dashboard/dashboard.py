@@ -337,3 +337,67 @@ async def get_customer_dashboard_metrics(
             log.exception("Unexpected error during dashboard metrics")
             raise HTTPException(status_code=500, detail="Internal server error.")
 
+@router.get(
+    "/payment-metrics",
+    summary="Get Payment Collection Metrics",
+)
+async def get_payment_dashboard_metrics(
+    filter_type: Optional[str] = Query(
+        None,
+        description="today | yesterday | last_7_days | last_1_month | last_2_months"
+    ),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    current_user=Depends(require_permission("USER_ACCESS", "READ")),
+):
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": current_emp_id, "api": "payment_dashboard_metrics"})
+
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
+
+    if filter_type:
+        if filter_type == "today":
+            start_dt, end_dt = now.replace(hour=0, minute=0, second=0, microsecond=0), now
+        elif filter_type == "yesterday":
+            start_dt = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            end_dt = start_dt + timedelta(days=1)
+        elif filter_type == "last_7_days":
+            start_dt, end_dt = now - timedelta(days=7), now
+        elif filter_type == "last_1_month":
+            start_dt, end_dt = now - timedelta(days=30), now
+        elif filter_type == "last_2_months":
+            start_dt, end_dt = now - timedelta(days=60), now
+        else:
+            raise HTTPException(status_code=400, detail="Invalid filter_type")
+    elif start_date and end_date:
+        start_dt = start_date.replace(tzinfo=IST) if start_date.tzinfo is None else start_date.astimezone(IST)
+        end_dt = end_date.replace(tzinfo=IST) if end_date.tzinfo is None else end_date.astimezone(IST)
+    else:
+        raise HTTPException(status_code=400, detail="Missing filter")
+
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            # Aggregate collected amount and total pending
+            sql = f"""
+                SELECT 
+                    SUM(COALESCE(paid_amount, 0)) AS total_received,
+                    SUM(CASE 
+                        WHEN payment_status != 'CANCELLED' THEN COALESCE(net_amount, 0) - COALESCE(paid_amount, 0) 
+                        ELSE 0 
+                    END) AS total_pending
+                FROM {DB_SCHEMA}.registration_payments
+                WHERE created_at >= $1 AND created_at <= $2
+                  AND is_active = TRUE
+            """
+            row = await conn.fetchrow(sql, start_dt, end_dt)
+            return {
+                "total_received": float(row["total_received"] or 0),
+                "total_pending": float(row["total_pending"] or 0),
+                "request_id": request_id
+            }
+    except Exception as e:
+        log.exception("Payment dashboard error")
+        raise HTTPException(status_code=500, detail="Internal server error")
