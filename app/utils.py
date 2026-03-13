@@ -312,9 +312,10 @@ SolveTax Security Team
 # --------------------------------------------------
 
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions
-from datetime import datetime, timedelta
-from urllib.parse import urlparse
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse, quote, unquote
 import os
+import mimetypes
 
 AZURE_SAS_EXPIRY_MINUTES = int(os.getenv("AZURE_SAS_EXPIRY_MINUTES", 15))
 
@@ -342,19 +343,32 @@ def generate_blob_sas_url(blob_path: str, disposition: str = "inline") -> str:
     else:
         content_disposition = "inline"
 
+    # Guess content type for preview
+    content_type, _ = mimetypes.guess_type(filename)
+    if not content_type:
+        # Fallback based on extension if mimetypes fails
+        ext = filename.split(".")[-1].lower()
+        if ext == "pdf": content_type = "application/pdf"
+        elif ext in ["jpg", "jpeg"]: content_type = "image/jpeg"
+        elif ext == "png": content_type = "image/png"
+
     sas_token = generate_blob_sas(
         account_name=account_name,
         container_name=AZURE_STORAGE_CONTAINER,
         blob_name=blob_path,
         account_key=account_key,
         permission=BlobSasPermissions(read=True),
-        expiry=datetime.utcnow() + timedelta(minutes=AZURE_SAS_EXPIRY_MINUTES),
+        expiry=datetime.now(timezone.utc) + timedelta(minutes=AZURE_SAS_EXPIRY_MINUTES),
         content_disposition=content_disposition,
+        content_type=content_type,
     )
+
+    # URL encode the blob path for the final URL
+    encoded_blob_path = quote(blob_path)
 
     url = (
         f"https://{account_name}.blob.core.windows.net/"
-        f"{AZURE_STORAGE_CONTAINER}/{blob_path}?{sas_token}"
+        f"{AZURE_STORAGE_CONTAINER}/{encoded_blob_path}?{sas_token}"
     )
 
     return url
@@ -366,7 +380,7 @@ def generate_blob_sas_url(blob_path: str, disposition: str = "inline") -> str:
 
 def extract_blob_path(blob_url: str) -> str:
     """
-    Extract blob path safely from Azure blob URL.
+    Extract blob path safely from Azure blob URL and unquote it.
     """
 
     parsed_url = urlparse(blob_url)
@@ -374,9 +388,18 @@ def extract_blob_path(blob_url: str) -> str:
     if not parsed_url.path:
         raise ValueError("Invalid blob URL")
 
-    blob_path = parsed_url.path.replace(f"/{AZURE_STORAGE_CONTAINER}/", "")
+    # Path starts with /container_name/
+    prefix = f"/{AZURE_STORAGE_CONTAINER}/"
+    path = parsed_url.path
+
+    if path.startswith(prefix):
+        blob_path = path[len(prefix):]
+    else:
+        # Fallback if container is not at start (unlikely for standard Azure URLs)
+        blob_path = path.replace(prefix, "", 1).lstrip("/")
 
     if not blob_path:
         raise ValueError("Blob path could not be extracted")
 
-    return blob_path
+    # Unquote to get the raw blob name (e.g., %20 -> space)
+    return unquote(blob_path)
