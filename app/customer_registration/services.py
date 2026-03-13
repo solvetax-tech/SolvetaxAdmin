@@ -19,6 +19,10 @@ router = APIRouter(
     prefix="/api/v1/services",
     tags=["services"]
 )
+<<<<<<< HEAD
+=======
+
+>>>>>>> b0f824b (Resolved merge conflict and integrated remote changes)
 from fastapi import Query
 from datetime import datetime
 @router.get(
