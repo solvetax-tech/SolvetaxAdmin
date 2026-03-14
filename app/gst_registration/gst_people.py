@@ -23,6 +23,10 @@ router = APIRouter(
 # GET DESIGNATIONS BASED ON OWNERSHIP CATEGORY
 # -------------------------------------------------------------------
 
+# -------------------------------------------------------------------
+# GET DESIGNATIONS BASED ON OWNERSHIP CATEGORY
+# -------------------------------------------------------------------
+
 @router.get(
     "/gst-registration/{gst_id}/designations",
     summary="Get Designations based on GST Ownership Category",
@@ -70,12 +74,14 @@ async def get_designations(
         try:
 
             # --------------------------------------------------
-            # Fetch ownership category
+            # Fetch GST Registration
             # --------------------------------------------------
 
             gst_row = await conn.fetchrow(
                 f"""
-                SELECT ownership_category
+                SELECT
+                    id,
+                    ownership_category
                 FROM {DB_SCHEMA}.gst_registration
                 WHERE id = $1
                 AND is_active = TRUE
@@ -101,16 +107,15 @@ async def get_designations(
             ownership_category = gst_row["ownership_category"]
 
             # --------------------------------------------------
-            # Fetch designations
+            # Fetch Designations
             # --------------------------------------------------
 
-            designations = await conn.fetch(
+            rows = await conn.fetch(
                 f"""
                 SELECT
                     value,
                     display_name,
-                    description,
-                    sort_order
+                    description
                 FROM {DB_SCHEMA}.gst_registration_config
                 WHERE config_type = $1
                 AND is_active = TRUE
@@ -118,6 +123,8 @@ async def get_designations(
                 """,
                 ownership_category,
             )
+
+            designations = [dict(r) for r in rows]
 
             log.info(
                 "Designations fetched successfully | ownership_category=%s count=%s",
@@ -128,12 +135,12 @@ async def get_designations(
             return {
                 "gst_id": gst_id,
                 "ownership_category": ownership_category,
-                "designations": [dict(d) for d in designations],
+                "designations": designations,
                 "request_id": request_id,
             }
 
         # --------------------------------------------------
-        # DB ERROR
+        # DATABASE ERROR
         # --------------------------------------------------
 
         except asyncpg.PostgresError:
