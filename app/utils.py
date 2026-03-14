@@ -30,10 +30,20 @@ _db_pool = None
 _db_pool_lock = asyncio.Lock()
 
 
+import hashlib
+
 def hash_password(password: str) -> str:
     hash_obj = hashlib.sha512()
     hash_obj.update(password.encode("utf-8"))
     return hash_obj.hexdigest()
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    hash_obj = hashlib.sha512()
+    hash_obj.update(password.encode("utf-8"))
+    computed_hash = hash_obj.hexdigest()
+
+    return computed_hash == stored_hash
 
 
 def is_password_strong(password: str) -> bool:
@@ -140,7 +150,165 @@ def passwords_match(password1: str, password2: str) -> bool:
     """
     return password1 == password2
 
+def build_customer_visibility(role: str, emp_id: int, idx: int, schema: str):
+    """
+    Enterprise customer visibility rules (customers table alias = c).
 
+    Role Access:
+    ADMIN           → All customers
+    RM              → Customers assigned as RM
+    OP              → Customers assigned as OP
+    SALES_MANAGER   → Customers of RM team
+    OP_MANAGER      → Customers of OP team
+
+    Returns:
+        sql_condition (str | None)
+        values (list)
+        new_idx (int)
+    """
+
+    # --------------------------------------------------
+    # ADMIN → Full Access
+    # --------------------------------------------------
+    if role == "ADMIN":
+        return None, [], idx
+
+    # --------------------------------------------------
+    # RM → Own Customers
+    # --------------------------------------------------
+    if role == "RM":
+        return f"c.rm_id = ${idx}", [emp_id], idx + 1
+
+    # --------------------------------------------------
+    # OP → Own Customers
+    # --------------------------------------------------
+    if role == "OP":
+        return f"c.op_id = ${idx}", [emp_id], idx + 1
+
+    # --------------------------------------------------
+    # Managers → Team Customers
+    # --------------------------------------------------
+    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+
+        sql = f"""
+        (
+            c.rm_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                    ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+            OR
+            c.op_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                    ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+        )
+        """
+
+        return sql, [emp_id], idx + 1
+
+    # --------------------------------------------------
+    # Default → No restriction
+    # --------------------------------------------------
+    return None, [], idx
+def build_gst_visibility(role: str, emp_id: int, idx: int, schema: str):
+    """
+    Enterprise GST visibility rules.
+
+    ADMIN → all
+    RM → gst.rm_id
+    OP → gst.created_by
+    MANAGERS → team RMs or team OPs
+    """
+
+    if role == "ADMIN":
+        return None, [], idx
+
+    if role == "RM":
+        return f"g.rm_id = ${idx}", [emp_id], idx + 1
+
+    if role == "OP":
+        return f"g.created_by = ${idx}", [emp_id], idx + 1
+
+    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+        sql = f"""
+        (
+            g.rm_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+            OR
+            g.created_by IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+        )
+        """
+
+        return sql, [emp_id], idx + 1
+
+    return None, [], idx
+def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: str):
+    """
+    Enterprise visibility for customer_services (alias = cs)
+
+    Role Access:
+    ADMIN           → All services
+    RM              → Services where cs.rm_id = emp_id
+    OP              → Services where cs.op_id = emp_id
+    SALES_MANAGER   → Services of RM team
+    OP_MANAGER      → Services of OP team
+    """
+
+    # ADMIN → Full access
+    if role == "ADMIN":
+        return None, [], idx
+
+    # RM → Own services
+    if role == "RM":
+        return f"cs.rm_id = ${idx}", [emp_id], idx + 1
+
+    # OP → Own services
+    if role == "OP":
+        return f"cs.op_id = ${idx}", [emp_id], idx + 1
+
+    # MANAGERS → Team visibility
+    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+
+        sql = f"""
+        (
+            cs.rm_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                     ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+            OR
+            cs.op_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                     ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+        )
+        """
+
+        return sql, [emp_id], idx + 1
+
+    return None, [], idx
 
 async def get_user_permissions(emp_id: int, conn, DB_SCHEMA="solvetax") -> Dict[str, Any]:
     """

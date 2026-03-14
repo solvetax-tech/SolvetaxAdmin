@@ -9,9 +9,8 @@ import os
 import asyncpg
 import logging
 import re
-import json   # ✅ VERSION AUDIT
+import json
 
-# Load environment variables
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 router = APIRouter(prefix="/app/v1", tags=["Signup"])
@@ -34,8 +33,9 @@ async def get_role_id(conn: asyncpg.Connection, role_code: str) -> Optional[int]
 async def assign_role_to_employee(conn: asyncpg.Connection, emp_id: int, role_id: int) -> None:
     await conn.execute(
         f"""
-        INSERT INTO {DB_SCHEMA}.employee_roles(emp_id, role_id, is_active, created_at, updated_at)
-        VALUES ($1, $2, true, NOW(), NOW())
+        INSERT INTO {DB_SCHEMA}.employee_roles
+        (emp_id, role_id, is_active, created_at, updated_at)
+        VALUES ($1,$2,true,NOW(),NOW())
         ON CONFLICT DO NOTHING
         """,
         emp_id,
@@ -47,8 +47,8 @@ async def create_user(conn: asyncpg.Connection, user_data: dict) -> Optional[int
     row = await conn.fetchrow(
         f"""
         INSERT INTO {DB_SCHEMA}.employees
-        (username, email, password_hash, first_name, last_name, phone_number, is_active, role, manager_emp_id, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, NOW(), NOW())
+        (username,email,password_hash,first_name,last_name,phone_number,is_active,role,manager_emp_id,created_at,updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8,NOW(),NOW())
         RETURNING emp_id
         """,
         user_data["username"],
@@ -111,6 +111,7 @@ async def signup(
     # --------------------------------------------------
 
     if not is_password_strong(payload.password):
+
         log.warning("[signup] Weak password for username=%s email=%s", username, normalized_email)
 
         raise HTTPException(
@@ -132,7 +133,9 @@ async def signup(
 
     try:
         pool = await get_db_pool()
+
     except Exception:
+
         log.error("[signup] DB pool initialization failed", exc_info=True)
 
         raise HTTPException(
@@ -147,9 +150,11 @@ async def signup(
         # --------------------------------------------------
 
         role_code = payload.role
+
         role_id = await get_role_id(conn, role_code)
 
         if not role_id:
+
             log.warning("[signup] Invalid role code provided: %s", role_code)
 
             raise HTTPException(
@@ -171,28 +176,30 @@ async def signup(
 
             manager_valid = await conn.fetchval(
                 f"""
-                SELECT EXISTS (
-                    SELECT 1 FROM {DB_SCHEMA}.employees e
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM {DB_SCHEMA}.employees e
                     JOIN {DB_SCHEMA}.employee_roles er ON e.emp_id = er.emp_id
                     JOIN {DB_SCHEMA}.roles r ON er.role_id = r.id
                     WHERE e.emp_id = $1
                     AND e.is_active = TRUE
-                    AND r.role_code IN ('ADMIN', 'SALES_MANAGER', 'OP_MANAGER')
+                    AND r.role_code IN ('ADMIN','SALES_MANAGER','OP_MANAGER')
                 )
                 """,
                 payload.manager_emp_id
             )
 
             if not manager_valid:
+
                 log.warning("[signup] Invalid manager_emp_id: %s", payload.manager_emp_id)
 
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
-                        "error": {
-                            "type": "validation_error",
-                            "message": "Invalid or unauthorized manager_emp_id",
-                            "fields": {"manager_emp_id": "Invalid or unauthorized manager"}
+                        "error":{
+                            "type":"validation_error",
+                            "message":"Invalid or unauthorized manager_emp_id",
+                            "fields":{"manager_emp_id":"Invalid or unauthorized manager"}
                         }
                     }
                 )
@@ -208,20 +215,20 @@ async def signup(
         duplicate_row = await conn.fetchrow(
             f"""
             SELECT
-                EXISTS (
-                    SELECT 1 FROM {DB_SCHEMA}.employees
-                    WHERE lower(trim(username)) = lower(trim($1))
-                ) AS username_match,
+            EXISTS(
+                SELECT 1 FROM {DB_SCHEMA}.employees
+                WHERE lower(trim(username)) = lower(trim($1))
+            ) AS username_match,
 
-                EXISTS (
-                    SELECT 1 FROM {DB_SCHEMA}.employees
-                    WHERE lower(trim(email)) = lower(trim($2))
-                ) AS email_match,
+            EXISTS(
+                SELECT 1 FROM {DB_SCHEMA}.employees
+                WHERE lower(trim(email)) = lower(trim($2))
+            ) AS email_match,
 
-                EXISTS (
-                    SELECT 1 FROM {DB_SCHEMA}.employees
-                    WHERE trim(phone_number) = trim($3)
-                ) AS phone_match
+            EXISTS(
+                SELECT 1 FROM {DB_SCHEMA}.employees
+                WHERE trim(phone_number) = trim($3)
+            ) AS phone_match
             """,
             username,
             normalized_email,
@@ -244,10 +251,10 @@ async def signup(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": field_errors
+                    "error":{
+                        "type":"validation_error",
+                        "message":"Validation failed",
+                        "fields":field_errors
                     }
                 }
             )
@@ -276,6 +283,7 @@ async def signup(
                 created_id = await create_user(conn, user_data)
 
                 if not created_id:
+
                     log.error("[signup] Failed to create employee")
 
                     raise HTTPException(
@@ -290,7 +298,68 @@ async def signup(
                 await assign_role_to_employee(conn, created_id, role_id)
 
                 # --------------------------------------------------
-                # 3️⃣ Fetch Employee Snapshot
+                # 3️⃣ Assign Team Member (NEW)
+                # --------------------------------------------------
+
+                if payload.team_id:
+
+                    team_exists = await conn.fetchval(
+                        f"""
+                        SELECT EXISTS(
+                            SELECT 1
+                            FROM {DB_SCHEMA}.teams
+                            WHERE id = $1
+                            AND is_active = TRUE
+                        )
+                        """,
+                        payload.team_id
+                    )
+
+                    if not team_exists:
+
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error":{
+                                    "type":"validation_error",
+                                    "message":"Validation failed",
+                                    "fields":{
+                                        "team_id":"Invalid team id"
+                                    }
+                                }
+                            }
+                        )
+
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.team_members
+                        (team_id, emp_id, is_active, created_at, updated_at)
+                        VALUES ($1,$2,TRUE,NOW(),NOW())
+                        ON CONFLICT DO NOTHING
+                        """,
+                        payload.team_id,
+                        created_id
+                    )
+
+                # --------------------------------------------------
+                # 4️⃣ Assign Team Manager (NEW)
+                # --------------------------------------------------
+
+                if payload.role in ["SALES_MANAGER","OP_MANAGER"] and payload.team_id:
+
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.team_managers
+                        (team_id, manager_emp_id, is_active, created_at, updated_at)
+                        VALUES ($1,$2,TRUE,NOW(),NOW())
+                        ON CONFLICT DO NOTHING
+                        """,
+                        payload.team_id,
+                        created_id
+                    )
+
+                # --------------------------------------------------
+                # 5️⃣ Fetch Employee Snapshot
                 # --------------------------------------------------
 
                 employee_row = await conn.fetchrow(
@@ -304,21 +373,18 @@ async def signup(
 
                 employee_dict = dict(employee_row)
 
-                # Remove sensitive data
                 employee_dict.pop("password_hash", None)
 
                 # --------------------------------------------------
-                # 4️⃣ Insert Version Audit
+                # 6️⃣ Version Audit
                 # --------------------------------------------------
 
-                version_sql = f"""
-                    INSERT INTO {DB_SCHEMA}.versions
-                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7)
-                """
-
                 await conn.execute(
-                    version_sql,
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (emp_id,entity_type,entity_id,customer_id,action,json,updated_json)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
                     emp_id,
                     "SIGNUP",
                     created_id,
@@ -334,51 +400,19 @@ async def signup(
 
             constraint = getattr(e, "constraint_name", None)
 
-            if not constraint:
-                constraint_match = re.search(r'constraint ["\'](.+?)["\']', str(e))
-                if constraint_match:
-                    constraint = constraint_match.group(1)
-
             if constraint == "uq_employees_email":
-                err = {
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"email": "Email already exists"}
-                    }
-                }
+                err = {"error":{"type":"validation_error","message":"Validation failed","fields":{"email":"Email already exists"}}}
 
             elif constraint == "uq_employees_username":
-                err = {
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"username": "Username already exists"}
-                    }
-                }
+                err = {"error":{"type":"validation_error","message":"Validation failed","fields":{"username":"Username already exists"}}}
 
             elif constraint == "uq_employees_phone":
-                err = {
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"phone_number": "Phone number already exists"}
-                    }
-                }
+                err = {"error":{"type":"validation_error","message":"Validation failed","fields":{"phone_number":"Phone number already exists"}}}
 
             else:
-                err = {
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {}
-                    }
-                }
+                err = {"error":{"type":"validation_error","message":"Validation failed","fields":{}}}
 
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=err
-            )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
 
         except asyncpg.exceptions.ForeignKeyViolationError as e:
 
@@ -387,10 +421,10 @@ async def signup(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Invalid manager_emp_id",
-                        "fields": {"manager_emp_id": "Invalid manager"}
+                    "error":{
+                        "type":"validation_error",
+                        "message":"Invalid manager_emp_id",
+                        "fields":{"manager_emp_id":"Invalid manager"}
                     }
                 }
             )
@@ -405,10 +439,10 @@ async def signup(
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
-                    "error": {
-                        "type": "server_error",
-                        "message": "Service temporarily unavailable. Please try again later.",
-                        "fields": {}
+                    "error":{
+                        "type":"server_error",
+                        "message":"Service temporarily unavailable. Please try again later.",
+                        "fields":{}
                     }
                 }
             )

@@ -9,7 +9,7 @@ from app.customer_registration.schemas import CustomerIn, CustomerEditIn, Custom
 from app.utils import get_db_pool, DB_SCHEMA
 from app.security.rbac import require_permission
 from app.logger import logger
-from app.utils import mask_sensitive_data,generate_uuid
+from app.utils import mask_sensitive_data,generate_uuid,build_customer_visibility
 import json
 from zoneinfo import ZoneInfo
 IST = ZoneInfo("Asia/Kolkata")
@@ -455,6 +455,26 @@ async def get_customer_by_id(
         )
 
     try:
+        # --------------------------------------------------
+        # ROLE BASED VISIBILITY (Single Customer)
+        # --------------------------------------------------
+        conditions = ["c.customer_id = $1"]
+        values = [customer_id]
+        idx = 2
+
+        visibility_sql, visibility_values, idx = build_customer_visibility(
+            current_user.get("role"),
+            emp_id,
+            idx,
+            DB_SCHEMA,
+        )
+
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        where_clause = " AND ".join(conditions)
+
         query = f"""
             SELECT c.*,
                    e_rm.first_name AS rm_name,
@@ -464,10 +484,10 @@ async def get_customer_by_id(
                    ON c.rm_id = e_rm.emp_id
             LEFT JOIN {DB_SCHEMA}.employees e_op
                    ON c.op_id = e_op.emp_id
-            WHERE c.customer_id = $1
+            WHERE {where_clause}
         """
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(query, customer_id)
+            row = await conn.fetchrow(query, *values)
 
         if not row:
             log.warning("Customer not found | customer_id=%s", customer_id)
@@ -493,7 +513,6 @@ async def get_customer_by_id(
             status_code=500,
             detail="Internal server error.",
         )
-
 # -------------------------------------------------------------------
 # LIST CUSTOMERS (Enterprise Filter + Pagination + Services Support)
 # -------------------------------------------------------------------
@@ -522,6 +541,7 @@ ARRAY_FILTERS = {
 
 from fastapi import Query
 from datetime import datetime
+
 
 @router.get(
     "/customer_get/filter",
@@ -572,6 +592,8 @@ async def filter_customers(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    role = current_user.get("role")   # ✅ role from JWT
 
     log = logging.LoggerAdapter(
         logger,
@@ -679,16 +701,60 @@ async def filter_customers(
             idx += 1
 
         # --------------------------------------------------
+        # ROLE BASED VISIBILITY (TEAM / MANAGER / RM / OP)
+        # --------------------------------------------------
+
+        visibility_sql, visibility_values, idx = build_customer_visibility(
+            role,
+            emp_id,
+            idx,
+            DB_SCHEMA
+        )
+
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        # --------------------------------------------------
         # WHERE CLAUSE
         # --------------------------------------------------
+        # Build a WHERE clause and safely qualify simple column
+        # references with the customer table alias `c` without
+        # corrupting placeholders or complex expressions.
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        where_clause_c = (
-            where_clause.replace("WHERE ", "WHERE c.")
-            .replace(" AND ", " AND c.")
-            if where_clause
-            else ""
-        )
+        if conditions:
+            qualified_conditions = []
+            for cond in conditions:
+                stripped = cond.lstrip()
+
+                # Leave complex/parenthesized or placeholder-first
+                # expressions as-is (e.g. "$1 = ANY(...)", "(...)" etc.)
+                if (
+                    not stripped
+                    or stripped[0] in "($"
+                ):
+                    qualified_conditions.append(cond)
+                    continue
+
+                parts = stripped.split(" ", 1)
+                first = parts[0]
+                rest = parts[1] if len(parts) > 1 else ""
+
+                # If the first token looks like a bare column name,
+                # prefix it with the alias `c.`
+                if first.isidentifier() and not first.upper() in {"NOT", "EXISTS"}:
+                    first = f"c.{first}"
+
+                qualified = f"{first} {rest}".rstrip() if rest else first
+
+                # Preserve original leading whitespace
+                leading_ws_len = len(cond) - len(cond.lstrip(" "))
+                qualified_conditions.append(" " * leading_ws_len + qualified)
+
+            where_clause_c = f"WHERE {' AND '.join(qualified_conditions)}"
+        else:
+            where_clause_c = ""
 
         count_sql = f"""
             SELECT COUNT(*)

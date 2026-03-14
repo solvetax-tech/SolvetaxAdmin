@@ -14,6 +14,7 @@ router = APIRouter(
     prefix="/api/v1/document-config",
     tags=["Document Config"]
 )
+
 @router.get(
     "/gst-registration/{gst_id}/required-documents",
     summary="Get Required Documents for GST Registration Person",

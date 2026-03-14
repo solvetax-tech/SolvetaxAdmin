@@ -7,7 +7,7 @@ from app.gst_registration.schemas import (
     RegistrationPersonIn,
     RegistrationPersonEditIn,
 )
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from app.logger import logger
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -18,6 +18,144 @@ router = APIRouter(
     prefix="/api/v1/gst-people",
     tags=["GST Registration People"]
 )
+
+# -------------------------------------------------------------------
+# GET DESIGNATIONS BASED ON OWNERSHIP CATEGORY
+# -------------------------------------------------------------------
+
+@router.get(
+    "/gst-registration/{gst_id}/designations",
+    summary="Get Designations based on GST Ownership Category",
+)
+async def get_designations(
+    gst_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+
+    # --------------------------------------------------
+    # Request Context
+    # --------------------------------------------------
+
+    request_id = generate_uuid()
+    emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id}
+    )
+
+    log.info(
+        "Fetching designations | gst_id=%s",
+        gst_id,
+    )
+
+    # --------------------------------------------------
+    # DB Pool
+    # --------------------------------------------------
+
+    try:
+        pool = await get_db_pool()
+
+    except Exception:
+
+        log.exception("Database pool acquisition failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error."
+        )
+
+    async with pool.acquire() as conn:
+
+        try:
+
+            # --------------------------------------------------
+            # Fetch ownership category
+            # --------------------------------------------------
+
+            gst_row = await conn.fetchrow(
+                f"""
+                SELECT ownership_category
+                FROM {DB_SCHEMA}.gst_registration
+                WHERE id = $1
+                AND is_active = TRUE
+                """,
+                gst_id,
+            )
+
+            if not gst_row:
+
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error":{
+                            "type":"validation_error",
+                            "message":"Validation failed",
+                            "fields":{
+                                "gst_id":"GST registration not found or inactive."
+                            }
+                        }
+                    }
+                )
+
+            ownership_category = gst_row["ownership_category"]
+
+            # --------------------------------------------------
+            # Fetch designations
+            # --------------------------------------------------
+
+            designations = await conn.fetch(
+                f"""
+                SELECT
+                    value,
+                    display_name,
+                    description,
+                    sort_order
+                FROM {DB_SCHEMA}.gst_registration_config
+                WHERE config_type = $1
+                AND is_active = TRUE
+                ORDER BY sort_order
+                """,
+                ownership_category,
+            )
+
+            log.info(
+                "Designations fetched successfully | ownership_category=%s count=%s",
+                ownership_category,
+                len(designations),
+            )
+
+            return {
+                "gst_id": gst_id,
+                "ownership_category": ownership_category,
+                "designations": [dict(d) for d in designations],
+                "request_id": request_id,
+            }
+
+        # --------------------------------------------------
+        # DB ERROR
+        # --------------------------------------------------
+
+        except asyncpg.PostgresError:
+
+            log.exception("Database error while fetching designations")
+
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred."
+            )
+
+        except HTTPException:
+            raise
+
+        except Exception:
+
+            log.exception("Unexpected error while fetching designations")
+
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error."
+            )
 # -------------------------------------------------------------------
 # CREATE REGISTRATION PERSON (Production Standard + Version Audit + IST)
 # -------------------------------------------------------------------
@@ -421,15 +559,6 @@ async def list_registration_persons(
 ):
     """
     Enterprise Registration Person Filtering
-
-    ✔ Filters only from gst_registration_persons table
-    ✔ Supports gst_registration_id (FK safe)
-    ✔ Supports GSTIN null filtering
-    ✔ Trim + uppercase safe
-    ✔ Partial match for name/designation
-    ✔ Active filtering pattern aligned
-    ✔ Pagination safe
-    ✔ Structured logging
     """
 
     # --------------------------------------------------
@@ -437,6 +566,7 @@ async def list_registration_persons(
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    role = current_user.get("role")
 
     log = logging.LoggerAdapter(
         logger,
@@ -480,50 +610,50 @@ async def list_registration_persons(
         # --------------------------------------------------
 
         if person_id is not None:
-            conditions.append(f"person_id = ${param_index}")
+            conditions.append(f"p.person_id = ${param_index}")
             values.append(person_id)
             param_index += 1
 
         if customer_id is not None:
-            conditions.append(f"customer_id = ${param_index}")
+            conditions.append(f"p.customer_id = ${param_index}")
             values.append(customer_id)
             param_index += 1
 
         if gst_registration_id is not None:
-            conditions.append(f"gst_registration_id = ${param_index}")
+            conditions.append(f"p.gst_registration_id = ${param_index}")
             values.append(gst_registration_id)
             param_index += 1
 
         # ---------------- GSTIN ----------------
         if gstin_is_null:
-            conditions.append("gstin IS NULL")
+            conditions.append("p.gstin IS NULL")
         elif gstin and gstin.strip():
-            conditions.append(f"upper(gstin) = ${param_index}")
+            conditions.append(f"upper(p.gstin) = ${param_index}")
             values.append(gstin.strip().upper())
             param_index += 1
 
         if pan and pan.strip():
-            conditions.append(f"upper(pan) = ${param_index}")
+            conditions.append(f"upper(p.pan) = ${param_index}")
             values.append(pan.strip().upper())
             param_index += 1
 
         if aadhaar and aadhaar.strip():
-            conditions.append(f"trim(aadhaar) = ${param_index}")
+            conditions.append(f"trim(p.aadhaar) = ${param_index}")
             values.append(aadhaar.strip())
             param_index += 1
 
         if mobile and mobile.strip():
-            conditions.append(f"mobile = ${param_index}")
+            conditions.append(f"p.mobile = ${param_index}")
             values.append(mobile.strip())
             param_index += 1
 
         if email and email.strip():
-            conditions.append(f"lower(email) = ${param_index}")
+            conditions.append(f"lower(p.email) = ${param_index}")
             values.append(email.strip().lower())
             param_index += 1
 
         if is_primary_customer is not None:
-            conditions.append(f"is_primary_customer = ${param_index}")
+            conditions.append(f"p.is_primary_customer = ${param_index}")
             values.append(is_primary_customer)
             param_index += 1
 
@@ -532,12 +662,12 @@ async def list_registration_persons(
         # --------------------------------------------------
 
         if full_name and full_name.strip():
-            conditions.append(f"full_name ILIKE ${param_index}")
+            conditions.append(f"p.full_name ILIKE ${param_index}")
             values.append(f"%{full_name.strip()}%")
             param_index += 1
 
         if designation and designation.strip():
-            conditions.append(f"designation ILIKE ${param_index}")
+            conditions.append(f"p.designation ILIKE ${param_index}")
             values.append(f"%{designation.strip()}%")
             param_index += 1
 
@@ -546,25 +676,47 @@ async def list_registration_persons(
         # --------------------------------------------------
 
         if is_active is not None:
-            conditions.append(f"is_active = ${param_index}")
+            conditions.append(f"p.is_active = ${param_index}")
             values.append(is_active)
             param_index += 1
         elif not include_inactive:
-            conditions.append("is_active = TRUE")
+            conditions.append("p.is_active = TRUE")
 
         # --------------------------------------------------
         # Date Filters
         # --------------------------------------------------
 
         if from_date:
-            conditions.append(f"created_at >= ${param_index}")
+            conditions.append(f"p.created_at >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"created_at <= ${param_index}")
+            conditions.append(f"p.created_at <= ${param_index}")
             values.append(to_date)
             param_index += 1
+
+        # --------------------------------------------------
+        # ROLE BASED VISIBILITY (GST → PERSON)
+        # --------------------------------------------------
+
+        visibility_sql, visibility_values, param_index = build_gst_visibility(
+            role,
+            int(current_emp_id) if str(current_emp_id).isdigit() else None,
+            param_index,
+            DB_SCHEMA
+        )
+
+        if visibility_sql:
+            visibility_sql = f"""
+            p.gst_registration_id IN (
+                SELECT g.id
+                FROM {DB_SCHEMA}.gst_registration g
+                WHERE {visibility_sql}
+            )
+            """
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
 
         # --------------------------------------------------
         # WHERE Builder
@@ -574,15 +726,27 @@ async def list_registration_persons(
 
         count_sql = f"""
             SELECT COUNT(*)
-              FROM {DB_SCHEMA}.gst_registration_persons
+              FROM {DB_SCHEMA}.gst_registration_persons p
+              LEFT JOIN {DB_SCHEMA}.gst_registration g
+                     ON p.gst_registration_id = g.id
               {where_clause}
         """
 
         data_sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.gst_registration_persons
+            SELECT p.*,
+                   g.rm_id,
+                   g.created_by,
+                   e_rm.first_name AS rm_name,
+                   e_creator.first_name AS created_by_name
+              FROM {DB_SCHEMA}.gst_registration_persons p
+              LEFT JOIN {DB_SCHEMA}.gst_registration g
+                     ON p.gst_registration_id = g.id
+              LEFT JOIN {DB_SCHEMA}.employees e_rm
+                     ON g.rm_id = e_rm.emp_id
+              LEFT JOIN {DB_SCHEMA}.employees e_creator
+                     ON g.created_by = e_creator.emp_id
               {where_clause}
-             ORDER BY created_at DESC, person_id DESC
+             ORDER BY p.created_at DESC, p.person_id DESC
              LIMIT ${param_index} OFFSET ${param_index + 1}
         """
 
@@ -622,7 +786,6 @@ async def list_registration_persons(
             status_code=500,
             detail="Internal server error.",
         )
-
 
 def mask_gstin(gstin: str) -> str:
     if not gstin or len(gstin) < 6:

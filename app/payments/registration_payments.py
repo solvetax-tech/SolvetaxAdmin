@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from app.security.rbac import require_permission
 from app.payments.schemas import RegistrationPaymentIn, RegistrationPaymentEditIn
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_customer_visibility
 from app.logger import logger
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -14,6 +14,7 @@ router = APIRouter(
     prefix="/api/v1/payments",
     tags=["Registration Payments"]
 )
+
 # -------------------------------------------------------------------
 # CREATE REGISTRATION PAYMENT (Production Ready + Audit + Full Validation)
 # -------------------------------------------------------------------
@@ -201,13 +202,44 @@ async def create_registration_payment(
                 )
 
             # --------------------------------------------------
+            # LOCK existing payments (ADDED FOR RACE CONDITION SAFETY)
+            # --------------------------------------------------
+
+            await conn.fetch(
+                f"""
+                SELECT id
+                FROM {DB_SCHEMA}.registration_payments
+                WHERE customer_id = $1
+                AND entity_id = $2
+                AND entity_type = $3
+                AND is_active = true
+                FOR UPDATE
+                """,
+                customer_id,
+                payload.entity_id,
+                entity_type,
+            )
+
+            # --------------------------------------------------
             # Remaining Amount Calculation
             # --------------------------------------------------
 
             summary_row = await conn.fetchrow(
                 f"""
                 SELECT
-                    COALESCE(MAX(net_amount), $1 - COALESCE($2,0)) AS net_amount,
+                    COALESCE(
+                        (
+                            SELECT net_amount
+                            FROM {DB_SCHEMA}.registration_payments
+                            WHERE customer_id = $3
+                            AND entity_id = $4
+                            AND entity_type = $5
+                            AND is_active = true
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                        ),
+                        $1 - COALESCE($2,0)
+                    ) AS net_amount,
                     COALESCE(SUM(paid_amount),0) AS total_paid
                 FROM {DB_SCHEMA}.registration_payments
                 WHERE customer_id = $3
@@ -228,6 +260,13 @@ async def create_registration_payment(
             total_paid = summary_row["total_paid"]
 
             remaining_amount = net_amount - total_paid
+
+            log.info(
+                "Payment validation summary | net_amount=%s | total_paid=%s | remaining=%s",
+                net_amount,
+                total_paid,
+                remaining_amount,
+            )
 
             if payload.paid_amount > remaining_amount:
 
@@ -481,7 +520,6 @@ async def create_registration_payment(
                     }
                 },
             )
-
 # -------------------------------------------------------------------
 # LIST REGISTRATION PAYMENTS (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
@@ -505,9 +543,12 @@ async def list_registration_payments(
     min_amount: Optional[float] = None,
     max_amount: Optional[float] = None,
 
-    # Comparison filter
     amount: Optional[float] = None,
     amount_operator: Optional[str] = None,
+
+    # NEW FILTER (Remaining amount)
+    min_remaining: Optional[float] = None,
+    max_remaining: Optional[float] = None,
 
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
@@ -520,23 +561,14 @@ async def list_registration_payments(
 
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-    """
-    Enterprise Registration Payment Filtering
-
-    ✔ Filters only from registration_payments table
-    ✔ Supports entity_id filtering
-    ✔ Supports payment status filtering
-    ✔ Supports net_amount filtering
-    ✔ Supports pagination
-    ✔ Structured logging
-    ✔ Safe SQL parameter binding
-    """
 
     # --------------------------------------------------
     # Request Context
     # --------------------------------------------------
+
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    role = current_user.get("role")
 
     log = logging.LoggerAdapter(
         logger,
@@ -552,6 +584,7 @@ async def list_registration_payments(
     # --------------------------------------------------
     # Date Validation
     # --------------------------------------------------
+
     if from_date and to_date and from_date > to_date:
         raise HTTPException(
             status_code=400,
@@ -561,6 +594,7 @@ async def list_registration_payments(
     # --------------------------------------------------
     # Amount Range Validation
     # --------------------------------------------------
+
     if min_amount is not None and max_amount is not None and min_amount > max_amount:
         raise HTTPException(
             status_code=400,
@@ -568,8 +602,19 @@ async def list_registration_payments(
         )
 
     # --------------------------------------------------
+    # Remaining Amount Validation (NEW)
+    # --------------------------------------------------
+
+    if min_remaining is not None and max_remaining is not None and min_remaining > max_remaining:
+        raise HTTPException(
+            status_code=400,
+            detail="min_remaining cannot be greater than max_remaining.",
+        )
+
+    # --------------------------------------------------
     # Operator Validation
     # --------------------------------------------------
+
     ALLOWED_OPERATORS = {">", "<", "="}
 
     if amount_operator and amount_operator not in ALLOWED_OPERATORS:
@@ -581,6 +626,7 @@ async def list_registration_payments(
     # --------------------------------------------------
     # Enum Validation
     # --------------------------------------------------
+
     ALLOWED_STATUS = {
         "PENDING",
         "PAID",
@@ -596,6 +642,7 @@ async def list_registration_payments(
     }
 
     if payment_status and payment_status.strip():
+
         payment_status = payment_status.strip().upper()
 
         if payment_status not in ALLOWED_STATUS:
@@ -605,6 +652,7 @@ async def list_registration_payments(
             )
 
     if payment_mode and payment_mode.strip():
+
         payment_mode = payment_mode.strip().upper()
 
         if payment_mode not in ALLOWED_MODES:
@@ -616,16 +664,20 @@ async def list_registration_payments(
     # --------------------------------------------------
     # DB Pool
     # --------------------------------------------------
+
     try:
         pool = await get_db_pool()
     except Exception:
+
         log.exception("Database pool acquisition failed")
+
         raise HTTPException(
             status_code=500,
             detail="Database connection error.",
         )
 
     try:
+
         conditions = []
         values = []
         param_index = 1
@@ -635,32 +687,32 @@ async def list_registration_payments(
         # --------------------------------------------------
 
         if payment_id is not None:
-            conditions.append(f"id = ${param_index}")
+            conditions.append(f"rp.id = ${param_index}")
             values.append(payment_id)
             param_index += 1
 
         if customer_id is not None:
-            conditions.append(f"customer_id = ${param_index}")
+            conditions.append(f"rp.customer_id = ${param_index}")
             values.append(customer_id)
             param_index += 1
 
         if entity_id is not None:
-            conditions.append(f"entity_id = ${param_index}")
+            conditions.append(f"rp.entity_id = ${param_index}")
             values.append(entity_id)
             param_index += 1
 
         if entity_type and entity_type.strip():
-            conditions.append(f"entity_type = ${param_index}")
+            conditions.append(f"rp.entity_type = ${param_index}")
             values.append(entity_type.strip().upper())
             param_index += 1
 
         if payment_status:
-            conditions.append(f"payment_status = ${param_index}")
+            conditions.append(f"rp.payment_status = ${param_index}")
             values.append(payment_status)
             param_index += 1
 
         if payment_mode:
-            conditions.append(f"payment_mode = ${param_index}")
+            conditions.append(f"rp.payment_mode = ${param_index}")
             values.append(payment_mode)
             param_index += 1
 
@@ -669,13 +721,27 @@ async def list_registration_payments(
         # --------------------------------------------------
 
         if min_amount is not None:
-            conditions.append(f"net_amount >= ${param_index}")
+            conditions.append(f"rp.net_amount >= ${param_index}")
             values.append(min_amount)
             param_index += 1
 
         if max_amount is not None:
-            conditions.append(f"net_amount <= ${param_index}")
+            conditions.append(f"rp.net_amount <= ${param_index}")
             values.append(max_amount)
+            param_index += 1
+
+        # --------------------------------------------------
+        # Remaining Amount Filtering (NEW)
+        # --------------------------------------------------
+
+        if min_remaining is not None:
+            conditions.append(f"rp.remaining_amount >= ${param_index}")
+            values.append(min_remaining)
+            param_index += 1
+
+        if max_remaining is not None:
+            conditions.append(f"rp.remaining_amount <= ${param_index}")
+            values.append(max_remaining)
             param_index += 1
 
         # --------------------------------------------------
@@ -683,8 +749,10 @@ async def list_registration_payments(
         # --------------------------------------------------
 
         if amount is not None:
+
             operator = amount_operator if amount_operator else "="
-            conditions.append(f"net_amount {operator} ${param_index}")
+
+            conditions.append(f"rp.net_amount {operator} ${param_index}")
             values.append(amount)
             param_index += 1
 
@@ -693,25 +761,41 @@ async def list_registration_payments(
         # --------------------------------------------------
 
         if is_active is not None:
-            conditions.append(f"is_active = ${param_index}")
+            conditions.append(f"rp.is_active = ${param_index}")
             values.append(is_active)
             param_index += 1
+
         elif not include_inactive:
-            conditions.append("is_active = TRUE")
+            conditions.append("rp.is_active = TRUE")
 
         # --------------------------------------------------
         # Date Filters
         # --------------------------------------------------
 
         if from_date:
-            conditions.append(f"created_at >= ${param_index}")
+            conditions.append(f"rp.created_at >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"created_at <= ${param_index}")
+            conditions.append(f"rp.created_at <= ${param_index}")
             values.append(to_date)
             param_index += 1
+
+        # --------------------------------------------------
+        # ROLE BASED VISIBILITY (CUSTOMER → PAYMENT)
+        # --------------------------------------------------
+
+        visibility_sql, visibility_values, param_index = build_customer_visibility(
+            role,
+            int(current_emp_id) if str(current_emp_id).isdigit() else None,
+            param_index,
+            DB_SCHEMA,
+        )
+
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
 
         # --------------------------------------------------
         # WHERE Builder
@@ -719,24 +803,49 @@ async def list_registration_payments(
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+        # --------------------------------------------------
+        # COUNT QUERY
+        # --------------------------------------------------
+
         count_sql = f"""
             SELECT COUNT(*)
-              FROM {DB_SCHEMA}.registration_payments
-              {where_clause}
+            FROM {DB_SCHEMA}.registration_payments rp
+            LEFT JOIN {DB_SCHEMA}.customers c
+                   ON rp.customer_id = c.customer_id
+            {where_clause}
         """
 
+        # --------------------------------------------------
+        # DATA QUERY
+        # --------------------------------------------------
+
         data_sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.registration_payments
-              {where_clause}
-             ORDER BY created_at DESC, id DESC
-             LIMIT ${param_index} OFFSET ${param_index + 1}
+            SELECT
+                rp.*,
+                rp.remaining_amount,   -- NEW FIELD
+                c.full_name,
+                c.rm_id,
+                c.op_id,
+                e_rm.first_name AS rm_name,
+                e_op.first_name AS op_name
+            FROM {DB_SCHEMA}.registration_payments rp
+            LEFT JOIN {DB_SCHEMA}.customers c
+                   ON rp.customer_id = c.customer_id
+            LEFT JOIN {DB_SCHEMA}.employees e_rm
+                   ON c.rm_id = e_rm.emp_id
+            LEFT JOIN {DB_SCHEMA}.employees e_op
+                   ON c.op_id = e_op.emp_id
+            {where_clause}
+            ORDER BY rp.created_at DESC, rp.id DESC
+            LIMIT ${param_index} OFFSET ${param_index + 1}
         """
 
         values_with_pagination = values + [limit, offset]
 
         async with pool.acquire() as conn:
+
             total_count = await conn.fetchval(count_sql, *values)
+
             rows = await conn.fetch(data_sql, *values_with_pagination)
 
         log.info(
@@ -753,11 +862,13 @@ async def list_registration_payments(
         }
 
     except asyncpg.PostgresError as e:
+
         log.error(
             "Database error during registration payments filtering | error=%s",
             str(e),
             exc_info=True,
         )
+
         raise HTTPException(
             status_code=500,
             detail="Database error occurred during filtering.",
@@ -767,12 +878,13 @@ async def list_registration_payments(
         raise
 
     except Exception:
+
         log.exception("Unexpected error during registration payments filtering")
+
         raise HTTPException(
             status_code=500,
             detail="Internal server error.",
         )
-
 # -------------------------------------------------------------------
 # EDIT REGISTRATION PAYMENT (Production Ready + Discount Propagation)
 # -------------------------------------------------------------------
@@ -953,6 +1065,46 @@ async def edit_registration_payment(
                     )
 
                 # --------------------------------------------------
+                # Calculate total already paid
+                # --------------------------------------------------
+
+                total_paid = await conn.fetchval(
+                    f"""
+                    SELECT COALESCE(SUM(paid_amount),0)
+                    FROM {DB_SCHEMA}.registration_payments
+                    WHERE
+                        customer_id = $1
+                    AND entity_id = $2
+                    AND entity_type = $3
+                    AND is_active = TRUE
+                    """,
+                    old_row["customer_id"],
+                    old_row["entity_id"],
+                    old_row["entity_type"],
+                )
+
+                new_net = old_row["amount"] - new_discount
+
+                # --------------------------------------------------
+                # Prevent discount breaking payment integrity
+                # --------------------------------------------------
+
+                if new_net < total_paid:
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "type": "business_rule_violation",
+                                "message": "Discount cannot be applied because payments already made exceed the new net amount.",
+                                "fields": {
+                                    "discount": f"Maximum allowed discount is {old_row['amount'] - total_paid}."
+                                },
+                            }
+                        },
+                    )
+
+                # --------------------------------------------------
                 # Detect no change
                 # --------------------------------------------------
 
@@ -981,7 +1133,6 @@ async def edit_registration_payment(
 
                     new_net = old_row["amount"] - new_discount
 
-                    # update all related payments
                     await conn.execute(
                         f"""
                         UPDATE {DB_SCHEMA}.registration_payments

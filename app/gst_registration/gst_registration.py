@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from datetime import datetime
 from app.gst_registration.schemas import GSTRegistrationIn, GSTRegistrationEditIn
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
 from zoneinfo import ZoneInfo
@@ -325,9 +325,6 @@ async def create_gst_registration(
         except Exception:
             log.exception("Unexpected error during GST registration create")
             raise HTTPException(500, "Internal server error.")
-# -------------------------------------------------------------------
-# LIST GST REGISTRATIONS (DYNAMIC FILTER + PAGINATION)
-# -------------------------------------------------------------------
 @router.get(
     "/dynamic_filter",
     summary="Filter GST Registrations",
@@ -349,8 +346,9 @@ async def list_gst_registrations(
     secondary_email: Optional[str] = None,
     secondary_email_is_null: Optional[bool] = None,
     rm_id: Optional[int] = None,
-    business_name: Optional[str] = None,                  # ✅ NEW
-    business_name_is_null: Optional[bool] = None,         # ✅ NEW
+    created_by: Optional[int] = None,   # NEW FILTER
+    business_name: Optional[str] = None,
+    business_name_is_null: Optional[bool] = None,
     business_type: Optional[str] = None,
     registration_status: Optional[str] = None,
     ownership_category: Optional[str] = None,
@@ -365,11 +363,15 @@ async def list_gst_registrations(
 ):
 
     request_id = str(uuid.uuid4())
-    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    role = current_user.get("role")
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": current_emp_id},
+        {"request_id": request_id, "emp_id": emp_id},
     )
 
     log.info(
@@ -403,91 +405,85 @@ async def list_gst_registrations(
         # --------------------------------------------------
 
         if gst_registration_id is not None:
-            conditions.append(f"id = ${param_index}")
+            conditions.append(f"g.id = ${param_index}")
             values.append(gst_registration_id)
             param_index += 1
 
         if customer_id is not None:
-            conditions.append(f"customer_id = ${param_index}")
+            conditions.append(f"g.customer_id = ${param_index}")
             values.append(customer_id)
             param_index += 1
 
-        # ---------------- GSTIN ----------------
         if gstin_is_null:
-            conditions.append("gstin IS NULL")
+            conditions.append("g.gstin IS NULL")
         elif gstin and gstin.strip():
-            conditions.append(f"upper(gstin) = ${param_index}")
+            conditions.append(f"upper(g.gstin) = ${param_index}")
             values.append(gstin.strip().upper())
             param_index += 1
 
-        # ---------------- MOBILE ----------------
         if mobile_is_null:
-            conditions.append("mobile IS NULL")
+            conditions.append("g.mobile IS NULL")
         elif mobile and mobile.strip():
-            conditions.append(f"mobile = ${param_index}")
+            conditions.append(f"g.mobile = ${param_index}")
             values.append(mobile.strip())
             param_index += 1
 
-        # ---------------- EMAIL ----------------
         if email_is_null:
-            conditions.append("email IS NULL")
+            conditions.append("g.email IS NULL")
         elif email and email.strip():
-            conditions.append(f"lower(email) = ${param_index}")
+            conditions.append(f"lower(g.email) = ${param_index}")
             values.append(email.strip().lower())
             param_index += 1
 
-        # ---------------- SECONDARY EMAIL ----------------
         if secondary_email_is_null:
-            conditions.append("secondary_email IS NULL")
+            conditions.append("g.secondary_email IS NULL")
         elif secondary_email and secondary_email.strip():
-            conditions.append(f"lower(secondary_email) = ${param_index}")
+            conditions.append(f"lower(g.secondary_email) = ${param_index}")
             values.append(secondary_email.strip().lower())
             param_index += 1
 
         if rm_id is not None:
-            conditions.append(f"rm_id = ${param_index}")
+            conditions.append(f"g.rm_id = ${param_index}")
             values.append(rm_id)
             param_index += 1
 
-        # --------------------------------------------------
-        # ✅ BUSINESS NAME (Case-insensitive + Partial + 80% Similarity)
-        # --------------------------------------------------
+        # NEW FILTER
+        if created_by is not None:
+            conditions.append(f"g.created_by = ${param_index}")
+            values.append(created_by)
+            param_index += 1
 
         if business_name_is_null:
-            conditions.append("business_name IS NULL")
+            conditions.append("g.business_name IS NULL")
 
         elif business_name and business_name.strip():
             conditions.append(
                 f"""(
-                    business_name ILIKE ${param_index}
-                    OR similarity(business_name, ${param_index + 1}) >= 0.8
+                    g.business_name ILIKE ${param_index}
+                    OR similarity(g.business_name, ${param_index + 1}) >= 0.8
                 )"""
             )
             values.append(f"%{business_name.strip()}%")
             values.append(business_name.strip())
             param_index += 2
 
-        # --------------------------------------------------
-        # Uppercase Stored Business Fields
-        # --------------------------------------------------
-
         if business_type and business_type.strip():
-            conditions.append(f"business_type = ${param_index}")
+            conditions.append(f"g.business_type = ${param_index}")
             values.append(business_type.strip().upper())
             param_index += 1
 
         if registration_status and registration_status.strip():
-            conditions.append(f"registration_status = ${param_index}")
+            conditions.append(f"g.registration_status = ${param_index}")
             values.append(registration_status.strip().upper())
             param_index += 1
 
         if ownership_category and ownership_category.strip():
-            conditions.append(f"ownership_category = ${param_index}")
+            conditions.append(f"g.ownership_category = ${param_index}")
             values.append(ownership_category.strip().upper())
             param_index += 1
 
         if state and state.strip():
-            conditions.append(f"state = ${param_index}")
+            conditions.append(f"g.state = ${param_index}")
             values.append(state.strip().upper())
             param_index += 1
 
@@ -496,25 +492,40 @@ async def list_gst_registrations(
         # --------------------------------------------------
 
         if is_active is not None:
-            conditions.append(f"is_active = ${param_index}")
+            conditions.append(f"g.is_active = ${param_index}")
             values.append(is_active)
             param_index += 1
         elif not include_inactive:
-            conditions.append("is_active = TRUE")
+            conditions.append("g.is_active = TRUE")
 
         # --------------------------------------------------
         # Date Filtering
         # --------------------------------------------------
 
         if from_date:
-            conditions.append(f"created_at >= ${param_index}")
+            conditions.append(f"g.created_at >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"created_at <= ${param_index}")
+            conditions.append(f"g.created_at <= ${param_index}")
             values.append(to_date)
             param_index += 1
+
+        # --------------------------------------------------
+        # ROLE BASED VISIBILITY
+        # --------------------------------------------------
+
+        visibility_sql, visibility_values, param_index = build_gst_visibility(
+            role,
+            emp_id,
+            param_index,
+            DB_SCHEMA,
+        )
+
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
 
         # --------------------------------------------------
         # WHERE Builder
@@ -525,15 +536,19 @@ async def list_gst_registrations(
         count_sql = f"""
             SELECT COUNT(*)
               FROM {DB_SCHEMA}.gst_registration g
-              {where_clause.replace('WHERE ', 'WHERE g.').replace(' AND ', ' AND g.') if where_clause else ""}
+              {where_clause}
         """
 
         data_sql = f"""
-            SELECT g.*, 
-                   e.first_name as rm_name
+            SELECT g.*,
+                   e_rm.first_name AS rm_name,
+                   e_creator.first_name AS created_by_name
               FROM {DB_SCHEMA}.gst_registration g
-              LEFT JOIN {DB_SCHEMA}.employees e ON g.rm_id = e.emp_id
-              {where_clause.replace('WHERE ', 'WHERE g.').replace(' AND ', ' AND g.') if where_clause else ""}
+              LEFT JOIN {DB_SCHEMA}.employees e_rm
+                     ON g.rm_id = e_rm.emp_id
+              LEFT JOIN {DB_SCHEMA}.employees e_creator
+                     ON g.created_by = e_creator.emp_id
+              {where_clause}
              ORDER BY g.created_at DESC, g.id DESC
              LIMIT ${param_index} OFFSET ${param_index + 1}
         """

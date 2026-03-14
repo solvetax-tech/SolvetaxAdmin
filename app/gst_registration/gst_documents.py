@@ -8,7 +8,7 @@ from app.gst_registration.schemas import (
     RegistrationDocumentIn,
     RegistrationDocumentEditIn,
 )
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, get_blob_service_client, AZURE_STORAGE_CONTAINER, generate_blob_sas_url, extract_blob_path
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, get_blob_service_client, AZURE_STORAGE_CONTAINER, generate_blob_sas_url, extract_blob_path,build_gst_visibility
 from app.logger import logger
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -256,14 +256,6 @@ async def list_registration_documents(
 
     """
     Filter Registration Documents (Enterprise Standard)
-
-    ✔ Fully aligned with DB logic
-    ✔ Uppercase GSTIN safe
-    ✔ Mobile trimmed
-    ✔ Active filtering pattern consistent
-    ✔ Deterministic ordering
-    ✔ Pagination safe
-    ✔ Structured logging
     """
 
     # --------------------------------------------------
@@ -271,6 +263,7 @@ async def list_registration_documents(
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    role = current_user.get("role")
 
     log = logging.LoggerAdapter(
         logger,
@@ -305,6 +298,7 @@ async def list_registration_documents(
         )
 
     try:
+
         conditions = []
         values = []
         param_index = 1
@@ -312,6 +306,7 @@ async def list_registration_documents(
         # --------------------------------------------------
         # Indexed Exact Match Filters
         # --------------------------------------------------
+
         if person_id is not None:
             conditions.append(f"d.person_id = ${param_index}")
             values.append(person_id)
@@ -335,14 +330,16 @@ async def list_registration_documents(
         # --------------------------------------------------
         # Partial Match Filters
         # --------------------------------------------------
+
         if document_type and document_type.strip():
             conditions.append(f"d.document_type ILIKE ${param_index}")
             values.append(f"%{document_type.strip()}%")
             param_index += 1
 
         # --------------------------------------------------
-        # Active Filtering Pattern (Enterprise Standard)
+        # Active Filtering Pattern
         # --------------------------------------------------
+
         if is_active is not None:
             conditions.append(f"d.is_active = ${param_index}")
             values.append(is_active)
@@ -353,6 +350,7 @@ async def list_registration_documents(
         # --------------------------------------------------
         # Date Filtering
         # --------------------------------------------------
+
         if from_date:
             conditions.append(f"d.created_at >= ${param_index}")
             values.append(from_date)
@@ -364,13 +362,43 @@ async def list_registration_documents(
             param_index += 1
 
         # --------------------------------------------------
-        # WHERE Clause Builder
+        # ROLE BASED VISIBILITY (GST → PERSON → DOCUMENT)
         # --------------------------------------------------
+
+        visibility_sql, visibility_values, param_index = build_gst_visibility(
+            role,
+            int(current_emp_id) if str(current_emp_id).isdigit() else None,
+            param_index,
+            DB_SCHEMA,
+        )
+
+        if visibility_sql:
+
+            visibility_sql = f"""
+            d.person_id IN (
+                SELECT p.person_id
+                FROM {DB_SCHEMA}.gst_registration_persons p
+                WHERE p.gst_registration_id IN (
+                    SELECT g.id
+                    FROM {DB_SCHEMA}.gst_registration g
+                    WHERE {visibility_sql}
+                )
+            )
+            """
+
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        # --------------------------------------------------
+        # WHERE Builder
+        # --------------------------------------------------
+
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         # --------------------------------------------------
-        # COUNT Query (Pagination Support)
+        # COUNT Query
         # --------------------------------------------------
+
         count_sql = f"""
             SELECT COUNT(*)
             FROM {DB_SCHEMA}.gst_registration_documents d
@@ -380,13 +408,27 @@ async def list_registration_documents(
         # --------------------------------------------------
         # DATA Query
         # --------------------------------------------------
+
         data_sql = f"""
             SELECT
                 d.*,
-                e.first_name AS verified_by_name
+                p.full_name,
+                g.rm_id,
+                g.created_by,
+                e_rm.first_name AS rm_name,
+                e_creator.first_name AS created_by_name,
+                e_verify.first_name AS verified_by_name
             FROM {DB_SCHEMA}.gst_registration_documents d
-            LEFT JOIN {DB_SCHEMA}.employees e
-                ON d.verified_by = e.emp_id
+            LEFT JOIN {DB_SCHEMA}.gst_registration_persons p
+                   ON d.person_id = p.person_id
+            LEFT JOIN {DB_SCHEMA}.gst_registration g
+                   ON p.gst_registration_id = g.id
+            LEFT JOIN {DB_SCHEMA}.employees e_rm
+                   ON g.rm_id = e_rm.emp_id
+            LEFT JOIN {DB_SCHEMA}.employees e_creator
+                   ON g.created_by = e_creator.emp_id
+            LEFT JOIN {DB_SCHEMA}.employees e_verify
+                   ON d.verified_by = e_verify.emp_id
             {where_clause}
             ORDER BY d.created_at DESC, d.document_id DESC
             LIMIT ${param_index} OFFSET ${param_index + 1}
@@ -395,7 +437,9 @@ async def list_registration_documents(
         values_with_pagination = values + [limit, offset]
 
         async with pool.acquire() as conn:
+
             total = await conn.fetchval(count_sql, *values)
+
             rows = await conn.fetch(data_sql, *values_with_pagination)
 
         log.info(
@@ -413,11 +457,13 @@ async def list_registration_documents(
         }
 
     except asyncpg.PostgresError as e:
+
         log.error(
             "Database error during registration document filtering | error=%s",
             str(e),
             exc_info=True,
         )
+
         raise HTTPException(
             status_code=500,
             detail="Database error occurred during filtering.",
@@ -427,12 +473,13 @@ async def list_registration_documents(
         raise
 
     except Exception:
+
         log.exception("Unexpected error during registration document filtering")
+
         raise HTTPException(
             status_code=500,
             detail="Internal server error.",
         )
-
 @router.post(
     "/{document_id}/edit",
     summary="Edit Registration Document (Flexible Verified + Version Audit)",

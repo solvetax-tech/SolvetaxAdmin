@@ -615,7 +615,7 @@ async def get_employee(
     summary="Get list of active Relationship Managers",
 )
 async def get_active_rms(
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
@@ -672,7 +672,7 @@ async def get_active_rms(
     summary="Get list of active Operations personnel",
 )
 async def get_active_ops(
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
@@ -1078,3 +1078,133 @@ async def list_roles(
             status_code=500,
             detail="Internal server error.",
         )
+# -------------------------------------------------------------------
+# CREATE ROLE
+# -------------------------------------------------------------------
+
+@router.post(
+    "/create",
+    summary="Create Role",
+    responses={
+        201: {"description": "Role created successfully"},
+        400: {"description": "Validation failed"},
+        409: {"description": "Duplicate role"},
+        500: {"description": "Database error"}
+    }
+)
+async def create_role(
+    role_code: str,
+    role_name: str,
+    current_user=Depends(require_permission("USER_ACCESS", "WRITE"))
+):
+
+    request_id = generate_uuid()
+
+    emp_id = current_user.get("sub")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "create_role"}
+    )
+
+    # --------------------------------------------------
+    # Input Validation
+    # --------------------------------------------------
+
+    field_errors = {}
+
+    if not role_code or not role_code.strip():
+        field_errors["role_code"] = "Role code is required."
+
+    if not role_name or not role_name.strip():
+        field_errors["role_name"] = "Role name is required."
+
+    if field_errors:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error":{
+                    "type":"validation_error",
+                    "message":"Validation failed",
+                    "fields":field_errors
+                }
+            }
+        )
+
+    role_code = role_code.strip().upper()
+    role_name = role_name.strip()
+
+    # --------------------------------------------------
+    # DB Connection
+    # --------------------------------------------------
+
+    try:
+        pool = await get_db_pool()
+
+    except Exception:
+
+        log.exception("DB connection failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error"
+        )
+
+    async with pool.acquire() as conn:
+
+        try:
+
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {DB_SCHEMA}.roles
+                (
+                    role_code,
+                    role_name,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    $1,$2,NOW(),NOW()
+                )
+                RETURNING *
+                """,
+                role_code,
+                role_name
+            )
+
+            log.info("Role created successfully id=%s role_code=%s", row["id"], role_code)
+
+            return dict(row)
+
+        # --------------------------------------------------
+        # UNIQUE CONSTRAINT
+        # --------------------------------------------------
+
+        except asyncpg.exceptions.UniqueViolationError:
+
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error":{
+                        "type":"validation_error",
+                        "message":"Validation failed",
+                        "fields":{
+                            "role_code":"Role code already exists"
+                        }
+                    }
+                }
+            )
+
+        # --------------------------------------------------
+        # GENERIC ERROR
+        # --------------------------------------------------
+
+        except Exception:
+
+            log.exception("Unexpected error creating role")
+
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error"
+            )

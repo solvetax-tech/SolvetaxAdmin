@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from app.utils import get_db_pool, DB_SCHEMA
 from app.security.rbac import require_permission
 from app.logger import logger
-from app.utils import mask_sensitive_data,generate_uuid
+from app.utils import mask_sensitive_data,generate_uuid,build_customer_service_visibility
 import json
 from zoneinfo import ZoneInfo
 IST = ZoneInfo("Asia/Kolkata")
@@ -35,7 +35,6 @@ async def filter_customer_services(
     id: Optional[int] = None,
     customer_id: Optional[int] = None,
 
-    # Service filter by code
     service_code: Optional[str] = None,
     service_codes: Optional[List[str]] = Query(None),
 
@@ -60,6 +59,7 @@ async def filter_customer_services(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
 
     log = logging.LoggerAdapter(
         logger,
@@ -146,7 +146,6 @@ async def filter_customer_services(
             ]
 
             if cleaned:
-
                 conditions.append(f"s.service_code = ANY(${idx})")
                 values.append(cleaned)
                 idx += 1
@@ -173,6 +172,21 @@ async def filter_customer_services(
             conditions.append(f"cs.created_at < ${idx}")
             values.append(cursor)
             idx += 1
+
+        # --------------------------------------------------
+        # ROLE BASED VISIBILITY
+        # --------------------------------------------------
+
+        visibility_sql, visibility_values, idx = build_customer_service_visibility(
+            role,
+            emp_id,
+            idx,
+            DB_SCHEMA
+        )
+
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
 
         # --------------------------------------------------
         # WHERE CLAUSE
@@ -268,7 +282,6 @@ async def filter_customer_services(
             status_code=500,
             detail="Internal server error.",
         )
-
 
 @router.post(
     "/customer-services/{service_id}/activate",

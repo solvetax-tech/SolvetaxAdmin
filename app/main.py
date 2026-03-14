@@ -79,6 +79,7 @@ app.openapi = custom_openapi
 from app.sign_up.signup import router as signup_router
 from app.sign_up.login import router as login_router
 from app.sign_up.forgot import router as forgot_password_router
+from app.security.teams_api import router as teams_api
 from app.sign_up.employee_edit import router as employee_edit_router
 from app.customer_registration.customer import router as customer_router
 from app.gst_registration.gst_registration import router as gst_registration_router
@@ -103,6 +104,8 @@ if login_router:
     app.include_router(login_router)
 if forgot_password_router:
     app.include_router(forgot_password_router)
+if teams_api:
+    app.include_router(teams_api)
 if customer_router:
     app.include_router(customer_router)
 if gst_registration_router:

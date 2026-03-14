@@ -1,6 +1,15 @@
 from fastapi import APIRouter, HTTPException, Request, Body, Depends
 from pydantic import BaseModel
-from app.utils import get_db_pool, DB_SCHEMA, hash_password, get_user_permissions, generate_uuid, generate_refresh_token, hash_refresh_token
+from app.utils import (
+    get_db_pool,
+    DB_SCHEMA,
+    hash_password,
+    verify_password,
+    get_user_permissions,
+    generate_uuid,
+    generate_refresh_token,
+    hash_refresh_token
+)
 from dotenv import load_dotenv
 from app.sign_up.schemas import LoginRequest
 import os
@@ -11,6 +20,7 @@ from app.security.rbac import require_permission
 from app.logger import logger
 import time
 import secrets
+
 # Load environment variables from project root .env
 load_dotenv()
 JWT_SECRET = os.getenv("JWT_SECRET")
@@ -19,6 +29,7 @@ JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
 router = APIRouter(prefix="/app/v1", tags=["Login"])
 from fastapi.responses import JSONResponse
+
 
 @router.post(
     "/login",
@@ -90,18 +101,18 @@ async def login(
                 raise HTTPException(status_code=401, detail="Invalid credentials")
 
             emp_id = employee["emp_id"]
+            role = employee.get("role")
+
             log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
 
             if not employee.get("is_active", False):
                 log.warning("[login] Inactive employee")
                 raise HTTPException(status_code=401, detail="Employee account is inactive")
 
-            computed_hash = hash_password(password)
-
-            if not secrets.compare_digest(
-                str(employee["password_hash"]),
-                str(computed_hash)
-            ):
+            # --------------------------------------------------
+            # Password Verification
+            # --------------------------------------------------
+            if not verify_password(password, employee["password_hash"]):
                 log.warning("[login] Invalid password")
                 raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -117,6 +128,7 @@ async def login(
 
             jwt_payload = {
                 "sub": str(emp_id),
+                "role": role,
                 "iat": int(now_aware.timestamp()),
                 "exp": int(access_expiry.timestamp()),
                 "jti": generate_uuid(),
@@ -166,13 +178,12 @@ async def login(
                 }
             )
 
-            # 🔐 HttpOnly Secure Refresh Cookie
             response.set_cookie(
                 key="refresh_token",
                 value=raw_refresh_token,
                 httponly=True,
-                secure=True,       # MUST be True in production (HTTPS)
-                samesite="Strict", # or "Lax" depending on frontend
+                secure=True,
+                samesite="Strict",
                 max_age=14 * 24 * 60 * 60
             )
 
@@ -183,6 +194,7 @@ async def login(
     except Exception:
         log.exception("[login] Unexpected error")
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
+
 
 @router.post(
     "/refresh",
@@ -250,7 +262,7 @@ async def refresh_token_endpoint(
             log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
 
             employee = await conn.fetchrow(
-                f"SELECT is_active FROM {DB_SCHEMA}.employees WHERE emp_id=$1",
+                f"SELECT is_active, role FROM {DB_SCHEMA}.employees WHERE emp_id=$1",
                 emp_id
             )
 
@@ -275,6 +287,7 @@ async def refresh_token_endpoint(
 
             new_payload = {
                 "sub": str(emp_id),
+                "role": employee["role"],
                 "iat": int(now_utc.timestamp()),
                 "exp": int(access_expiry.timestamp()),
                 "jti": generate_uuid(),
@@ -323,13 +336,16 @@ async def refresh_token_endpoint(
                 secure=True,
                 samesite="Strict",
                 max_age=14 * 24 * 60 * 60,
-                path = "/app/v1"
+                path="/app/v1"
             )
 
             return response
 
+
 class LogoutRequest(BaseModel):
     session_token: str
+
+
 @router.post(
     "/logout",
     response_model=None,
@@ -386,7 +402,6 @@ async def logout(
             if result != "UPDATE 1":
                 raise HTTPException(status_code=401, detail="Session already inactive or invalid.")
 
-            # 🔐 Audit log
             await conn.execute(
                 f"""
                 INSERT INTO {DB_SCHEMA}.session_audit_log
@@ -406,7 +421,6 @@ async def logout(
                 content={"message": "Session revoked successfully."}
             )
 
-            # 🧹 Clear cookie
             response.delete_cookie(
                 key="refresh_token",
                 httponly=True,
