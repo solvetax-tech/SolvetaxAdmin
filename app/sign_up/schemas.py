@@ -146,6 +146,29 @@ class ForgotPasswordVerify(BaseSchema):
 class ForgotPasswordResponse(BaseSchema):
     message: str
 
+# =========================================================
+# Change Password Request
+# =========================================================
+
+class ChangePasswordRequest(BaseSchema):
+    current_password: str
+    new_password: Annotated[str, constr(min_length=8)]
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password_strength(cls, v):
+        if (
+            not re.search(r"[A-Z]", v)
+            or not re.search(r"[a-z]", v)
+            or not re.search(r"\d", v)
+            or not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v)
+        ):
+            raise ValueError(
+                "Password must contain uppercase, lowercase, number, and special character"
+            )
+        return v
+
+
 
 # =========================================================
 # Employee Edit Schema (Dynamic Update)

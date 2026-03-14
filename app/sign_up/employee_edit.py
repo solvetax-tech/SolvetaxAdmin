@@ -4,8 +4,8 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
 from datetime import datetime
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
-from app.sign_up.schemas import EmployeeEditIn, EmployeeOut
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, hash_password, is_password_strong
+from app.sign_up.schemas import EmployeeEditIn, EmployeeOut,  ChangePasswordRequest
 from app.security.rbac import require_permission
 from app.logger import logger
 import json
@@ -1208,3 +1208,138 @@ async def create_role(
                 status_code=500,
                 detail="Internal server error"
             )
+
+# -------------------------------------------------------------------
+# CHANGE PASSWORD (HASH VERIFICATION + VERSION AUDIT)
+# -------------------------------------------------------------------
+
+@router.post(
+    "/{emp_id}/change-password",
+    summary="Change Employee Password",
+    responses={
+        200: {"description": "Password changed successfully."},
+        400: {"description": "Invalid current password or weak new password."},
+        404: {"description": "Employee not found."},
+        500: {"description": "Database or internal error."},
+    },
+)
+async def change_password(
+    emp_id: int,
+    payload: ChangePasswordRequest,
+    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
+):
+    """
+    Change Password API (Hash Verification + Version Audit)
+    """
+
+    request_id = generate_uuid()
+    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    # ✅ Safe conversion for version table
+    actor_emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": current_emp_id},
+    )
+
+    log.info("Incoming change password request for emp_id=%s", emp_id)
+
+    # 1. Password Strength Check (redundant if schema does it, but good for safety)
+    if not is_password_strong(payload.new_password):
+        log.warning("Weak new password provided for emp_id=%s", emp_id)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "type": "validation_error",
+                    "message": "Validation failed",
+                    "fields": {"new_password": "Password does not meet complexity requirements."},
+                    "code": "WEAK_PASSWORD"
+                }
+            }
+        )
+
+    try:
+        pool = await get_db_pool()
+    except Exception as e:
+        log.exception("Database pool acquisition failed error=%s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                # 1️⃣ Fetch old row to verify current password
+                old_row = await conn.fetchrow(
+                    f"SELECT emp_id, password_hash FROM {DB_SCHEMA}.employees WHERE emp_id = $1",
+                    emp_id
+                )
+
+                if not old_row:
+                    log.warning("Employee not found for password change emp_id=%s", emp_id)
+                    raise HTTPException(status_code=404, detail="Employee not found.")
+
+                # 2️⃣ Verify current password hash
+                current_hash = hash_password(payload.current_password)
+                if old_row["password_hash"] != current_hash:
+                    log.warning("Incorrect current password for emp_id=%s", emp_id)
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Invalid current password",
+                                "fields": {"current_password": "The current password you entered is incorrect."},
+                                "code": "INVALID_CURRENT_PASSWORD"
+                            }
+                        }
+                    )
+
+                # 3️⃣ Update with new hash
+                new_hash = hash_password(payload.new_password)
+                await conn.execute(
+                    f"UPDATE {DB_SCHEMA}.employees SET password_hash = $1, updated_at = NOW() WHERE emp_id = $2",
+                    new_hash, emp_id
+                )
+
+                # 4️⃣ Insert Version Audit
+                # Fetch full data for audit (sanitized)
+                new_full_row = await conn.fetchrow(
+                    f"SELECT * FROM {DB_SCHEMA}.employees WHERE emp_id = $1",
+                    emp_id
+                )
+                
+                # Sanitize snapshot
+                old_snapshot = dict(old_row)
+                old_snapshot.pop("password_hash", None)
+                new_snapshot = dict(new_full_row)
+                new_snapshot.pop("password_hash", None)
+
+                version_sql = f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """
+
+                await conn.execute(
+                    version_sql,
+                    actor_emp_id,
+                    "EMPLOYEE_PASSWORD",
+                    emp_id,
+                    None,
+                    "UPDATE",
+                    json.dumps(old_snapshot, default=str),
+                    json.dumps(new_snapshot, default=str)
+                )
+
+            log.info("Password changed successfully for emp_id=%s", emp_id)
+            return {"message": "Password changed successfully."}
+
+        except HTTPException:
+            raise
+        except Exception:
+            log.exception("Unexpected error during password change emp_id=%s", emp_id)
+            raise HTTPException(status_code=500, detail="Internal server error.")
