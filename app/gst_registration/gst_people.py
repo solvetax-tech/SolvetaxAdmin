@@ -1025,7 +1025,32 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 4️⃣ Handle primary logic
+                # 4️⃣ Reject if no actual change
+                # --------------------------------------------------
+
+                no_change = True
+
+                for k, v in update_data.items():
+
+                    if k in old_row and old_row[k] != v:
+                        no_change = False
+                        break
+
+                if no_change:
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "No changes detected to update.",
+                                "fields": {}
+                            }
+                        }
+                    )
+
+                # --------------------------------------------------
+                # 5️⃣ Handle primary logic
                 # --------------------------------------------------
                 if (
                     "is_primary_customer" in update_data
@@ -1044,7 +1069,7 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 5️⃣ Dynamic update
+                # 6️⃣ Dynamic update
                 # --------------------------------------------------
                 fields, values, idx = [], [], 1
 
@@ -1073,7 +1098,7 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 6️⃣ Mobile propagation
+                # 7️⃣ Mobile propagation
                 # --------------------------------------------------
                 if "mobile" in update_data and update_data["mobile"]:
 
@@ -1090,7 +1115,7 @@ async def edit_registration_person(
                     )
 
                 # --------------------------------------------------
-                # 7️⃣ Version audit
+                # 8️⃣ Version audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -1118,9 +1143,6 @@ async def edit_registration_person(
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # UNIQUE CONSTRAINT HANDLING
-        # --------------------------------------------------
         except asyncpg.exceptions.UniqueViolationError as e:
 
             constraint_name = getattr(e, "constraint_name", "")

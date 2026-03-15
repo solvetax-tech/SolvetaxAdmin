@@ -1,4 +1,16 @@
-
+ALTER TABLE solvetax.versions
+ADD CONSTRAINT chk_action_json
+CHECK (
+(
+(action = 'CREATE' AND json IS NOT NULL AND updated_json IS NULL)
+OR
+(action = 'UPDATE' AND json IS NOT NULL AND updated_json IS NOT NULL)
+OR
+(action = 'DELETE' AND json IS NULL AND updated_json IS NOT NULL)
+OR
+(action = 'ACTIVATE' AND json IS NULL AND updated_json IS NOT NULL)
+)
+);
 -- solvetax.crm_leads definition
 -- Drop table
 

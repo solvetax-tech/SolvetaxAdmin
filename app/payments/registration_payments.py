@@ -1176,6 +1176,7 @@ async def edit_registration_payment(
                     SET {', '.join(fields)}
                     WHERE id = ${idx}
                     AND is_active = TRUE
+                    AND payment_status IN ('PENDING','CANCELLED')
                     RETURNING *
                 """
 

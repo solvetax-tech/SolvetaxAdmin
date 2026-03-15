@@ -782,7 +782,32 @@ async def edit_gst_registration(
                     )
 
                 # --------------------------------------------------
-                # 2️⃣ Dynamic Update
+                # 2️⃣ Reject if no actual change
+                # --------------------------------------------------
+
+                no_change = True
+
+                for k, v in update_data.items():
+
+                    if k in old_row and old_row[k] != v:
+                        no_change = False
+                        break
+
+                if no_change:
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "No changes detected to update.",
+                                "fields": {}
+                            }
+                        }
+                    )
+
+                # --------------------------------------------------
+                # 3️⃣ Dynamic Update
                 # --------------------------------------------------
                 fields, values, idx = [], [], 1
 
@@ -811,7 +836,7 @@ async def edit_gst_registration(
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Version Audit
+                # 4️⃣ Version Audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -920,7 +945,6 @@ async def edit_gst_registration(
         except Exception:
             log.exception("Unexpected error during GST update")
             raise HTTPException(500, "Internal server error.")
-
 @router.delete(
     "/{gst_id}/soft_delete",
     summary="Soft delete GST registration (Enterprise + Cascade + Audit)",

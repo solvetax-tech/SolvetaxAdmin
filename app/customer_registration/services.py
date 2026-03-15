@@ -377,7 +377,7 @@ async def activate_customer_service(
                     service_id,
                     old_row["customer_id"],
                     "ACTIVATE",
-                    json.dumps(dict(old_row), default=str),
+                    None,
                     json.dumps(dict(new_row), default=str),
                 )
 
@@ -485,8 +485,8 @@ async def deactivate_customer_service(
                     "CUSTOMER_SERVICE",
                     service_id,
                     old_row["customer_id"],
-                    "DEACTIVATE",
-                    json.dumps(dict(old_row), default=str),
+                    "DELETE",
+                    None, 
                     json.dumps(dict(new_row), default=str),
                 )
 
@@ -635,5 +635,4 @@ async def get_pending_services(
         "data": [dict(r) for r in rows],
         "request_id": request_id,
     }
-
 

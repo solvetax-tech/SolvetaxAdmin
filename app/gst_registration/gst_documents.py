@@ -480,6 +480,9 @@ async def list_registration_documents(
             status_code=500,
             detail="Internal server error.",
         )
+# -------------------------------------------------------------------
+# EDIT REGISTRATION DOCUMENT (Flexible Verified + Version Audit)
+# -------------------------------------------------------------------
 @router.post(
     "/{document_id}/edit",
     summary="Edit Registration Document (Flexible Verified + Version Audit)",
@@ -606,6 +609,7 @@ async def edit_registration_document(
                     UPDATE {DB_SCHEMA}.gst_registration_documents
                        SET {', '.join(fields)}
                      WHERE document_id = ${idx}
+                       AND is_active = TRUE
                      RETURNING *
                 """
 
@@ -613,8 +617,8 @@ async def edit_registration_document(
 
                 if not new_row:
                     raise HTTPException(
-                        status_code=404,
-                        detail="Document became inactive before update.",
+                        status_code=409,
+                        detail="Document state changed. Please retry.",
                     )
 
                 # --------------------------------------------------
