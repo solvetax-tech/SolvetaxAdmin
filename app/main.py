@@ -75,7 +75,7 @@ app.openapi = custom_openapi
 
 # Import signup and login routers
 
-
+from app.sign_up.email_verification import router as email_verification
 from app.sign_up.signup import router as signup_router
 from app.sign_up.login import router as login_router
 from app.sign_up.forgot import router as forgot_password_router
@@ -98,6 +98,8 @@ from app.customer_registration.service_config import router as service_config
 
 
 
+if email_verification:
+    app.include_router(email_verification)
 if signup_router:
     app.include_router(signup_router)
 if login_router:

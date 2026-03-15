@@ -474,6 +474,79 @@ SolveTax Security Team
     except Exception as e:
         logger.error("Email sending failed for %s | Error: %s", email, str(e))
         raise
+    
+async def send_email_otp(email: str, otp: str, purpose: str = "password_reset"):
+
+    smtp_server = os.getenv("SMTP_SERVER")
+    smtp_port = int(os.getenv("SMTP_PORT"))
+    smtp_email = os.getenv("SMTP_EMAIL")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+
+    if not all([smtp_server, smtp_port, smtp_email, smtp_password]):
+        raise RuntimeError("SMTP configuration missing")
+
+    # --------------------------------------------------
+    # Email Content
+    # --------------------------------------------------
+
+    if purpose == "email_verification":
+
+        subject = "SolveTax Email Verification OTP"
+
+        body = f"""
+Hello,
+
+Welcome to SolveTax.
+
+Your OTP for verifying your SolveTax account email is:
+
+{otp}
+
+This OTP will expire in 10 minutes.
+
+If you did not initiate this verification, please ignore this email.
+
+Regards,
+SolveTax Security Team
+"""
+
+    else:
+
+        subject = "SolveTax Password Reset OTP"
+
+        body = f"""
+Hello,
+
+Your OTP for resetting your SolveTax account password is:
+
+{otp}
+
+This OTP will expire in 10 minutes.
+
+If you did not request this, please ignore this email.
+
+Regards,
+SolveTax Security Team
+"""
+
+    message = MIMEMultipart()
+    message["From"] = smtp_email
+    message["To"] = email
+    message["Subject"] = subject
+    message.attach(MIMEText(body, "plain"))
+
+    try:
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_email, smtp_password)
+            server.sendmail(smtp_email, email, message.as_string())
+
+        logger.info("OTP email sent successfully to %s | purpose=%s", email, purpose)
+
+    except Exception as e:
+        logger.error("Email sending failed for %s | Error: %s", email, str(e))
+        raise
 
 # --------------------------------------------------
 # Generate Secure SAS URL for Blob

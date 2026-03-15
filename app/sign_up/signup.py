@@ -8,7 +8,6 @@ from typing import Optional
 import os
 import asyncpg
 import logging
-import re
 import json
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
@@ -144,6 +143,31 @@ async def signup(
         )
 
     async with pool.acquire() as conn:
+
+        # --------------------------------------------------
+        # EMAIL VERIFICATION CHECK
+        # --------------------------------------------------
+
+        is_verified = await conn.fetchval(
+            f"""
+            SELECT is_verified
+            FROM {DB_SCHEMA}.employee_email_verifications
+            WHERE lower(trim(email)) = lower(trim($1))
+            """,
+            normalized_email
+        )
+
+        if is_verified is not True:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error":{
+                        "type":"validation_error",
+                        "message":"Email not verified",
+                        "fields":{"email":"Please verify email before signup"}
+                    }
+                }
+            )
 
         # --------------------------------------------------
         # Validate Role
@@ -292,13 +316,28 @@ async def signup(
                     )
 
                 # --------------------------------------------------
+                # LINK EMAIL VERIFICATION TABLE
+                # --------------------------------------------------
+
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.employee_email_verifications
+                    SET emp_id=$1
+                    WHERE lower(trim(email)) = lower(trim($2))
+                    AND is_verified = TRUE
+                    """,
+                    created_id,
+                    normalized_email
+                )
+
+                # --------------------------------------------------
                 # 2️⃣ Assign Role
                 # --------------------------------------------------
 
                 await assign_role_to_employee(conn, created_id, role_id)
 
                 # --------------------------------------------------
-                # 3️⃣ Assign Team Member (NEW)
+                # 3️⃣ Assign Team Member
                 # --------------------------------------------------
 
                 if payload.team_id:
@@ -342,7 +381,7 @@ async def signup(
                     )
 
                 # --------------------------------------------------
-                # 4️⃣ Assign Team Manager (NEW)
+                # 4️⃣ Assign Team Manager
                 # --------------------------------------------------
 
                 if payload.role in ["SALES_MANAGER","OP_MANAGER"] and payload.team_id:
@@ -372,7 +411,6 @@ async def signup(
                 )
 
                 employee_dict = dict(employee_row)
-
                 employee_dict.pop("password_hash", None)
 
                 # --------------------------------------------------
