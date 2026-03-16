@@ -38,13 +38,12 @@ async def edit_employee(
     current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
     """
-    Edit Employee API (Dynamic Update + Version Audit)
+    Edit Employee API (Dynamic Update + Version Audit + Team Sync + Manager Sync)
     """
 
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
 
-    # ✅ Safe conversion for version table
     actor_emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
@@ -57,7 +56,6 @@ async def edit_employee(
     update_data = payload.model_dump(exclude_unset=True)
 
     if not update_data:
-        log.warning("No fields provided for update")
         raise HTTPException(
             status_code=400,
             detail="At least one field must be provided for update.",
@@ -67,36 +65,33 @@ async def edit_employee(
         pool = await get_db_pool()
     except Exception as e:
         log.exception("Database pool acquisition failed error=%s", e)
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection error.",
-        )
+        raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ FETCH OLD SNAPSHOT (FOR VERSION AUDIT)
+                # 1️⃣ FETCH OLD SNAPSHOT + LOCK ROW (RACE SAFE)
                 # --------------------------------------------------
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT *
                     FROM {DB_SCHEMA}.employees
                     WHERE emp_id = $1
+                    FOR UPDATE
                     """,
                     emp_id
                 )
 
                 if not old_row:
-                    log.warning("Employee not found for update")
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Employee not found.",
-                    )
+                    raise HTTPException(status_code=404, detail="Employee not found.")
+
+                old_role = old_row["role"]
+                old_manager = old_row["manager_emp_id"]
 
                 # --------------------------------------------------
-                # Normalize critical fields (UNCHANGED LOGIC)
+                # Normalize critical fields
                 # --------------------------------------------------
                 if "email" in update_data and update_data["email"]:
                     update_data["email"] = update_data["email"].strip().lower()
@@ -105,33 +100,35 @@ async def edit_employee(
                     update_data["phone_number"] = update_data["phone_number"].strip()
 
                 # --------------------------------------------------
-                # 1.5️⃣ PROACTIVE DUPLICATE CHECK (MULTI-FIELD)
+                # DUPLICATE CHECK
                 # --------------------------------------------------
                 check_username = update_data.get("username")
                 check_email = update_data.get("email")
                 check_phone = update_data.get("phone_number")
 
                 field_errors = {}
+
                 if check_username or check_email or check_phone:
+
                     duplicate_row = await conn.fetchrow(
                         f"""
                         SELECT
                             EXISTS (
                                 SELECT 1 FROM {DB_SCHEMA}.employees
                                 WHERE lower(trim(username)) = lower(trim($1))
-                                  AND emp_id != $4
+                                AND emp_id != $4
                             ) AS username_match,
 
                             EXISTS (
                                 SELECT 1 FROM {DB_SCHEMA}.employees
                                 WHERE lower(trim(email)) = lower(trim($2))
-                                  AND emp_id != $4
+                                AND emp_id != $4
                             ) AS email_match,
 
                             EXISTS (
                                 SELECT 1 FROM {DB_SCHEMA}.employees
                                 WHERE trim(phone_number) = trim($3)
-                                  AND emp_id != $4
+                                AND emp_id != $4
                             ) AS phone_match
                         """,
                         check_username or "",
@@ -141,15 +138,17 @@ async def edit_employee(
                     )
 
                     if duplicate_row:
+
                         if check_username and duplicate_row["username_match"]:
                             field_errors["username"] = "Username already exists"
+
                         if check_email and duplicate_row["email_match"]:
                             field_errors["email"] = "Email already exists"
+
                         if check_phone and duplicate_row["phone_match"]:
                             field_errors["phone_number"] = "Phone number already exists"
 
                 if field_errors:
-                    log.warning("Duplicate field validation failed for emp_id=%s: %s", emp_id, field_errors)
                     raise HTTPException(
                         status_code=409,
                         detail={
@@ -163,7 +162,7 @@ async def edit_employee(
                     )
 
                 # --------------------------------------------------
-                # Build dynamic SET clause safely
+                # Dynamic update
                 # --------------------------------------------------
                 fields = []
                 values = []
@@ -187,99 +186,133 @@ async def edit_employee(
 
                 new_row = await conn.fetchrow(sql, *values)
 
-                # --------------------------------------------------
-                # 2️⃣ INSERT VERSION AUDIT
-                # --------------------------------------------------
-                version_sql = f"""
-                    INSERT INTO {DB_SCHEMA}.versions
-                    (
-                        emp_id,
-                        entity_type,
-                        entity_id,
-                        customer_id,
-                        action,
-                        json,
-                        updated_json
+                if not new_row:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Employee state changed. Please retry."
                     )
-                    VALUES ($1,$2,$3,$4,$5,$6,$7)
-                """
+
+                new_role = new_row["role"]
+                new_manager = new_row["manager_emp_id"]
+
+                # --------------------------------------------------
+                # TEAM MEMBERS SYNC (Manager Change)
+                # --------------------------------------------------
+
+                if new_manager and new_manager != old_manager:
+
+                    manager_team = await conn.fetchval(
+                        f"""
+                        SELECT team_id
+                        FROM {DB_SCHEMA}.team_members
+                        WHERE emp_id = $1
+                        AND is_active = TRUE
+                        """,
+                        new_manager
+                    )
+
+                    if manager_team:
+
+                        await conn.execute(
+                            f"""
+                            UPDATE {DB_SCHEMA}.team_members
+                            SET is_active = FALSE,
+                            updated_at = NOW()
+                            WHERE emp_id = $1
+                            """,
+                            emp_id
+                        )
+
+                        await conn.execute(
+                            f"""
+                            INSERT INTO {DB_SCHEMA}.team_members
+                            (team_id, emp_id, is_active, created_at, updated_at)
+                            VALUES ($1,$2,TRUE,NOW(),NOW())
+                            ON CONFLICT (team_id, emp_id)
+                            DO UPDATE SET is_active = TRUE, updated_at = NOW()
+                            """,
+                            manager_team,
+                            emp_id
+                        )
+
+                # --------------------------------------------------
+                # TEAM MANAGER SYNC (Role Change)
+                # --------------------------------------------------
+
+                manager_roles = ["SALES_MANAGER", "OP_MANAGER"]
+
+                if old_role not in manager_roles and new_role in manager_roles:
+
+                    team_id = await conn.fetchval(
+                        f"""
+                        SELECT team_id
+                        FROM {DB_SCHEMA}.team_members
+                        WHERE emp_id = $1
+                        AND is_active = TRUE
+                        """,
+                        emp_id
+                    )
+
+                    if team_id:
+
+                        await conn.execute(
+                            f"""
+                            UPDATE {DB_SCHEMA}.team_managers
+                            SET is_active = FALSE,
+                            updated_at = NOW()
+                            WHERE team_id = $1
+                            AND is_active = TRUE
+                            """,
+                            team_id
+                        )
+
+                        await conn.execute(
+                            f"""
+                            INSERT INTO {DB_SCHEMA}.team_managers
+                            (team_id, manager_emp_id, is_active, created_at, updated_at)
+                            VALUES ($1,$2,TRUE,NOW(),NOW())
+                            ON CONFLICT DO NOTHING
+                            """,
+                            team_id,
+                            emp_id
+                        )
+
+                if old_role in manager_roles and new_role not in manager_roles:
+
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.team_managers
+                        SET is_active = FALSE,
+                        updated_at = NOW()
+                        WHERE manager_emp_id = $1
+                        AND is_active = TRUE
+                        """,
+                        emp_id
+                    )
+
+                # --------------------------------------------------
+                # VERSION AUDIT
+                # --------------------------------------------------
 
                 await conn.execute(
-                    version_sql,
-                    actor_emp_id,                 # Actor performing update
-                    "EMPLOYEE",                   # entity_type
-                    3,                            # entity_id
-                    None,                         # customer_id (not applicable)
-                    "UPDATE",                     # action
-                    json.dumps(dict(old_row), default=str),   # OLD snapshot
-                    json.dumps(dict(new_row), default=str),   # NEW snapshot
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    actor_emp_id,
+                    "EMPLOYEE",
+                    emp_id,
+                    None,
+                    "UPDATE",
+                    json.dumps(dict(old_row), default=str),
+                    json.dumps(dict(new_row), default=str),
                 )
-
-            log.info("Employee updated successfully emp_id=%s", emp_id)
 
             return {
                 **dict(new_row),
                 "message": "Employee updated successfully."
             }
-
-        # --------------------------------------------------
-        # EXCEPTION HANDLING (UNCHANGED FROM YOUR CODE)
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.UniqueViolationError as e:
-            constraint = getattr(e, "constraint_name", None) or ""
-            if not constraint:
-                match = re.search(r'constraint ["\']?(.+?)["\']', str(e))
-                constraint = match.group(1) if match else ""
-            
-            log.warning("Unique constraint violation emp_id=%s constraint=%s", emp_id, constraint)
-            
-            if constraint in ["employees_email_key", "uq_employees_email"]:
-                detail = "Email already exists."
-            elif constraint in ["employees_username_key", "uq_employees_username"]:
-                detail = "Username already exists."
-            elif "phone" in constraint.lower() or constraint == "uq_employees_phone":
-                detail = "Phone number already exists."
-            else:
-                detail = "Duplicate field value violates unique constraint."
-
-            # return structured error so frontend does not need to guess fields
-            field_map = {}
-            if "Email" in detail:
-                field_map["email"] = detail
-            elif "Username" in detail:
-                field_map["username"] = detail
-            elif "Phone" in detail:
-                field_map["phone_number"] = detail
-
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": field_map,
-                        "code": "EMPLOYEE_DUPLICATE"
-                    }
-                }
-            )
-
-        except asyncpg.exceptions.ForeignKeyViolationError:
-            log.warning("Invalid foreign key reference (manager_emp_id) emp_id=%s", emp_id)
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid foreign key reference.",
-            )
-
-        except asyncpg.PostgresError as e:
-            log.error(
-                "Database error during employee update emp_id=%s error=%s",
-                emp_id, e, exc_info=True,
-            )
-            raise HTTPException(status_code=500, detail="Database error.")
-
-        except HTTPException:
-            raise
 
         except Exception:
             log.exception("Unexpected error during employee update emp_id=%s", emp_id)
