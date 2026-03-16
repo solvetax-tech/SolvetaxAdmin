@@ -1102,7 +1102,7 @@ async def soft_delete_gst_registration(
                     deleted_gst["customer_id"],
                     "DELETE",
                     None,
-                    json.dumps(dict(deleted_gst), default=str),
+                    None,
                 )
 
             log.info(
@@ -1301,7 +1301,7 @@ async def activate_gst_registration(
                     customer_id,
                     "ACTIVATE",
                     None,
-                    json.dumps(dict(activated_gst), default=str),
+                    None,
                 )
 
             log.info(

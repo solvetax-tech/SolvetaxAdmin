@@ -872,7 +872,7 @@ async def soft_delete_registration_document(
                     deleted_row["customer_id"],   # ✅ now exists
                     "DELETE",
                     None,
-                    json.dumps(dict(deleted_row), default=str),
+                    None,
                 )
 
             log.info(
@@ -1072,7 +1072,7 @@ async def activate_registration_document(
                     activated_row["customer_id"],   # ✅ now exists
                     "ACTIVATE",
                     None,
-                    json.dumps(dict(activated_row), default=str),
+                    None,
                 )
 
             log.info("Document activated successfully | document_id=%s", document_id)

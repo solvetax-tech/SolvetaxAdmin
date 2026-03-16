@@ -6,9 +6,9 @@ CHECK (
 OR
 (action = 'UPDATE' AND json IS NOT NULL AND updated_json IS NOT NULL)
 OR
-(action = 'DELETE' AND json IS NULL AND updated_json IS NOT NULL)
+(action = 'DELETE' AND json IS NULL AND updated_json IS  NULL)
 OR
-(action = 'ACTIVATE' AND json IS NULL AND updated_json IS NOT NULL)
+(action = 'ACTIVATE' AND json IS NULL AND updated_json IS  NULL)
 )
 );
 -- solvetax.crm_leads definition

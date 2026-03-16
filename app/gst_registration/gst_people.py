@@ -1402,7 +1402,7 @@ async def soft_delete_registration_person(
                     person_row["customer_id"],
                     "DELETE",
                     None,
-                    json.dumps(dict(deleted_person), default=str),
+                    None,
                 )
 
             log.info(
@@ -1642,7 +1642,7 @@ async def activate_registration_person(
                     customer_id,
                     "ACTIVATE",
                     None,
-                    json.dumps(dict(activated_person), default=str),
+                    None,
                 )
 
             log.info(

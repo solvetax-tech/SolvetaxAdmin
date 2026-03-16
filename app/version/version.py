@@ -108,32 +108,32 @@ async def list_versions(
         # --------------------------------------------------
 
         if id is not None:
-            conditions.append(f"id = ${param_index}")
+            conditions.append(f"v.id = ${param_index}")
             values.append(id)
             param_index += 1
 
         if emp_id is not None:
-            conditions.append(f"emp_id = ${param_index}")
+            conditions.append(f"v.emp_id = ${param_index}")
             values.append(emp_id)
             param_index += 1
 
         if entity_type:
-            conditions.append(f"entity_type = ${param_index}")
+            conditions.append(f"v.entity_type = ${param_index}")
             values.append(entity_type.strip().upper())
             param_index += 1
 
         if entity_id is not None:
-            conditions.append(f"entity_id = ${param_index}")
+            conditions.append(f"v.entity_id = ${param_index}")
             values.append(entity_id)
             param_index += 1
 
         if customer_id is not None:
-            conditions.append(f"customer_id = ${param_index}")
+            conditions.append(f"v.customer_id = ${param_index}")
             values.append(customer_id)
             param_index += 1
 
         if action:
-            conditions.append(f"action = ${param_index}")
+            conditions.append(f"v.action = ${param_index}")
             values.append(action)
             param_index += 1
 
@@ -142,12 +142,12 @@ async def list_versions(
         # --------------------------------------------------
 
         if from_date:
-            conditions.append(f"created_at >= ${param_index}")
+            conditions.append(f"v.created_at >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"created_at <= ${param_index}")
+            conditions.append(f"v.created_at <= ${param_index}")
             values.append(to_date)
             param_index += 1
 
@@ -163,7 +163,7 @@ async def list_versions(
 
         count_sql = f"""
             SELECT COUNT(*)
-              FROM {DB_SCHEMA}.versions
+              FROM {DB_SCHEMA}.versions v
               {where_clause}
         """
 
@@ -172,10 +172,14 @@ async def list_versions(
         # --------------------------------------------------
 
         main_sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.versions
+            SELECT v.*, 
+                   e.username as emp_name,
+                   c.business_name as customer_name
+              FROM {DB_SCHEMA}.versions v
+              LEFT JOIN {DB_SCHEMA}.employees e ON v.emp_id = e.emp_id
+              LEFT JOIN {DB_SCHEMA}.customers c ON v.customer_id = c.customer_id
               {where_clause}
-             ORDER BY created_at DESC, id DESC
+             ORDER BY v.created_at DESC, v.id DESC
              LIMIT ${param_index} OFFSET ${param_index + 1}
         """
 

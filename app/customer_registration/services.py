@@ -378,7 +378,7 @@ async def activate_customer_service(
                     old_row["customer_id"],
                     "ACTIVATE",
                     None,
-                    json.dumps(dict(new_row), default=str),
+                    None,
                 )
 
             log.info("Customer service activated | id=%s", service_id)
@@ -487,7 +487,7 @@ async def deactivate_customer_service(
                     old_row["customer_id"],
                     "DELETE",
                     None, 
-                    json.dumps(dict(new_row), default=str),
+                    None,
                 )
 
             log.info("Customer service deactivated | id=%s", service_id)

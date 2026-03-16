@@ -222,6 +222,7 @@ class GSTRegistrationEditIn(BaseModel):
     secondary_email: Optional[EmailStr] = None
 
     rm_id: Optional[int] = Field(None, gt=0)
+    created_by: Optional[int] = Field(None, gt=0)
 
     # =====================================================
     # Normalization (Improved & Safe)

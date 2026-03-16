@@ -1469,7 +1469,7 @@ async def soft_delete_registration_payment(
                     deleted_row["customer_id"],
                     "DELETE",
                     None,
-                    json.dumps(dict(deleted_row), default=str),
+                    None,
                 )
 
             log.info(
@@ -1623,7 +1623,7 @@ async def activate_registration_payment(
                     activated_row["customer_id"],
                     "ACTIVATE",
                     None,
-                    json.dumps(dict(activated_row), default=str),
+                    None,
                 )
 
             log.info(

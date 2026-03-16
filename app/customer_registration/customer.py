@@ -1416,7 +1416,7 @@ async def soft_delete_customer(
                     customer_id,
                     "DELETE",
                     None,
-                    json.dumps(dict(deleted_customer), default=str),
+                    None,
                 )
 
             # --------------------------------------------------
@@ -1712,7 +1712,7 @@ async def activate_customer(
                     customer_id,
                     "ACTIVATE",
                     None,
-                    json.dumps(dict(activated_customer), default=str),
+                    None,
                 )
 
             # --------------------------------------------------

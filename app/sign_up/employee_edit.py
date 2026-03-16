@@ -929,7 +929,7 @@ async def soft_delete_employee(
                     None,                               # customer_id
                     "DELETE",                           # action
                     None,                               # json must be NULL
-                    json.dumps(deleted_snapshot, default=str),  # updated_json
+                    None,
                 )
 
             log.info("Employee soft deleted successfully emp_id=%s", emp_id)
