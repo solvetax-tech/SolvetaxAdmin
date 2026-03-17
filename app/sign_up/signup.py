@@ -9,6 +9,7 @@ import os
 import asyncpg
 import logging
 import json
+from datetime import datetime, timezone  # ✅ ADDED
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
@@ -145,19 +146,21 @@ async def signup(
     async with pool.acquire() as conn:
 
         # --------------------------------------------------
-        # EMAIL VERIFICATION CHECK
+        # EMAIL VERIFICATION CHECK (LATEST ROW ONLY)
         # --------------------------------------------------
 
-        is_verified = await conn.fetchval(
+        verification_row = await conn.fetchrow(
             f"""
-            SELECT is_verified
+            SELECT is_verified, expires_at
             FROM {DB_SCHEMA}.employee_email_verifications
             WHERE lower(trim(email)) = lower(trim($1))
+            ORDER BY created_at DESC
+            LIMIT 1
             """,
             normalized_email
         )
 
-        if is_verified is not True:
+        if verification_row["is_verified"] is not True:
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -165,6 +168,44 @@ async def signup(
                         "type":"validation_error",
                         "message":"Email not verified",
                         "fields":{"email":"Please verify email before signup"}
+                    }
+                }
+            )
+
+        if verification_row["expires_at"] < datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error":{
+                        "type":"validation_error",
+                        "message":"Verification expired",
+                        "fields":{"email":"Please verify email again verification time expired"}
+                    }
+                }
+            )
+
+        # --------------------------------------------------
+        # FINAL TRUTH CHECK
+        # --------------------------------------------------
+
+        exists_email = await conn.fetchval(
+            f"""
+            SELECT EXISTS(
+                SELECT 1 FROM {DB_SCHEMA}.employees
+                WHERE lower(trim(email)) = lower(trim($1))
+            )
+            """,
+            normalized_email
+        )
+
+        if exists_email:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error":{
+                        "type":"validation_error",
+                        "message":"Email already exists",
+                        "fields":{"email":"Already registered"}
                     }
                 }
             )
@@ -300,10 +341,6 @@ async def signup(
 
             async with conn.transaction():
 
-                # --------------------------------------------------
-                # 1️⃣ Create Employee
-                # --------------------------------------------------
-
                 created_id = await create_user(conn, user_data)
 
                 if not created_id:
@@ -315,30 +352,23 @@ async def signup(
                         detail="Could not create employee"
                     )
 
-                # --------------------------------------------------
-                # LINK EMAIL VERIFICATION TABLE
-                # --------------------------------------------------
-
                 await conn.execute(
                     f"""
                     UPDATE {DB_SCHEMA}.employee_email_verifications
                     SET emp_id=$1
-                    WHERE lower(trim(email)) = lower(trim($2))
-                    AND is_verified = TRUE
+                    WHERE id = (
+                        SELECT id
+                        FROM {DB_SCHEMA}.employee_email_verifications
+                        WHERE lower(trim(email)) = lower(trim($2))
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    )
                     """,
                     created_id,
                     normalized_email
                 )
 
-                # --------------------------------------------------
-                # 2️⃣ Assign Role
-                # --------------------------------------------------
-
                 await assign_role_to_employee(conn, created_id, role_id)
-
-                # --------------------------------------------------
-                # 3️⃣ Assign Team Member
-                # --------------------------------------------------
 
                 if payload.team_id:
 
@@ -380,10 +410,6 @@ async def signup(
                         created_id
                     )
 
-                # --------------------------------------------------
-                # 4️⃣ Assign Team Manager
-                # --------------------------------------------------
-
                 if payload.role in ["SALES_MANAGER","OP_MANAGER"] and payload.team_id:
 
                     await conn.execute(
@@ -397,10 +423,6 @@ async def signup(
                         created_id
                     )
 
-                # --------------------------------------------------
-                # 5️⃣ Fetch Employee Snapshot
-                # --------------------------------------------------
-
                 employee_row = await conn.fetchrow(
                     f"""
                     SELECT *
@@ -412,10 +434,6 @@ async def signup(
 
                 employee_dict = dict(employee_row)
                 employee_dict.pop("password_hash", None)
-
-                # --------------------------------------------------
-                # 6️⃣ Version Audit
-                # --------------------------------------------------
 
                 await conn.execute(
                     f"""

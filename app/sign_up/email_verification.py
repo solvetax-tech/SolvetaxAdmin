@@ -31,7 +31,7 @@ def generate_otp():
 
 
 # --------------------------------------------------
-# REQUEST OTP
+# REQUEST OTP (UPDATED - EXPIRY AWARE FIXED)
 # --------------------------------------------------
 
 @router.post("/email-verification/request", response_model=EmailVerificationResponse)
@@ -65,36 +65,36 @@ async def request_email_verification(payload: EmailVerificationRequest = Body(..
             raise HTTPException(status_code=400, detail="Email already registered")
 
         # --------------------------------------------------
-        # Check if email already verified
+        # Get latest verification row (FIXED)
         # --------------------------------------------------
 
-        verified = await conn.fetchval(
+        last_record = await conn.fetchrow(
             """
-            SELECT is_verified
+            SELECT created_at, is_verified, expires_at   -- 🔥 ADDED expires_at
             FROM solvetax.employee_email_verifications
-            WHERE email=$1
+            WHERE lower(trim(email)) = lower(trim($1))
+            ORDER BY created_at DESC
+            LIMIT 1
             """,
             email
         )
 
-        if verified:
-            raise HTTPException(status_code=400, detail="Email already verified")
+        # --------------------------------------------------
+        # Already verified check (🔥 FIXED)
+        # --------------------------------------------------
+
+        if (
+            last_record
+            and last_record["is_verified"]
+            and last_record["expires_at"] > datetime.now(timezone.utc)
+        ):
+            raise HTTPException(status_code=400, detail="Email already verified and you can proceed with Onboarding")
 
         # --------------------------------------------------
         # Cooldown check (60 sec)
         # --------------------------------------------------
 
-        last_record = await conn.fetchrow(
-            """
-            SELECT created_at
-            FROM solvetax.employee_email_verifications
-            WHERE email=$1
-            """,
-            email
-        )
-
         if last_record:
-
             seconds_since_last = (
                 datetime.now(timezone.utc) - last_record["created_at"]
             ).total_seconds()
@@ -110,21 +110,17 @@ async def request_email_verification(payload: EmailVerificationRequest = Body(..
         # --------------------------------------------------
 
         otp = generate_otp()
-
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
+
+                # --------------------------------------------------
+        # INSERT NEW OTP (FINAL FIX - NO UPSERT)
+        # --------------------------------------------------
 
         await conn.execute(
             """
             INSERT INTO solvetax.employee_email_verifications
             (email, otp_code, expires_at, is_used, is_verified, created_at)
             VALUES ($1,$2,$3,false,false,NOW())
-            ON CONFLICT (email)
-            DO UPDATE SET
-                otp_code = EXCLUDED.otp_code,
-                expires_at = EXCLUDED.expires_at,
-                is_used = false,
-                is_verified = false,
-                created_at = NOW()
             """,
             email,
             otp,
@@ -143,9 +139,8 @@ async def request_email_verification(payload: EmailVerificationRequest = Body(..
             message="Verification OTP sent to email."
         )
 
-
 # --------------------------------------------------
-# VERIFY OTP
+# VERIFY OTP (UPDATED - EXPIRY AWARE)
 # --------------------------------------------------
 
 @router.post("/email-verification/verify", response_model=EmailVerificationResponse)
@@ -160,11 +155,17 @@ async def verify_email(payload: EmailVerificationVerify = Body(...)):
 
         email = payload.email.strip().lower()
 
+        # --------------------------------------------------
+        # Get latest OTP row (CRITICAL FIX)
+        # --------------------------------------------------
+
         otp_row = await conn.fetchrow(
             """
             SELECT id, otp_code, expires_at, is_used, is_verified
             FROM solvetax.employee_email_verifications
-            WHERE email=$1
+            WHERE lower(trim(email)) = lower(trim($1))
+            ORDER BY created_at DESC
+            LIMIT 1
             """,
             email
         )
@@ -172,7 +173,8 @@ async def verify_email(payload: EmailVerificationVerify = Body(...)):
         if not otp_row:
             raise HTTPException(status_code=400, detail="OTP not requested")
 
-        if otp_row["is_verified"]:
+        # 🔥 EXPIRY AWARE CHECK
+        if otp_row["is_verified"] and otp_row["expires_at"] > datetime.now(timezone.utc):
             raise HTTPException(status_code=400, detail="Email already verified")
 
         if otp_row["is_used"]:
