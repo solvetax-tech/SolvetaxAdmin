@@ -15,172 +15,62 @@ router = APIRouter(
     tags=["Registration Payments"]
 )
 
-# -------------------------------------------------------------------
-# CREATE REGISTRATION PAYMENT (Production Ready + Audit + Full Validation)
-# -------------------------------------------------------------------
-
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
     summary="Create Registration Payment",
-    responses={
-        201: {"description": "Registration payment created successfully."},
-        400: {"description": "Validation failed."},
-        404: {"description": "Entity not found."},
-        409: {"description": "Business rule violation."},
-        500: {"description": "Database or internal error."},
-    },
 )
 async def create_registration_payment(
     payload: RegistrationPaymentIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
 
-    """
-    ✔ Atomic transaction (Payment + Version)
-    ✔ Partial payment supported
-    ✔ Remaining balance validation
-    ✔ Reject if already PAID
-    ✔ Version audit
-    ✔ Structured logging
-    ✔ All DB errors mapped to UI
-    """
-
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
-
     request_id = generate_uuid()
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-
-    log = logging.LoggerAdapter(
-        logger,
-        {"request_id": request_id, "emp_id": emp_id, "api": "create_registration_payment"},
-    )
 
     entity_type = "GST_REGISTRATION"
 
-    log.info(
-        "Incoming registration payment create | entity_type=%s | entity_id=%s | amount=%s | paid_amount=%s",
-        entity_type,
-        payload.entity_id,
-        payload.amount,
-        payload.paid_amount,
-    )
-
-    # --------------------------------------------------
-    # Input Validation
-    # --------------------------------------------------
-
-    field_errors = {}
-
-    if payload.amount is None or payload.amount <= 0:
-        field_errors["amount"] = "Amount must be greater than zero."
-
-    if payload.discount is not None and payload.discount < 0:
-        field_errors["discount"] = "Discount cannot be negative."
-
-    if payload.paid_amount is not None and payload.paid_amount < 0:
-        field_errors["paid_amount"] = "Paid amount cannot be negative."
-
-    if field_errors:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "type": "validation_error",
-                    "message": "Validation failed",
-                    "fields": field_errors,
-                }
-            },
-        )
-
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
-
-    try:
-        pool = await get_db_pool()
-
-    except Exception:
-
-        log.exception("Database pool acquisition failed")
-
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": {
-                    "type": "server_error",
-                    "message": "Database connection error.",
-                    "fields": {},
-                }
-            },
-        )
+    pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-
         try:
 
             # --------------------------------------------------
-            # Validate GST Registration
+            # 1️⃣ Validate GST Registration
             # --------------------------------------------------
 
             entity_row = await conn.fetchrow(
                 f"""
-                SELECT id,
-                       customer_id,
-                       is_active
+                SELECT id, customer_id, is_active
                 FROM {DB_SCHEMA}.gst_registration
                 WHERE id = $1
-                LIMIT 1
                 """,
                 payload.entity_id,
             )
 
             if not entity_row:
-
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "error": {
-                            "type": "validation_error",
-                            "message": "Validation failed",
-                            "fields": {"entity_id": "GST registration not found."},
-                        }
-                    },
-                )
+                raise HTTPException(404, "GST registration not found.")
 
             if not entity_row["is_active"]:
-
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": {
-                            "type": "validation_error",
-                            "message": "Validation failed",
-                            "fields": {"entity_id": "GST registration is inactive."},
-                        }
-                    },
-                )
+                raise HTTPException(400, "GST registration is inactive.")
 
             customer_id = entity_row["customer_id"]
 
             # --------------------------------------------------
-            # Reject if payment already completed
+            # 2️⃣ Reject if already PAID
             # --------------------------------------------------
 
-            paid_row = await conn.fetchrow(
+            already_paid = await conn.fetchrow(
                 f"""
-                SELECT id
+                SELECT 1
                 FROM {DB_SCHEMA}.registration_payments
                 WHERE customer_id = $1
                 AND entity_id = $2
                 AND entity_type = $3
                 AND payment_status = 'PAID'
-                AND is_active = true
+                AND is_active = TRUE
                 LIMIT 1
                 """,
                 customer_id,
@@ -188,21 +78,11 @@ async def create_registration_payment(
                 entity_type,
             )
 
-            if paid_row:
-
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "error": {
-                            "type": "business_rule_violation",
-                            "message": "Payment already completed for this registration.",
-                            "fields": {},
-                        }
-                    },
-                )
+            if already_paid:
+                raise HTTPException(409, "Payment already completed.")
 
             # --------------------------------------------------
-            # LOCK existing payments (ADDED FOR RACE CONDITION SAFETY)
+            # 3️⃣ LOCK rows (race condition safety)
             # --------------------------------------------------
 
             await conn.fetch(
@@ -212,7 +92,6 @@ async def create_registration_payment(
                 WHERE customer_id = $1
                 AND entity_id = $2
                 AND entity_type = $3
-                AND is_active = true
                 FOR UPDATE
                 """,
                 customer_id,
@@ -221,70 +100,129 @@ async def create_registration_payment(
             )
 
             # --------------------------------------------------
-            # Remaining Amount Calculation
+            # 4️⃣ Fetch ORIGINAL + TOTAL DISCOUNT (FIXED)
             # --------------------------------------------------
 
-            summary_row = await conn.fetchrow(
+            base_row = await conn.fetchrow(
                 f"""
                 SELECT
-                    COALESCE(
-                        (
-                            SELECT net_amount
-                            FROM {DB_SCHEMA}.registration_payments
-                            WHERE customer_id = $3
-                            AND entity_id = $4
-                            AND entity_type = $5
-                            AND is_active = true
-                            ORDER BY created_at DESC
-                            LIMIT 1
-                        ),
-                        $1 - COALESCE($2,0)
-                    ) AS net_amount,
-                    COALESCE(SUM(paid_amount),0) AS total_paid
+                    (
+                        SELECT amount
+                        FROM {DB_SCHEMA}.registration_payments
+                        WHERE
+                            customer_id = $1
+                        AND entity_id = $2
+                        AND entity_type = $3
+                        AND is_active = TRUE
+                        AND payment_status != 'CANCELLED'
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                    ) AS original_amount,
+
+                    COALESCE(SUM(discount), 0) AS total_discount
+
                 FROM {DB_SCHEMA}.registration_payments
-                WHERE customer_id = $3
-                AND entity_id = $4
-                AND entity_type = $5
-                AND is_active = true
+                WHERE
+                    customer_id = $1
+                AND entity_id = $2
+                AND entity_type = $3
+                AND is_active = TRUE
                 AND payment_status != 'CANCELLED'
                 """,
-                payload.amount,
-                payload.discount or 0,
                 customer_id,
                 payload.entity_id,
                 entity_type,
             )
 
-            net_amount = summary_row["net_amount"]
+            # First payment
+            if not base_row or base_row["original_amount"] is None:
+                original_amount = float(payload.amount)
+                total_discount = 0.0
+            else:
+                original_amount = float(base_row["original_amount"])
+                total_discount = float(base_row["total_discount"] or 0)
 
-            total_paid = summary_row["total_paid"]
+            # --------------------------------------------------
+            # 5️⃣ Total paid
+            # --------------------------------------------------
 
-            remaining_amount = net_amount - total_paid
-
-            log.info(
-                "Payment validation summary | net_amount=%s | total_paid=%s | remaining=%s",
-                net_amount,
-                total_paid,
-                remaining_amount,
+            paid_row = await conn.fetchrow(
+                f"""
+                SELECT COALESCE(SUM(paid_amount),0) AS total_paid
+                FROM {DB_SCHEMA}.registration_payments
+                WHERE customer_id = $1
+                AND entity_id = $2
+                AND entity_type = $3
+                AND is_active = TRUE
+                AND payment_status != 'CANCELLED'
+                """,
+                customer_id,
+                payload.entity_id,
+                entity_type,
             )
 
-            if payload.paid_amount > remaining_amount:
+            total_paid = float(paid_row["total_paid"])
 
+            # --------------------------------------------------
+            # 6️⃣ Remaining BEFORE discount
+            # --------------------------------------------------
+
+            remaining_before_discount = original_amount - total_discount - total_paid
+
+            if remaining_before_discount <= 0:
+                raise HTTPException(409, "Payment already completed.")
+
+            # --------------------------------------------------
+            # 7️⃣ Apply NEW discount
+            # --------------------------------------------------
+
+            new_discount = float(payload.discount or 0)
+
+            if new_discount < 0:
+                raise HTTPException(400, "Discount cannot be negative.")
+
+            if new_discount > remaining_before_discount:
                 raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": {
-                            "type": "validation_error",
-                            "message": "Validation failed",
-                            "fields": {
-                                "paid_amount": f"Paid amount exceeds remaining balance ({remaining_amount})."
-                            },
-                        }
-                    },
+                    400,
+                    f"Discount cannot exceed remaining amount ({remaining_before_discount}).",
+                )
+
+            total_discount += new_discount
+
+            # --------------------------------------------------
+            # 8️⃣ Remaining AFTER discount
+            # --------------------------------------------------
+
+            remaining_after_discount = original_amount - total_discount - total_paid
+
+            paid_amount = float(payload.paid_amount or 0)
+
+            if paid_amount <= 0:
+                raise HTTPException(400, "Paid amount must be greater than 0.")
+
+            if paid_amount > remaining_after_discount:
+                raise HTTPException(
+                    400,
+                    f"Paid amount exceeds remaining balance ({remaining_after_discount}).",
                 )
 
             # --------------------------------------------------
-            # Transaction Start
+            # 9️⃣ Net amount
+            # --------------------------------------------------
+
+            net_amount = original_amount - total_discount
+
+            # --------------------------------------------------
+            # 🔟 Status
+            # --------------------------------------------------
+
+            if paid_amount == remaining_after_discount:
+                payment_status = "PAID"
+            else:
+                payment_status = "PENDING"
+
+            # --------------------------------------------------
+            # 1️⃣1️⃣ INSERT
             # --------------------------------------------------
 
             async with conn.transaction():
@@ -300,37 +238,28 @@ async def create_registration_payment(
                         amount,
                         discount,
                         paid_amount,
+                        net_amount,
+                        payment_status,
                         remarks,
                         created_at,
                         updated_at
                     )
                     VALUES
                     (
-                        NULL,$1,$2,$3,$4,$5,$6,$7,NOW(),NOW()
+                        NULL,$1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW()
                     )
                     RETURNING *
                     """,
                     customer_id,
                     payload.entity_id,
                     entity_type,
-                    payload.amount,
-                    payload.discount or 0,
-                    payload.paid_amount or 0,
+                    original_amount,
+                    total_discount,
+                    paid_amount,
+                    net_amount,
+                    payment_status,
                     payload.remarks,
                 )
-
-                if not payment_row:
-
-                    raise HTTPException(
-                        status_code=500,
-                        detail={
-                            "error": {
-                                "type": "server_error",
-                                "message": "Payment creation failed.",
-                                "fields": {},
-                            }
-                        },
-                    )
 
                 # --------------------------------------------------
                 # Version Audit
@@ -359,167 +288,24 @@ async def create_registration_payment(
                     None,
                 )
 
-            log.info(
-                "Registration payment created successfully | payment_id=%s",
-                payment_row["id"],
-            )
+            # --------------------------------------------------
+            # RESPONSE
+            # --------------------------------------------------
 
             return {
                 **dict(payment_row),
-                "message": "Registration payment created successfully.",
+                "message": "Payment created successfully.",
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # UNIQUE CONSTRAINT
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.UniqueViolationError as e:
-
-            constraint = getattr(e, "constraint_name", "")
-
-            field_errors = {}
-
-            if constraint == "registration_payments_transaction_id_key":
-                field_errors["transaction_id"] = "Transaction ID already exists."
-
-            elif constraint == "uq_registration_paid":
-                field_errors["payment"] = "Payment already completed for this registration."
-
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": field_errors or {"non_field_error": "Duplicate value violation."},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # FOREIGN KEY VIOLATION
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.ForeignKeyViolationError:
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"non_field_error": "Invalid foreign key reference."},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # CHECK CONSTRAINT
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.CheckViolationError as e:
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {
-                            "non_field_error": f"Data violates constraint: {getattr(e, 'constraint_name','')}"
-                        },
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # NOT NULL
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.NotNullViolationError:
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"non_field_error": "Missing required field value."},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # DATA TYPE ERROR
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.DataError:
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Validation failed",
-                        "fields": {"non_field_error": "Invalid data format provided."},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # TRIGGER BUSINESS RULE
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.RaiseError as e:
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "business_rule_violation",
-                        "message": str(e),
-                        "fields": {},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # GENERIC DB ERROR
-        # --------------------------------------------------
-
         except asyncpg.PostgresError:
-
-            log.exception("Database error during registration payment creation")
-
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "type": "server_error",
-                        "message": "Database error occurred.",
-                        "fields": {},
-                    }
-                },
-            )
+            raise HTTPException(500, "Database error.")
 
         except HTTPException:
             raise
 
         except Exception:
-
-            log.exception("Unexpected error during registration payment creation")
-
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "type": "server_error",
-                        "message": "Internal server error.",
-                        "fields": {},
-                    }
-                },
-            )
+            raise HTTPException(500, "Internal server error.")
 # -------------------------------------------------------------------
 # LIST REGISTRATION PAYMENTS (DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
@@ -885,487 +671,7 @@ async def list_registration_payments(
             status_code=500,
             detail="Internal server error.",
         )
-# -------------------------------------------------------------------
-# EDIT REGISTRATION PAYMENT (Production Ready + Discount Propagation)
-# -------------------------------------------------------------------
 
-@router.post(
-    "/{payment_id}/edit",
-    summary="Edit Registration Payment",
-    responses={
-        200: {"description": "Registration payment updated successfully."},
-        400: {"description": "Validation failed."},
-        404: {"description": "Payment not found."},
-        409: {"description": "State conflict."},
-        500: {"description": "Database or internal error."},
-    },
-)
-async def edit_registration_payment(
-    payment_id: int,
-    payload: RegistrationPaymentEditIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
-):
-
-    """
-    ✔ Only PENDING / CANCELLED payments editable
-    ✔ Discount update propagates to all active payments
-    ✔ Partial payment integrity maintained
-    ✔ Row locking prevents concurrent updates
-    ✔ Full DB error mapping for UI
-    ✔ Version audit
-    """
-
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
-
-    request_id = generate_uuid()
-
-    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-
-    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-
-    log = logging.LoggerAdapter(
-        logger,
-        {"request_id": request_id, "emp_id": emp_id, "api": "edit_registration_payment"},
-    )
-
-    log.info("Incoming registration payment edit | payment_id=%s", payment_id)
-
-    # --------------------------------------------------
-    # Extract payload
-    # --------------------------------------------------
-
-    try:
-        update_data = payload.model_dump(exclude_unset=True)
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "type": "validation_error",
-                    "message": "Invalid request payload.",
-                    "fields": {},
-                }
-            },
-        )
-
-    if not update_data:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "type": "validation_error",
-                    "message": "No editable fields provided.",
-                    "fields": {},
-                }
-            },
-        )
-
-    # --------------------------------------------------
-    # Normalize inputs
-    # --------------------------------------------------
-
-    if "remarks" in update_data and update_data["remarks"]:
-        update_data["remarks"] = update_data["remarks"].strip()
-
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
-
-    try:
-        pool = await get_db_pool()
-
-    except Exception:
-
-        log.exception("Database pool acquisition failed")
-
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": {
-                    "type": "server_error",
-                    "message": "Database connection error.",
-                    "fields": {},
-                }
-            },
-        )
-
-    async with pool.acquire() as conn:
-
-        try:
-
-            async with conn.transaction():
-
-                # --------------------------------------------------
-                # Fetch payment with lock
-                # --------------------------------------------------
-
-                old_row = await conn.fetchrow(
-                    f"""
-                    SELECT *
-                    FROM {DB_SCHEMA}.registration_payments
-                    WHERE id = $1
-                    AND is_active = TRUE
-                    FOR UPDATE
-                    """,
-                    payment_id,
-                )
-
-                if not old_row:
-                    raise HTTPException(
-                        status_code=404,
-                        detail={
-                            "error": {
-                                "type": "validation_error",
-                                "message": "Validation failed",
-                                "fields": {
-                                    "payment_id": "Registration payment not found or inactive."
-                                },
-                            }
-                        },
-                    )
-
-                # --------------------------------------------------
-                # Prevent editing completed payments
-                # --------------------------------------------------
-
-                if old_row["payment_status"] == "PAID":
-
-                    raise HTTPException(
-                        status_code=409,
-                        detail={
-                            "error": {
-                                "type": "business_rule_violation",
-                                "message": "Completed payments cannot be modified.",
-                                "fields": {},
-                            }
-                        },
-                    )
-
-                # --------------------------------------------------
-                # Discount Validation
-                # --------------------------------------------------
-
-                new_discount = update_data.get("discount", old_row["discount"])
-
-                if new_discount > old_row["amount"]:
-
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "error": {
-                                "type": "validation_error",
-                                "message": "Validation failed",
-                                "fields": {
-                                    "discount": "Discount cannot exceed original amount."
-                                },
-                            }
-                        },
-                    )
-
-                # --------------------------------------------------
-                # Calculate total already paid
-                # --------------------------------------------------
-
-                total_paid = await conn.fetchval(
-                    f"""
-                    SELECT COALESCE(SUM(paid_amount),0)
-                    FROM {DB_SCHEMA}.registration_payments
-                    WHERE
-                        customer_id = $1
-                    AND entity_id = $2
-                    AND entity_type = $3
-                    AND is_active = TRUE
-                    """,
-                    old_row["customer_id"],
-                    old_row["entity_id"],
-                    old_row["entity_type"],
-                )
-
-                new_net = old_row["amount"] - new_discount
-
-                # --------------------------------------------------
-                # Prevent discount breaking payment integrity
-                # --------------------------------------------------
-
-                if new_net < total_paid:
-
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "error": {
-                                "type": "business_rule_violation",
-                                "message": "Discount cannot be applied because payments already made exceed the new net amount.",
-                                "fields": {
-                                    "discount": f"Maximum allowed discount is {old_row['amount'] - total_paid}."
-                                },
-                            }
-                        },
-                    )
-
-                # --------------------------------------------------
-                # Detect no change
-                # --------------------------------------------------
-
-                no_change = all(
-                    old_row.get(k) == v for k, v in update_data.items()
-                )
-
-                if no_change:
-
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "error": {
-                                "type": "validation_error",
-                                "message": "No changes detected.",
-                                "fields": {},
-                            }
-                        },
-                    )
-
-                # --------------------------------------------------
-                # Discount Propagation Logic
-                # --------------------------------------------------
-
-                if "discount" in update_data:
-
-                    new_net = old_row["amount"] - new_discount
-
-                    await conn.execute(
-                        f"""
-                        UPDATE {DB_SCHEMA}.registration_payments
-                        SET
-                            discount = $1,
-                            net_amount = $2,
-                            updated_at = NOW()
-                        WHERE
-                            customer_id = $3
-                        AND entity_id = $4
-                        AND entity_type = $5
-                        AND is_active = TRUE
-                        AND payment_status IN ('PENDING','CANCELLED')
-                        """,
-                        new_discount,
-                        new_net,
-                        old_row["customer_id"],
-                        old_row["entity_id"],
-                        old_row["entity_type"],
-                    )
-
-                # --------------------------------------------------
-                # Build dynamic update query
-                # --------------------------------------------------
-
-                fields = []
-                values = []
-                idx = 1
-
-                for k, v in update_data.items():
-                    fields.append(f"{k} = ${idx}")
-                    values.append(v)
-                    idx += 1
-
-                fields.append("updated_at = NOW()")
-
-                values.append(payment_id)
-
-                update_sql = f"""
-                    UPDATE {DB_SCHEMA}.registration_payments
-                    SET {', '.join(fields)}
-                    WHERE id = ${idx}
-                    AND is_active = TRUE
-                    AND payment_status IN ('PENDING','CANCELLED')
-                    RETURNING *
-                """
-
-                new_row = await conn.fetchrow(update_sql, *values)
-
-                if not new_row:
-
-                    raise HTTPException(
-                        status_code=409,
-                        detail={
-                            "error": {
-                                "type": "state_conflict",
-                                "message": "Payment state changed. Please retry.",
-                                "fields": {},
-                            }
-                        },
-                    )
-
-                # --------------------------------------------------
-                # Version Audit
-                # --------------------------------------------------
-
-                await conn.execute(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.versions
-                    (
-                        emp_id,
-                        entity_type,
-                        entity_id,
-                        customer_id,
-                        action,
-                        json,
-                        updated_json
-                    )
-                    VALUES ($1,$2,$3,$4,$5,$6,$7)
-                    """,
-                    emp_id,
-                    "REGISTRATION_PAYMENT",
-                    payment_id,
-                    old_row["customer_id"],
-                    "UPDATE",
-                    json.dumps(dict(old_row), default=str),
-                    json.dumps(dict(new_row), default=str),
-                )
-
-                log.info(
-                    "Registration payment updated successfully | payment_id=%s",
-                    payment_id,
-                )
-
-                return {
-                    **dict(new_row),
-                    "message": "Registration payment updated successfully.",
-                    "request_id": request_id,
-                }
-
-        # --------------------------------------------------
-        # UNIQUE CONSTRAINT
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.UniqueViolationError:
-
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Duplicate value violates unique constraint.",
-                        "fields": {},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # CHECK CONSTRAINT
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.CheckViolationError as e:
-
-            constraint = getattr(e, "constraint_name", None)
-
-            CHECK_MAP = {
-                "chk_amount_positive": "Amount cannot be negative.",
-                "chk_discount_positive": "Discount cannot be negative.",
-                "chk_paid_amount_positive": "Paid amount cannot be negative.",
-                "chk_payment_status": "Invalid payment status.",
-            }
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": CHECK_MAP.get(
-                            constraint,
-                            f"Data violates constraint: {constraint}",
-                        ),
-                        "fields": {},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # FOREIGN KEY
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.ForeignKeyViolationError:
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Invalid foreign key reference.",
-                        "fields": {},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # DATA TYPE
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.DataError:
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "validation_error",
-                        "message": "Invalid data format provided.",
-                        "fields": {},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # TRIGGER RAISE
-        # --------------------------------------------------
-
-        except asyncpg.exceptions.RaiseError as e:
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "type": "business_rule_violation",
-                        "message": str(e),
-                        "fields": {},
-                    }
-                },
-            )
-
-        # --------------------------------------------------
-        # GENERIC DB ERROR
-        # --------------------------------------------------
-
-        except asyncpg.PostgresError:
-
-            log.exception("Database error during payment update")
-
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "type": "server_error",
-                        "message": "Database error occurred.",
-                        "fields": {},
-                    }
-                },
-            )
-
-        except HTTPException:
-            raise
-
-        except Exception:
-
-            log.exception("Unexpected error during payment update")
-
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "type": "server_error",
-                        "message": "Internal server error.",
-                        "fields": {},
-                    }
-                },
-            )
 # -------------------------------------------------------------------
 # SOFT DELETE REGISTRATION PAYMENT (Production Ready + Audit)
 # -------------------------------------------------------------------

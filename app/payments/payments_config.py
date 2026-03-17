@@ -108,69 +108,31 @@ async def get_payment_configs(
             status_code=500,
             detail="Internal server error.",
         )
-# -------------------------------------------------------------------
-# GET GST REGISTRATION PAYMENT AMOUNT USING ENTITY_ID
-# -------------------------------------------------------------------
+
 @router.get(
     "/amount/{entity_id}",
-    summary="Get GST Registration Payment Amount",
-    responses={
-        200: {"description": "Amount fetched successfully."},
-        400: {"description": "Invalid request."},
-        404: {"description": "GST registration or payment configuration not found."},
-        500: {"description": "Database error."},
-    },
+    summary="Get GST Registration Payment Details",
 )
 async def get_payment_amount(
     entity_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
 
-    # --------------------------------------------------
-    # Request Context
-    # --------------------------------------------------
     request_id = generate_uuid()
-
-    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-
-    log = logging.LoggerAdapter(
-        logger,
-        {"request_id": request_id, "emp_id": emp_id},
-    )
-
     entity_type = "GST_REGISTRATION"
 
-    log.info(
-        "Fetching GST payment amount | entity_id=%s",
-        entity_id,
-    )
-
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
-    try:
-        pool = await get_db_pool()
-    except Exception:
-        log.exception("Database pool acquisition failed")
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection error.",
-        )
+    pool = await get_db_pool()
 
     async with pool.acquire() as conn:
-
         try:
 
             # --------------------------------------------------
-            # 1️⃣ Fetch GST registration
+            # 1️⃣ Validate GST Registration
             # --------------------------------------------------
+
             gst_row = await conn.fetchrow(
                 f"""
-                SELECT
-                    id,
-                    ownership_category,
-                    is_active
+                SELECT id, customer_id, ownership_category, is_active
                 FROM {DB_SCHEMA}.gst_registration
                 WHERE id = $1
                 LIMIT 1
@@ -179,93 +141,161 @@ async def get_payment_amount(
             )
 
             if not gst_row:
-                raise HTTPException(
-                    status_code=404,
-                    detail="GST registration not found.",
-                )
+                raise HTTPException(404, "GST registration not found.")
 
             if not gst_row["is_active"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail="GST registration is inactive.",
-                )
+                raise HTTPException(400, "GST registration is inactive.")
 
+            customer_id = gst_row["customer_id"]
             ownership_category = gst_row["ownership_category"].strip().upper()
 
             # --------------------------------------------------
-            # 2️⃣ Fetch payment configuration
+            # 2️⃣ Fetch payment summary (FINAL FIXED)
             # --------------------------------------------------
-            config_row = await conn.fetchrow(
-                """
+
+            payment_summary = await conn.fetchrow(
+                f"""
                 SELECT
-                    display_name,
-                    amount,
-                    description,
-                    is_active
-                FROM solvetax.payment_config
-                WHERE entity_type = 'GST_REGISTRATION'
-                AND config_type = 'PRICE'
-                AND value = $1
-                LIMIT 1
+                    -- ORIGINAL AMOUNT (first valid transaction)
+                    (
+                        SELECT amount
+                        FROM {DB_SCHEMA}.registration_payments
+                        WHERE
+                            customer_id = $1
+                        AND entity_id = $2
+                        AND entity_type = $3
+                        AND is_active = TRUE
+                        AND payment_status != 'CANCELLED'
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                    ) AS original_amount,
+
+                    -- TOTAL DISCOUNT
+                    COALESCE(SUM(discount), 0) AS total_discount,
+
+                    -- TOTAL PAID
+                    COALESCE(SUM(paid_amount), 0) AS total_paid,
+
+                    -- LAST STATUS (FIXED)
+                    (
+                        SELECT payment_status
+                        FROM {DB_SCHEMA}.registration_payments
+                        WHERE
+                            customer_id = $1
+                        AND entity_id = $2
+                        AND entity_type = $3
+                        AND is_active = TRUE
+                        AND payment_status != 'CANCELLED'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    ) AS last_status
+
+                FROM {DB_SCHEMA}.registration_payments
+                WHERE
+                    customer_id = $1
+                AND entity_id = $2
+                AND entity_type = $3
+                AND is_active = TRUE
+                AND payment_status != 'CANCELLED'
                 """,
-                ownership_category,
-            )
-
-            if not config_row:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Payment configuration not found.",
-                )
-
-            if not config_row["is_active"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Payment configuration is inactive.",
-                )
-
-            log.info(
-                "Payment amount fetched | entity_id=%s | ownership=%s | amount=%s",
+                customer_id,
                 entity_id,
-                ownership_category,
-                config_row["amount"],
+                entity_type,
             )
+
+            # --------------------------------------------------
+            # 3️⃣ FIRST PAYMENT (no records)
+            # --------------------------------------------------
+
+            if payment_summary["original_amount"] is None:
+
+                config = await conn.fetchrow(
+                    """
+                    SELECT display_name, amount, description, is_active
+                    FROM solvetax.payment_config
+                    WHERE entity_type = 'GST_REGISTRATION'
+                    AND config_type = 'PRICE'
+                    AND value = $1
+                    LIMIT 1
+                    """,
+                    ownership_category,
+                )
+
+                if not config:
+                    raise HTTPException(404, "Payment configuration not found.")
+
+                if not config["is_active"]:
+                    raise HTTPException(400, "Payment configuration is inactive.")
+
+                original_amount = float(config["amount"])
+                total_discount = 0.0
+                total_paid = 0.0
+
+                display_name = config["display_name"]
+                description = config["description"]
+
+            else:
+
+                original_amount = float(payment_summary["original_amount"])
+                total_discount = float(payment_summary["total_discount"] or 0)
+                total_paid = float(payment_summary["total_paid"])
+                last_status = payment_summary["last_status"]
+
+                display_name = "GST Registration"
+                description = "Remaining payment for GST registration"
+
+                # --------------------------------------------------
+                # 4️⃣ STOP if already PAID
+                # --------------------------------------------------
+
+                if last_status == "PAID":
+                    raise HTTPException(
+                        409,
+                        "Payment already completed for this registration.",
+                    )
+
+            # --------------------------------------------------
+            # 5️⃣ Calculate financials
+            # --------------------------------------------------
+
+            net_amount = original_amount - total_discount
+            remaining_amount = net_amount - total_paid
+
+            if remaining_amount <= 0:
+                raise HTTPException(
+                    409,
+                    "Payment already completed for this registration.",
+                )
+
+            # --------------------------------------------------
+            # 6️⃣ FINAL RESPONSE (UI FRIENDLY)
+            # --------------------------------------------------
 
             return {
                 "entity_id": entity_id,
                 "entity_type": entity_type,
                 "ownership_category": ownership_category,
-                "display_name": config_row["display_name"],
-                "amount": float(config_row["amount"]),
-                "description": config_row["description"],
+                "display_name": display_name,
+
+                # 🔥 CORE FINANCIAL DATA
+                "original_amount": round(original_amount, 2),
+                "total_discount": round(total_discount, 2),
+                "total_paid": round(total_paid, 2),
+                "net_amount": round(net_amount, 2),
+                "remaining_amount": round(remaining_amount, 2),
+
+                # 🔥 UI DIRECT FIELD (optional but helpful)
+                "payable_amount": round(remaining_amount, 2),
+
+                "description": description,
                 "request_id": request_id,
             }
 
-        # --------------------------------------------------
-        # DATABASE ERROR
-        # --------------------------------------------------
-        except asyncpg.PostgresError as e:
-
-            log.error(
-                "Database error while fetching payment amount | %s",
-                str(e),
-                exc_info=True,
-            )
-
-            raise HTTPException(
-                status_code=500,
-                detail="Database error.",
-            )
+        except asyncpg.PostgresError:
+            raise HTTPException(500, "Database error.")
 
         except HTTPException:
             raise
 
         except Exception:
-
-            log.exception(
-                "Unexpected error while fetching GST payment amount"
-            )
-
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error.",
-            )
+            raise HTTPException(500, "Internal server error.")
