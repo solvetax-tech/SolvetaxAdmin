@@ -259,6 +259,48 @@ def build_gst_visibility(role: str, emp_id: int, idx: int, schema: str):
         return sql, [emp_id], idx + 1
 
     return None, [], idx
+def build_gst_filing_visibility(role: str, emp_id: int, idx: int, schema: str):
+    """
+    GST Filing visibility rules
+
+    ADMIN → all
+    RM → gst_filings.rm_id
+    OP → gst_filings.op_id
+    MANAGERS → team members
+    """
+
+    if role == "ADMIN":
+        return None, [], idx
+
+    if role == "RM":
+        return f"f.rm_id = ${idx}", [emp_id], idx + 1
+
+    if role == "OP":
+        return f"f.op_id = ${idx}", [emp_id], idx + 1
+
+    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+        sql = f"""
+        (
+            f.rm_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+            OR
+            f.op_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+        )
+        """
+        return sql, [emp_id], idx + 1
+
+    return None, [], idx
 def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: str):
     """
     Enterprise visibility for customer_services (alias = cs)

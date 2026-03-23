@@ -42,7 +42,20 @@ async def get_services(
         {"request_id": request_id, "emp_id": emp_id},
     )
 
-    log.info("Fetching services dropdown | category=%s", service_category)
+    # --------------------------------------------------
+    # Normalize Input
+    # --------------------------------------------------
+
+    service_category_cleaned = (
+        service_category.strip().upper()
+        if service_category and service_category.strip()
+        else None
+    )
+
+    log.info(
+        "Fetching services dropdown | category=%s",
+        service_category_cleaned
+    )
 
     # --------------------------------------------------
     # DB Pool
@@ -62,12 +75,20 @@ async def get_services(
         values = []
         param_index = 1
 
-        if service_category and service_category.strip():
+        # --------------------------------------------------
+        # CATEGORY FILTER
+        # --------------------------------------------------
+
+        if service_category_cleaned:
             conditions.append(f"service_category = ${param_index}")
-            values.append(service_category.strip().upper())
+            values.append(service_category_cleaned)
             param_index += 1
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        # --------------------------------------------------
+        # MAIN QUERY (IMPROVED)
+        # --------------------------------------------------
 
         sql = f"""
             SELECT
@@ -75,7 +96,8 @@ async def get_services(
                 service_category,
                 service_code,
                 service_name,
-                description
+                description,
+                COALESCE(followup_mode, 'MANUAL') AS followup_mode  -- ✅ ADDED
             FROM {DB_SCHEMA}.service_config
             {where_clause}
             ORDER BY service_category, service_name
@@ -84,7 +106,10 @@ async def get_services(
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *values)
 
-        log.info("Services fetched successfully | count=%s", len(rows))
+        log.info(
+            "Services fetched successfully | count=%s",
+            len(rows)
+        )
 
         return {
             "data": [dict(row) for row in rows],

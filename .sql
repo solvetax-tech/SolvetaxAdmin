@@ -11,6 +11,18 @@ OR
 (action = 'ACTIVATE' AND json IS NULL AND updated_json IS  NULL)
 )
 );
+
+SELECT
+    c.relname AS table_name,
+    t.tgname AS trigger_name,
+    p.proname AS function_name,
+    pg_get_functiondef(p.oid) AS function_code
+FROM pg_trigger t
+JOIN pg_class c ON t.tgrelid = c.oid
+JOIN pg_proc p ON t.tgfoid = p.oid
+JOIN pg_namespace n ON c.relnamespace = n.oid
+WHERE n.nspname = 'solvetax'
+AND NOT t.tgisinternal;
 -- solvetax.crm_leads definition
 -- Drop table
 

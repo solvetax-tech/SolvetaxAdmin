@@ -85,6 +85,10 @@ async def create_gst_registration(
                 username_value = payload.username.strip() if payload.username else None
                 secondary_email_value = payload.secondary_email.strip().lower() if payload.secondary_email else None
 
+                username_value = username_value or None
+                mobile_value = mobile_value or None
+                secondary_email_value = secondary_email_value or None
+
                 if gstin_value and not re.fullmatch(r"[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]", gstin_value):
                     field_errors["gstin"] = "Invalid GSTIN format."
 
@@ -162,6 +166,9 @@ async def create_gst_registration(
                         },
                     )
 
+                # --------------------------------------------------
+                # INSERT GST
+                # --------------------------------------------------
                 insert_sql = f"""
                     INSERT INTO {DB_SCHEMA}.gst_registration (
                         customer_id,
@@ -186,13 +193,14 @@ async def create_gst_registration(
                         secondary_email,
                         created_by,
                         rm_id,
+                        filing_preference,
                         created_at,
                         updated_at
                     )
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
                         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                        $21,$22,$23,$24
+                        $21,$22,$23,$24,$25
                     )
                     RETURNING *
                 """
@@ -200,10 +208,10 @@ async def create_gst_registration(
                 gst_row = await conn.fetchrow(
                     insert_sql,
                     payload.customer_id,
-                    payload.username,
+                    username_value,
                     payload.password,
-                    payload.pan,
-                    payload.gstin,
+                    pan_value,
+                    gstin_value,
                     payload.business_name,
                     payload.registration_type,
                     payload.ownership_category,
@@ -216,11 +224,12 @@ async def create_gst_registration(
                     payload.is_rcm_applicable,
                     payload.is_filing_needed,
                     True,
-                    payload.mobile,
+                    mobile_value,
                     payload.email,
-                    payload.secondary_email,
+                    secondary_email_value,
                     payload.created_by or emp_id,
                     payload.rm_id,
+                    getattr(payload, "filing_preference", None),
                     now,
                     now,
                 )
@@ -228,6 +237,37 @@ async def create_gst_registration(
                 if not gst_row:
                     raise HTTPException(500, "GST registration creation failed.")
 
+                # --------------------------------------------------
+                # ✅ ALWAYS INSERT SERVICE_ID = 1
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.customer_services (
+                        customer_id,
+                        service_id,
+                        service_status,
+                        rm_id,
+                        op_id,
+                        entity_type,
+                        entity_id,
+                        created_at
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    payload.customer_id,
+                    1,  # 🔥 FIXED SERVICE_ID
+                    "PENDING",
+                    payload.rm_id,
+                    emp_id,
+                    "GST_REGISTRATION",
+                    gst_row["id"],
+                    now,
+                )
+
+                # --------------------------------------------------
+                # VERSION LOG
+                # --------------------------------------------------
                 await conn.execute(
                     f"""
                     INSERT INTO {DB_SCHEMA}.versions (
@@ -262,6 +302,7 @@ async def create_gst_registration(
             UNIQUE_MAP = {
                 "gst_registration_gstin_key": ("gstin", "GSTIN already exists."),
                 "uq_gst_username_lower": ("username", "Username already exists."),
+                "uq_gst_gstin_mobile_active": ("mobile", "Mobile already mapped to GST.")
             }
 
             field, message = UNIQUE_MAP.get(
@@ -325,6 +366,9 @@ async def create_gst_registration(
         except Exception:
             log.exception("Unexpected error during GST registration create")
             raise HTTPException(500, "Internal server error.")
+# -------------------------------------------------------------------
+# FILTER GST REGISTRATIONS (ENTERPRISE PRODUCTION READY)
+# -------------------------------------------------------------------
 @router.get(
     "/dynamic_filter",
     summary="Filter GST Registrations",
@@ -346,13 +390,15 @@ async def list_gst_registrations(
     secondary_email: Optional[str] = None,
     secondary_email_is_null: Optional[bool] = None,
     rm_id: Optional[int] = None,
-    created_by: Optional[int] = None,   # NEW FILTER
+    created_by: Optional[int] = None,
     business_name: Optional[str] = None,
     business_name_is_null: Optional[bool] = None,
     business_type: Optional[str] = None,
     registration_status: Optional[str] = None,
     ownership_category: Optional[str] = None,
     state: Optional[str] = None,
+    filing_preference: Optional[str] = None,  # ✅ ADDED
+    has_service: Optional[bool] = None,       # ✅ ADDED
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
     from_date: Optional[datetime] = None,
@@ -374,17 +420,49 @@ async def list_gst_registrations(
         {"request_id": request_id, "emp_id": emp_id},
     )
 
-    log.info(
-        "Incoming GST filter | limit=%s offset=%s",
-        limit,
-        offset,
-    )
+    log.info("Incoming GST filter | limit=%s offset=%s", limit, offset)
+
+    # --------------------------------------------------
+    # 🔥 ADDED VALIDATIONS (NO REMOVAL)
+    # --------------------------------------------------
 
     if from_date and to_date and from_date > to_date:
         raise HTTPException(
             status_code=400,
             detail="from_date cannot be greater than to_date.",
         )
+
+    # ✅ TIMEZONE NORMALIZATION
+    def normalize_dt(dt):
+        if dt and dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    from_date = normalize_dt(from_date)
+    to_date = normalize_dt(to_date)
+
+    # ✅ SAFE NORMALIZATION
+    gstin = gstin.strip().upper() if gstin else None
+    mobile = mobile.strip() if mobile else None
+    email = email.strip().lower() if email else None
+    secondary_email = secondary_email.strip().lower() if secondary_email else None
+
+    # ✅ ENUM VALIDATIONS
+    valid_registration_status = {"DRAFT", "SUBMITTED", "APPROVED", "REJECTED"}
+    if registration_status and registration_status.strip().upper() not in valid_registration_status:
+        raise HTTPException(400, "Invalid registration_status")
+
+    valid_business_types = {"PROPRIETORSHIP", "PARTNERSHIP", "COMPANY", "LLP"}
+    if business_type and business_type.strip().upper() not in valid_business_types:
+        raise HTTPException(400, "Invalid business_type")
+
+    valid_ownership = {"INDIVIDUAL", "COMPANY", "PARTNERSHIP"}
+    if ownership_category and ownership_category.strip().upper() not in valid_ownership:
+        raise HTTPException(400, "Invalid ownership_category")
+
+    valid_filing_pref = {"MONTHLY", "QUARTERLY"}
+    if filing_preference and filing_preference.strip().upper() not in valid_filing_pref:
+        raise HTTPException(400, "Invalid filing_preference")
 
     try:
         pool = await get_db_pool()
@@ -399,6 +477,8 @@ async def list_gst_registrations(
         conditions = []
         values = []
         param_index = 1
+
+        join_customer_services = False  # ✅ ADDED
 
         # --------------------------------------------------
         # Indexed Exact Match Filters
@@ -416,30 +496,30 @@ async def list_gst_registrations(
 
         if gstin_is_null:
             conditions.append("g.gstin IS NULL")
-        elif gstin and gstin.strip():
+        elif gstin:
             conditions.append(f"upper(g.gstin) = ${param_index}")
-            values.append(gstin.strip().upper())
+            values.append(gstin)
             param_index += 1
 
         if mobile_is_null:
             conditions.append("g.mobile IS NULL")
-        elif mobile and mobile.strip():
+        elif mobile:
             conditions.append(f"g.mobile = ${param_index}")
-            values.append(mobile.strip())
+            values.append(mobile)
             param_index += 1
 
         if email_is_null:
             conditions.append("g.email IS NULL")
-        elif email and email.strip():
+        elif email:
             conditions.append(f"lower(g.email) = ${param_index}")
-            values.append(email.strip().lower())
+            values.append(email)
             param_index += 1
 
         if secondary_email_is_null:
             conditions.append("g.secondary_email IS NULL")
-        elif secondary_email and secondary_email.strip():
+        elif secondary_email:
             conditions.append(f"lower(g.secondary_email) = ${param_index}")
-            values.append(secondary_email.strip().lower())
+            values.append(secondary_email)
             param_index += 1
 
         if rm_id is not None:
@@ -447,7 +527,6 @@ async def list_gst_registrations(
             values.append(rm_id)
             param_index += 1
 
-        # NEW FILTER
         if created_by is not None:
             conditions.append(f"g.created_by = ${param_index}")
             values.append(created_by)
@@ -457,14 +536,15 @@ async def list_gst_registrations(
             conditions.append("g.business_name IS NULL")
 
         elif business_name and business_name.strip():
+            business_name_clean = business_name.strip()
             conditions.append(
                 f"""(
                     g.business_name ILIKE ${param_index}
                     OR similarity(g.business_name, ${param_index + 1}) >= 0.8
                 )"""
             )
-            values.append(f"%{business_name.strip()}%")
-            values.append(business_name.strip())
+            values.append(f"%{business_name_clean}%")
+            values.append(business_name_clean)
             param_index += 2
 
         if business_type and business_type.strip():
@@ -487,9 +567,17 @@ async def list_gst_registrations(
             values.append(state.strip().upper())
             param_index += 1
 
-        # --------------------------------------------------
-        # Active Filtering Pattern
-        # --------------------------------------------------
+        if filing_preference and filing_preference.strip():
+            conditions.append(f"g.filing_preference = ${param_index}")
+            values.append(filing_preference.strip().upper())
+            param_index += 1
+
+        if has_service is not None:
+            join_customer_services = True
+            if has_service:
+                conditions.append("cs.entity_id IS NOT NULL")
+            else:
+                conditions.append("cs.entity_id IS NULL")
 
         if is_active is not None:
             conditions.append(f"g.is_active = ${param_index}")
@@ -497,10 +585,6 @@ async def list_gst_registrations(
             param_index += 1
         elif not include_inactive:
             conditions.append("g.is_active = TRUE")
-
-        # --------------------------------------------------
-        # Date Filtering
-        # --------------------------------------------------
 
         if from_date:
             conditions.append(f"g.created_at >= ${param_index}")
@@ -527,15 +611,27 @@ async def list_gst_registrations(
             conditions.append(visibility_sql)
             values.extend(visibility_values)
 
-        # --------------------------------------------------
-        # WHERE Builder
-        # --------------------------------------------------
-
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+        # --------------------------------------------------
+        # JOIN (FIXED DUPLICATE ISSUE)
+        # --------------------------------------------------
+
+        join_sql = ""
+        if join_customer_services:
+            join_sql = f"""
+            LEFT JOIN (
+                SELECT DISTINCT entity_id
+                FROM {DB_SCHEMA}.customer_services
+                WHERE entity_type = 'GST_REGISTRATION'
+                  AND status = 'ACTIVE'
+            ) cs ON cs.entity_id = g.id
+            """
+
         count_sql = f"""
-            SELECT COUNT(*)
+            SELECT COUNT(1)
               FROM {DB_SCHEMA}.gst_registration g
+              {join_sql}
               {where_clause}
         """
 
@@ -548,6 +644,7 @@ async def list_gst_registrations(
                      ON g.rm_id = e_rm.emp_id
               LEFT JOIN {DB_SCHEMA}.employees e_creator
                      ON g.created_by = e_creator.emp_id
+              {join_sql}
               {where_clause}
              ORDER BY g.created_at DESC, g.id DESC
              LIMIT ${param_index} OFFSET ${param_index + 1}
@@ -566,7 +663,11 @@ async def list_gst_registrations(
         )
 
         return {
-            "data": [dict(row) for row in rows]
+            "data": [dict(row) for row in rows],
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
         }
 
     except asyncpg.PostgresError as e:
@@ -639,12 +740,28 @@ async def edit_gst_registration(
         update_data = payload.model_dump(exclude_unset=True)
     except Exception:
         log.exception("Payload serialization failed")
-        raise HTTPException(400, "Invalid request payload.")
+        raise HTTPException(status_code=400, detail="Invalid request payload.")
 
     if not update_data:
-        raise HTTPException(400, "At least one field must be provided for update.")
+        raise HTTPException(status_code=400, detail="At least one field must be provided for update.")
 
     update_data.pop("approved_at", None)  # Never allow manual update
+
+    # --------------------------------------------------
+    # 🔥 ADDED (1): NORMALIZATION BEFORE DUPLICATE CHECK
+    # --------------------------------------------------
+    def normalize(k, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            if k in ["gstin", "pan"]:
+                return v.upper()
+            if k in ["email", "secondary_email"]:
+                return v.lower()
+        return v
+
+    update_data = {k: normalize(k, v) for k, v in update_data.items()}
 
     # --------------------------------------------------
     # DB Pool
@@ -653,7 +770,7 @@ async def edit_gst_registration(
         pool = await get_db_pool()
     except Exception:
         log.exception("Database pool acquisition failed")
-        raise HTTPException(500, "Database connection error.")
+        raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
         try:
@@ -675,8 +792,8 @@ async def edit_gst_registration(
 
                 if not old_row:
                     raise HTTPException(
-                        404,
-                        "GST registration not found or inactive,First Activate the GST to edit",
+                        status_code=404,
+                        detail="GST registration not found or inactive, First Activate the GST to edit",
                     )
 
                 # --------------------------------------------------
@@ -769,6 +886,7 @@ async def edit_gst_registration(
                     if duplicate_row["username_match"]:
                         field_errors["username"] = "Username already exists."
                         has_duplicate = True
+
                 if field_errors:
                     raise HTTPException(
                         status_code=409 if has_duplicate else 400,
@@ -782,19 +900,15 @@ async def edit_gst_registration(
                     )
 
                 # --------------------------------------------------
-                # 2️⃣ Reject if no actual change
+                # 🔥 ADDED (2): SAFE NO CHANGE CHECK
                 # --------------------------------------------------
-
                 no_change = True
-
                 for k, v in update_data.items():
-
-                    if k in old_row and old_row[k] != v:
+                    if k in old_row and str(old_row[k]).strip() != str(v).strip():
                         no_change = False
                         break
 
                 if no_change:
-
                     raise HTTPException(
                         status_code=400,
                         detail={
@@ -831,8 +945,8 @@ async def edit_gst_registration(
 
                 if not new_row:
                     raise HTTPException(
-                        409,
-                        "GST state changed. Please retry.",
+                        status_code=409,
+                        detail="GST state changed. Please retry.",
                     )
 
                 # --------------------------------------------------
@@ -854,17 +968,17 @@ async def edit_gst_registration(
                     json.dumps(dict(new_row), default=str),
                 )
 
-            log.info(
-                "GST updated successfully | gst_id=%s | fields=%s",
-                gst_id,
-                list(update_data.keys()),
-            )
+                log.info(
+                    "GST updated successfully | gst_id=%s | fields=%s",
+                    gst_id,
+                    list(update_data.keys()),
+                )
 
-            return {
-                **dict(new_row),
-                "message": "GST registration updated successfully.",
-                "request_id": request_id,
-            }
+                return {
+                    **dict(new_row),
+                    "message": "GST registration updated successfully.",
+                    "request_id": request_id,
+                }
 
         # --------------------------------------------------
         # UNIQUE CONSTRAINTS
@@ -897,7 +1011,7 @@ async def edit_gst_registration(
             )
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(400, "Invalid foreign key reference provided.")
+            raise HTTPException(status_code=400, detail="Invalid foreign key reference provided.")
 
         except asyncpg.exceptions.CheckViolationError as e:
             constraint = getattr(e, "constraint_name", None)
@@ -930,21 +1044,22 @@ async def edit_gst_registration(
             )
 
         except asyncpg.exceptions.NotNullViolationError:
-            raise HTTPException(400, "Missing required field value.")
+            raise HTTPException(status_code=400, detail="Missing required field value.")
 
         except asyncpg.exceptions.DataError:
-            raise HTTPException(400, "Invalid data format provided.")
+            raise HTTPException(status_code=400, detail="Invalid data format provided.")
 
         except asyncpg.PostgresError:
             log.exception("Database error during GST update")
-            raise HTTPException(500, "Database error occurred.")
+            raise HTTPException(status_code=500, detail="Database error occurred.")
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during GST update")
-            raise HTTPException(500, "Internal server error.")
+            raise HTTPException(status_code=500, detail="Internal server error.")
+
 @router.delete(
     "/{gst_id}/soft_delete",
     summary="Soft delete GST registration (Enterprise + Cascade + Audit)",

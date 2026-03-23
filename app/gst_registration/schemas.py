@@ -29,8 +29,6 @@ class GSTConfigOut(BaseModel):
     display_name: str
     sort_order: int
 
-
-
 class GSTRegistrationIn(BaseModel):
     """
     Create GST Registration Schema
@@ -95,7 +93,12 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     mobile: Annotated[str, Field(pattern=r"^\d{10}$")]
     email: Annotated[EmailStr, Field(..., max_length=150)]
-    secondary_email: Optional[Annotated[EmailStr, Field(None, max_length=150)]] 
+    secondary_email: Optional[Annotated[EmailStr, Field(None, max_length=150)]]
+
+    # ----------------------------
+    # Filing Preference (NEW)
+    # ----------------------------
+    filing_preference: Optional[Literal["MONTHLY", "QUARTERLY"]] = None
 
     # =====================================================
     # Normalization
@@ -161,6 +164,16 @@ class GSTRegistrationIn(BaseModel):
             return v.strip()
         return v
 
+    @field_validator("filing_preference", mode="before")
+    @classmethod
+    def normalize_filing_preference(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v.upper()
+        return v
+
     # =====================================================
     # Workflow Business Logic
     # =====================================================
@@ -179,7 +192,6 @@ class GSTRegistrationIn(BaseModel):
             )
 
         return self
-
 class GSTRegistrationEditIn(BaseModel):
 
     business_name: Optional[str] = Field(None, max_length=200)
