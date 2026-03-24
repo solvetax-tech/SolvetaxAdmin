@@ -18,7 +18,6 @@ router = APIRouter(
     prefix="/api/v1/Followups",
     tags=["Followups"]
 )
-
 @router.get(
     "/customer-service-followups/filter",
     summary="Filter Customer Service Followups (Dynamic + Advanced Filters)",
@@ -50,7 +49,6 @@ async def filter_followups(
     # --------------------------------------------------
     assigned_to: Optional[int] = None,
     created_by: Optional[int] = None,
-    completed_by: Optional[int] = None,
 
     # --------------------------------------------------
     # DATE FILTERS
@@ -74,10 +72,9 @@ async def filter_followups(
 
     reminder_sent: Optional[bool] = None,
 
-    # 🔥 NEW FILTERS
+    # 🔥 ENTITY FILTERS
     entity_type: Optional[str] = None,
     entity_id: Optional[int] = None,
-    next_reminder_due: Optional[bool] = None,
     high_reminder: Optional[bool] = None,
 
     # --------------------------------------------------
@@ -119,7 +116,6 @@ async def filter_followups(
     if status and statuses:
         raise HTTPException(400, "Use either status or statuses, not both")
 
-    # ✅ ENUM VALIDATION
     valid_status = {"PENDING", "COMPLETED", "MISSED", "CANCELLED"}
     if status and status not in valid_status:
         raise HTTPException(400, "Invalid status")
@@ -133,18 +129,19 @@ async def filter_followups(
     if mode and mode not in valid_modes:
         raise HTTPException(400, "Invalid mode")
 
-    # ✅ ENTITY VALIDATION
     if entity_id and not entity_type:
         raise HTTPException(400, "entity_type required when entity_id is provided")
 
-    # ✅ CONFLICT CHECKS
     if is_overdue and is_upcoming:
         raise HTTPException(400, "Cannot use is_overdue and is_upcoming together")
 
     if today_only and (followup_from or followup_to):
         raise HTTPException(400, "today_only cannot be used with date filters")
 
-    # ✅ TIMEZONE NORMALIZATION
+    # --------------------------------------------------
+    # TIMEZONE NORMALIZATION
+    # --------------------------------------------------
+
     def normalize(dt):
         if dt and dt.tzinfo is None:
             return dt.replace(tzinfo=timezone.utc)
@@ -243,11 +240,6 @@ async def filter_followups(
             values.append(created_by)
             idx += 1
 
-        if completed_by is not None:
-            conditions.append(f"f.completed_by = ${idx}")
-            values.append(completed_by)
-            idx += 1
-
         # --------------------------------------------------
         # DATE FILTERS
         # --------------------------------------------------
@@ -309,10 +301,6 @@ async def filter_followups(
             values.append(reminder_sent)
             idx += 1
 
-        # 🔥 NEW REMINDER FILTERS
-        if next_reminder_due:
-            conditions.append("(f.next_reminder_at IS NOT NULL AND f.next_reminder_at <= NOW())")
-
         if high_reminder:
             conditions.append("(f.reminder_count >= 3)")
 
@@ -326,7 +314,7 @@ async def filter_followups(
             idx += 1
 
         # --------------------------------------------------
-        # 🔥 VISIBILITY (CRITICAL)
+        # VISIBILITY
         # --------------------------------------------------
 
         visibility_sql, visibility_values, idx = build_customer_service_visibility(
@@ -377,7 +365,6 @@ async def filter_followups(
             SELECT
                 f.*,
 
-                -- 🔥 UI FLAGS
                 (f.followup_at < NOW() AND f.status = 'PENDING') AS is_overdue_flag,
                 (f.followup_at >= NOW() AND f.status = 'PENDING') AS is_upcoming_flag,
 
@@ -395,8 +382,7 @@ async def filter_followups(
                 op.first_name AS op_name,
 
                 assignee.first_name AS assigned_to_name,
-                creator.first_name AS created_by_name,
-                completer.first_name AS completed_by_name
+                creator.first_name AS created_by_name
 
             FROM {DB_SCHEMA}.customer_service_followups f
 
@@ -420,9 +406,6 @@ async def filter_followups(
 
             LEFT JOIN {DB_SCHEMA}.employees creator
                 ON creator.emp_id = f.created_by
-
-            LEFT JOIN {DB_SCHEMA}.employees completer
-                ON completer.emp_id = f.completed_by
 
             {where_clause}
 
@@ -456,7 +439,6 @@ async def filter_followups(
     except Exception:
         log.exception("Unexpected error")
         raise HTTPException(500, "Internal server error")
-
 # --------------------------------------------------
 # SCHEMA
 # --------------------------------------------------
@@ -471,6 +453,7 @@ class CreateFollowupRequest(BaseModel):
 class CreateFollowupResponse(BaseModel):
     id: int
     message: str
+
 
 # --------------------------------------------------
 # CREATE FOLLOWUP (MANUAL - GST)
@@ -645,13 +628,7 @@ async def create_followup(
                     raise HTTPException(409, "Duplicate followup")
 
                 # --------------------------------------------------
-                # STEP 5: REMINDER LOGIC
-                # --------------------------------------------------
-
-                next_reminder_at = followup_at - timedelta(minutes=10)
-
-                # --------------------------------------------------
-                # STEP 6: INSERT FOLLOWUP
+                # STEP 5: INSERT FOLLOWUP
                 # --------------------------------------------------
 
                 new_id = await conn.fetchval(
@@ -668,10 +645,9 @@ async def create_followup(
                         entity_type,
                         entity_id,
                         service_id,
-                        reminder_count,
-                        next_reminder_at
+                        reminder_count
                     )
-                    VALUES ($1,$2,$3,'PENDING',$4,$5,$6,$7,$8,$9,$10,$11)
+                    VALUES ($1,$2,$3,'PENDING',$4,$5,$6,$7,$8,$9,$10)
                     RETURNING id
                     """,
                     payload.customer_service_id,
@@ -680,11 +656,10 @@ async def create_followup(
                     payload.remarks,
                     assigned_to,
                     emp_id,
-                    cs_row["entity_type"],   # ✅ AUTO
-                    cs_row["entity_id"],     # ✅ AUTO
-                    cs_row["service_id"],    # ✅ AUTO
-                    0,                       # reminder_count
-                    next_reminder_at
+                    cs_row["entity_type"],
+                    cs_row["entity_id"],
+                    cs_row["service_id"],
+                    0
                 )
 
         log.info(
@@ -726,7 +701,7 @@ class UpdateFollowupResponse(BaseModel):
 
 
 # --------------------------------------------------
-# UPDATE FOLLOWUP (PATCH)
+# UPDATE FOLLOWUP (PATCH + STATUS)
 # --------------------------------------------------
 
 @router.post(
@@ -768,12 +743,10 @@ async def update_followup(
             detail="At least one field must be provided for update"
         )
 
-    # ✅ STATUS VALIDATION
     valid_status = {"PENDING", "COMPLETED", "CANCELLED"}
     if payload.status and payload.status not in valid_status:
         raise HTTPException(400, "Invalid status value")
 
-    # ❌ Prevent invalid combination
     if payload.status == "COMPLETED" and payload.followup_at:
         raise HTTPException(400, "Cannot change followup time while completing")
 
@@ -789,7 +762,7 @@ async def update_followup(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 🔥 STEP 1: FETCH FOLLOWUP + SERVICE
+                # STEP 1: FETCH FOLLOWUP + SERVICE (LOCK FOR UPDATE 🔥)
                 # --------------------------------------------------
 
                 row = await conn.fetchrow(
@@ -802,25 +775,23 @@ async def update_followup(
                     JOIN {DB_SCHEMA}.customer_services cs
                         ON cs.id = f.customer_service_id
                     WHERE f.id = $1
+                    FOR UPDATE
                     """,
                     followup_id
                 )
 
                 if not row:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Followup not found"
-                    )
+                    raise HTTPException(404, "Followup not found")
 
                 # ❌ Prevent modifying finalized followups
-                if row["status"] in ["CANCELLED", "COMPLETED", "MISSED"]:
+                if row["status"] in ["CANCELLED", "COMPLETED" ]:
                     raise HTTPException(
                         status_code=400,
                         detail="Finalized followup cannot be modified"
                     )
 
                 # --------------------------------------------------
-                # 🔥 STEP 2: ROLE VISIBILITY CHECK
+                # STEP 2: ROLE VISIBILITY CHECK
                 # --------------------------------------------------
 
                 visibility_sql, visibility_values, _ = build_customer_service_visibility(
@@ -850,7 +821,7 @@ async def update_followup(
                         )
 
                 # --------------------------------------------------
-                # 🔥 STEP 3: FOLLOWUP TIME VALIDATION
+                # STEP 3: FOLLOWUP TIME VALIDATION
                 # --------------------------------------------------
 
                 if payload.followup_at:
@@ -861,22 +832,15 @@ async def update_followup(
                         followup_at = payload.followup_at.astimezone(timezone.utc)
 
                     if followup_at < datetime.now(timezone.utc):
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Followup must be in future"
-                        )
+                        raise HTTPException(400, "Followup must be in future")
 
-                    # ✅ Max 60 days rule
                     if followup_at > datetime.now(timezone.utc) + timedelta(days=60):
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Followup cannot be scheduled beyond 60 days"
-                        )
+                        raise HTTPException(400, "Followup cannot be scheduled beyond 60 days")
                 else:
                     followup_at = row["followup_at"]
 
                 # --------------------------------------------------
-                # 🔥 STEP 4: ASSIGNMENT VALIDATION
+                # STEP 4: ASSIGNMENT VALIDATION
                 # --------------------------------------------------
 
                 if payload.assigned_to is not None:
@@ -894,15 +858,12 @@ async def update_followup(
                     )
 
                     if not valid:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Invalid assigned_to"
-                        )
+                        raise HTTPException(400, "Invalid assigned_to")
                 else:
                     assigned_to = row["assigned_to"]
 
                 # --------------------------------------------------
-                # 🔥 STEP 5: DUPLICATE CHECK
+                # STEP 5: DUPLICATE CHECK
                 # --------------------------------------------------
 
                 if payload.followup_at:
@@ -924,60 +885,60 @@ async def update_followup(
                     )
 
                     if exists:
-                        raise HTTPException(
-                            status_code=409,
-                            detail="Another followup already exists at this time"
-                        )
+                        raise HTTPException(409, "Another followup already exists at this time")
 
                 # --------------------------------------------------
-                # 🔥 STEP 6: BUILD UPDATE
+                # STEP 6: BUILD UPDATE
                 # --------------------------------------------------
 
                 updates = []
                 values = []
                 idx = 1
 
+                # FOLLOWUP TIME
                 if payload.followup_at:
                     updates.append(f"followup_at = ${idx}")
                     values.append(followup_at)
                     idx += 1
 
-                    # ✅ RESET REMINDERS
-                    updates.append(f"reminder_sent = FALSE")
-                    updates.append(f"reminder_count = 0")
-                    updates.append(f"next_reminder_at = ${idx}")
-                    values.append(followup_at - timedelta(minutes=10))
-                    idx += 1
+                    updates.append("reminder_sent = FALSE")
+                    updates.append("reminder_count = 0")
 
+                # REMARKS
                 if payload.remarks is not None:
                     updates.append(f"remarks = ${idx}")
                     values.append(payload.remarks)
                     idx += 1
 
+                # ASSIGNMENT
                 if payload.assigned_to is not None:
                     updates.append(f"assigned_to = ${idx}")
                     values.append(assigned_to)
                     idx += 1
 
+                # --------------------------------------------------
+                # STATUS LOGIC (MERGED 🔥)
+                # --------------------------------------------------
+
                 if payload.status:
+
                     updates.append(f"status = ${idx}")
                     values.append(payload.status)
                     idx += 1
 
-                    if payload.status == "COMPLETED":
-                        updates.append(f"completed_at = NOW()")
-                        updates.append(f"completed_by = ${idx}")
-                        values.append(emp_id)
-                        idx += 1
+                    # COMPLETED / CANCELLED
+                    if payload.status in ["COMPLETED", "CANCELLED"]:
+                        updates.append("completed_at = NOW()")
 
-                        # ✅ STOP REMINDERS
-                        updates.append(f"next_reminder_at = NULL")
+                    # RESET TO PENDING
+                    elif payload.status == "PENDING":
+                        updates.append("completed_at = NULL")
 
                 if not updates:
                     raise HTTPException(400, "Nothing to update")
 
                 # --------------------------------------------------
-                # 🔥 STEP 7: EXECUTE UPDATE
+                # STEP 7: EXECUTE UPDATE
                 # --------------------------------------------------
 
                 values.append(followup_id)
