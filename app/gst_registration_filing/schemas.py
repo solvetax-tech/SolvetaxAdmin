@@ -3,7 +3,7 @@ import html
 from datetime import datetime
 from typing import Optional, Literal, Annotated
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator, BaseModel
 # =========================================================
 # Base Schema (Global Config - same as customer_registration)
 # =========================================================

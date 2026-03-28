@@ -703,7 +703,6 @@ async def create_gst_filing(
 
 @router.get("/gst-filings/ui_love")
 async def get_gst_filings(
-    request: Request,
     customer_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
     filing_type: Optional[str] = Query(None),

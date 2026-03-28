@@ -236,6 +236,11 @@ class GSTRegistrationEditIn(BaseModel):
     rm_id: Optional[int] = Field(None, gt=0)
     created_by: Optional[int] = Field(None, gt=0)
 
+    # ----------------------------
+    # Filing Preference (NEW)
+    # ----------------------------
+    filing_preference: Optional[Literal["MONTHLY", "QUARTERLY"]] = None
+
     # =====================================================
     # Normalization (Improved & Safe)
     # =====================================================
@@ -315,6 +320,16 @@ class GSTRegistrationEditIn(BaseModel):
             return v
         return v
 
+    @field_validator("filing_preference", mode="before")
+    @classmethod
+    def normalize_filing_preference(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v.upper()
+        return v
+
     # =====================================================
     # Workflow Validation
     # =====================================================
@@ -359,6 +374,7 @@ class GSTRegistrationOut(BaseSchema):
     created_by: Optional[int]
     rm_id: Optional[int]
     rm_name: Optional[str] = None
+    filing_preference: Optional[str] = None
     approved_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
