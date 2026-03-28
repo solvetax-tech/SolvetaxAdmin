@@ -692,7 +692,7 @@ class UpdateFollowupRequest(BaseModel):
     followup_at: Optional[datetime] = None
     remarks: Optional[str] = None
     assigned_to: Optional[int] = None
-    status: Optional[str] = None  # PENDING / COMPLETED / CANCELLED
+    status: Optional[str] = None  # COMPLETED / CANCELLED
 
 
 class UpdateFollowupResponse(BaseModel):
