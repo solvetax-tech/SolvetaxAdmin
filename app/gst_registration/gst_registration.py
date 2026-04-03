@@ -39,6 +39,14 @@ async def create_gst_registration(
     request_id = str(uuid.uuid4())
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+
+    # Assignment: mirror customer create — RM defaults rm_id; created_by is OP-only on gst_registration.
+    rm_id = payload.rm_id
+    if role == "RM" and rm_id is None:
+        rm_id = emp_id
+    created_by_val = emp_id if role == "OP" else None
+    op_id_for_service = emp_id if role == "OP" else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -166,6 +174,12 @@ async def create_gst_registration(
                         },
                     )
 
+                if rm_id is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="rm_id is required (or sign in as RM to default rm_id to yourself).",
+                    )
+
                 # --------------------------------------------------
                 # INSERT GST
                 # --------------------------------------------------
@@ -227,8 +241,8 @@ async def create_gst_registration(
                     mobile_value,
                     payload.email,
                     secondary_email_value,
-                    payload.created_by or emp_id,
-                    payload.rm_id,
+                    created_by_val,
+                    rm_id,
                     getattr(payload, "filing_preference", None),
                     now,
                     now,
@@ -258,8 +272,8 @@ async def create_gst_registration(
                     payload.customer_id,
                     1,  # 🔥 FIXED SERVICE_ID
                     "PENDING",
-                    payload.rm_id,
-                    emp_id,
+                    rm_id,
+                    op_id_for_service,
                     "GST_REGISTRATION",
                     gst_row["id"],
                     now,
@@ -1195,7 +1209,20 @@ async def soft_delete_gst_registration(
                 )
 
                 # --------------------------------------------------
-                # 5️⃣ Version Audit (GST ONLY)
+                # 5️⃣ CUSTOMER SERVICE SYNC
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.customer_services
+                       SET status = 'INACTIVE'
+                     WHERE entity_type = 'GST_REGISTRATION'
+                       AND entity_id = $1
+                    """,
+                    gst_id,
+                )
+
+                # --------------------------------------------------
+                # 6️⃣ Version Audit (GST ONLY)
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -1394,7 +1421,21 @@ async def activate_gst_registration(
                 )
 
                 # --------------------------------------------------
-                # 5️⃣ Version Audit
+                # 5️⃣ CUSTOMER SERVICE SYNC
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.customer_services
+                       SET status = 'ACTIVE'
+                     WHERE entity_type = 'GST_REGISTRATION'
+                       AND entity_id = $1
+                       AND status = 'INACTIVE'
+                    """,
+                    gst_id,
+                )
+
+                # --------------------------------------------------
+                # 6️⃣ Version Audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""

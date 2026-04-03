@@ -79,8 +79,16 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     # Assignment
     # ----------------------------
-    created_by: Annotated[int, Field(..., gt=0)]
-    rm_id: Annotated[int, Field(..., gt=0)]
+    rm_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Relationship manager emp_id. Omitted + JWT role RM → API sets to current emp_id. Otherwise required if not RM.",
+    )
+    created_by: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Ignored on create; API sets gst_registration.created_by to current emp_id only when JWT role is OP.",
+    )
 
     # ----------------------------
     # Flags

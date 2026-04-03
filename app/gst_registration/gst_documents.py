@@ -1105,3 +1105,137 @@ async def activate_registration_document(
         except Exception:
             log.exception("Unexpected error during document activation")
             raise HTTPException(status_code=500, detail="Internal server error.")
+
+# -------------------------------------------------------------------
+# DEACTIVATE GST FILING DOCUMENT (SOFT DELETE)
+# -------------------------------------------------------------------
+@router.delete(
+    "/gst-filing-documents/{document_id}/deactivate",
+    summary="Deactivate GST Filing Document (Production Ready + Audit)",
+)
+async def deactivate_gst_filing_document(
+    document_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    request_id = generate_uuid()
+
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {
+            "request_id": request_id,
+            "emp_id": emp_id_raw,
+            "api": "deactivate_gst_filing_document",
+        },
+    )
+
+    log.info("Incoming GST filing document deactivate | document_id=%s", document_id)
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(500, "Database connection error.")
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+
+                # --------------------------------------------------
+                # 🔥 UPDATE WITH JOIN (GET CUSTOMER_ID)
+                # --------------------------------------------------
+                deleted_row = await conn.fetchrow(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_filings_documents d
+                       SET is_active = FALSE,
+                           updated_at = NOW()
+                      FROM {DB_SCHEMA}.gst_filings f
+                     WHERE d.document_id = $1
+                       AND d.gst_filing_id = f.id
+                       AND d.is_active = TRUE
+                     RETURNING d.*, f.customer_id
+                    """,
+                    document_id,
+                )
+
+                # --------------------------------------------------
+                # HANDLE NOT UPDATED
+                # --------------------------------------------------
+                if not deleted_row:
+                    existing = await conn.fetchrow(
+                        f"""
+                        SELECT document_id, is_active
+                        FROM {DB_SCHEMA}.gst_filings_documents
+                        WHERE document_id = $1
+                        """,
+                        document_id,
+                    )
+
+                    if not existing:
+                        raise HTTPException(404, "GST filing document not found.")
+
+                    if existing["is_active"] is False:
+                        raise HTTPException(400, "Document already inactive.")
+
+                    raise HTTPException(409, "Document state changed. Please retry.")
+
+                # --------------------------------------------------
+                # OPTIONAL LOGGING
+                # --------------------------------------------------
+                if deleted_row["verified"]:
+                    log.warning(
+                        "Deactivating verified document | document_id=%s",
+                        document_id,
+                    )
+
+                # --------------------------------------------------
+                # VERSION AUDIT
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    emp_id,
+                    "GST_FILING_DOCUMENT",
+                    document_id,
+                    deleted_row["customer_id"],
+                    "DELETE",
+                    None,
+                    None,
+                )
+
+            log.info("Document deactivated successfully | document_id=%s", document_id)
+
+            return {
+                **dict(deleted_row),
+                "message": "GST filing document deactivated successfully.",
+                "request_id": request_id,
+            }
+
+        # --------------------------------------------------
+        # ERROR HANDLING
+        # --------------------------------------------------
+        except asyncpg.exceptions.ForeignKeyViolationError:
+            raise HTTPException(400, "Foreign key constraint violation.")
+
+        except asyncpg.exceptions.CheckViolationError as e:
+            raise HTTPException(400, f"Constraint violated: {getattr(e,'constraint_name',None)}")
+
+        except asyncpg.exceptions.DataError:
+            raise HTTPException(400, "Invalid data format.")
+
+        except asyncpg.PostgresError:
+            log.exception("Database error during document deactivate")
+            raise HTTPException(500, "Database error occurred.")
+
+        except HTTPException:
+            raise
+
+        except Exception:
+            log.exception("Unexpected error during document deactivate")
+            raise HTTPException(500, "Internal server error.")
+

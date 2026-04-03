@@ -57,8 +57,8 @@ async def create_customer(
     request_id = generate_uuid()
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
 
     log = logging.LoggerAdapter(
         logger,
@@ -112,6 +112,17 @@ async def create_customer(
     service_required = normalize_services(payload.service_required)
 
     service_provided = normalize_services(payload.service_provided)
+
+    # --------------------------------------------------
+    # Default RM / OP assignment based on role
+    # --------------------------------------------------
+    rm_id = payload.rm_id
+    op_id = payload.op_id
+
+    if role == "RM" and rm_id is None:
+        rm_id = emp_id
+    if role == "OP" and op_id is None:
+        op_id = emp_id
 
     # --------------------------------------------------
     # DB Pool
@@ -218,8 +229,8 @@ async def create_customer(
                     payload.state,
                     payload.city,
                     payload.remark,
-                    payload.rm_id,
-                    payload.op_id,
+                    rm_id,
+                    op_id,
                     payload.referral_id,
                     service_required,
                     service_provided,

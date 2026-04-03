@@ -20,6 +20,9 @@ class BaseSchema(BaseModel):
 # =========================================================
 # Customer Create Schema (DB-Aligned + Services Array)
 # =========================================================
+# Assignment: on create, API applies JWT defaults — if role is RM and rm_id is omitted,
+# rm_id is set to the caller's emp_id; if role is OP and op_id is omitted, op_id is set to emp_id.
+# (See create_customer in customer.py.)
 
 class CustomerIn(BaseSchema):
     full_name: str = Field(..., min_length=2, max_length=150)
@@ -32,8 +35,16 @@ class CustomerIn(BaseSchema):
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
     remark: Optional[str] = None
-    rm_id: Optional[int] = Field(None, gt=0)
-    op_id: Optional[int] = Field(None, gt=0)
+    rm_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Relationship manager emp_id. Omitted + JWT role RM → API sets to current emp_id.",
+    )
+    op_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Operations emp_id. Omitted + JWT role OP → API sets to current emp_id.",
+    )
     referral_id: Optional[int] = Field(None, gt=0)
 
     # -----------------------------------------------------
@@ -127,8 +138,16 @@ class CustomerEditIn(BaseSchema):
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
     remark: Optional[str] = None
-    rm_id: Optional[int] = Field(None, gt=0)
-    op_id: Optional[int] = Field(None, gt=0)
+    rm_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="When set, updates RM emp_id; omit to leave unchanged (see edit_customer handler).",
+    )
+    op_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="When set, updates OP emp_id; omit to leave unchanged (see edit_customer handler).",
+    )
     referral_id: Optional[int] = Field(None, gt=0)
     is_active: Optional[bool] = None
 

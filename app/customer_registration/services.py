@@ -254,6 +254,7 @@ async def filter_customer_services(
     except Exception:
         log.exception("Unexpected error")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 @router.post(
     "/customer-services/{service_id}/activate",
     summary="Activate Customer Service (With Audit)",

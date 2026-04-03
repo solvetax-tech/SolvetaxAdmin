@@ -1,4 +1,10 @@
+"""
+GST filing documents (gst_filings_documents).
 
+Link-only flow: clients send an external Excel/Sheet/CSV URL in `document_url`;
+the API persists that string only — no Azure Blob upload or file storage here.
+Validation for URL shape lives in `schemas.GSTFilingDocumentIn` / `GSTFilingDocumentEditIn`.
+"""
 import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
@@ -11,12 +17,11 @@ from app.logger import logger
 from zoneinfo import ZoneInfo
 import json
 import uuid
-from datetime import datetime
 import re
 
 router = APIRouter(
     prefix="/api/v1/gst-filings-docs",
-    tags=["GST Filings Docs"]
+    tags=["GST Filings Docs"],
 )
 
 
@@ -24,12 +29,12 @@ router = APIRouter(
 
 
 # -------------------------------------------------------------------
-# CREATE GST FILING DOCUMENT (FINAL - PRODUCTION + VERSION + IST)
+# CREATE GST FILING DOCUMENT (link URL in DB only; no blob)
 # -------------------------------------------------------------------
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    summary="Create GST Filing Document",
+    summary="Create GST Filing Document (Excel/Sheet link)",
     responses={
         201: {"description": "GST filing document created successfully."},
         400: {"description": "Validation failed or filing not found."},
@@ -99,7 +104,7 @@ async def create_gst_filing_document(
                 gstin = gstin.strip().upper() if gstin else None
 
                 # --------------------------------------------------
-                # 2️⃣ INSERT DOCUMENT
+                # 2️⃣ INSERT ROW (document_url = external link string only)
                 # --------------------------------------------------
                 document_row = await conn.fetchrow(
                     f"""
@@ -221,11 +226,11 @@ async def create_gst_filing_document(
             raise HTTPException(500, "Internal server error.")
 
 # -------------------------------------------------------------------
-# UPDATE GST FILING DOCUMENT (FINAL - PRODUCTION + VERSION + SAFE)
+# UPDATE GST FILING DOCUMENT (link URL in DB only; no blob)
 # -------------------------------------------------------------------
 @router.patch(
     "/{document_id}",
-    summary="Update GST Filing Document",
+    summary="Update GST Filing Document (Excel/Sheet link)",
 )
 async def update_gst_filing_document(
     document_id: int,
@@ -590,7 +595,7 @@ async def filter_gst_filing_documents(
             SELECT 
                 d.*,
                 f.customer_id,
-                f.filing_type,
+                f.filing_category,
                 f.filing_period,
                 f.status AS filing_status,
                 rm.first_name AS rm_name,
@@ -833,6 +838,27 @@ async def activate_gst_filing_document(
                     raise HTTPException(400, "Document already active.")
 
                 # --------------------------------------------------
+                # PARENT FILINGS SAFETY (avoid activating doc under inactive filing)
+                # --------------------------------------------------
+                parent_filing = await conn.fetchrow(
+                    f"""
+                    SELECT id, is_active
+                    FROM {DB_SCHEMA}.gst_filings
+                    WHERE id = $1
+                    """,
+                    doc_row["gst_filing_id"],
+                )
+
+                if not parent_filing:
+                    raise HTTPException(
+                        400,
+                        "Associated GST filing not found for this document.",
+                    )
+
+                if parent_filing["is_active"] is False:
+                    raise HTTPException(400, "GST filing is inactive.")
+
+                # --------------------------------------------------
                 # ACTIVATE + FETCH CUSTOMER
                 # --------------------------------------------------
                 activated_row = await conn.fetchrow(
@@ -843,6 +869,7 @@ async def activate_gst_filing_document(
                       FROM {DB_SCHEMA}.gst_filings f
                      WHERE d.document_id = $1
                        AND d.gst_filing_id = f.id
+                       AND f.is_active = TRUE
                        AND d.is_active = FALSE
                      RETURNING d.*, f.customer_id
                     """,
@@ -850,7 +877,10 @@ async def activate_gst_filing_document(
                 )
 
                 if not activated_row:
-                    raise HTTPException(409, "Document state changed. Retry.")
+                    raise HTTPException(
+                        409,
+                        "Document state changed while activating. Please retry.",
+                    )
 
                 # OPTIONAL LOG
                 if activated_row["verified"]:

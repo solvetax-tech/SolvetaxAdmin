@@ -2,24 +2,43 @@ import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
-from datetime import datetime
-from app.gst_registration_filing.schemas import GSTFilingIn, GSTFilingEditIn
+from datetime import datetime, timedelta
+from app.gst_registration_filing.schemas import GSTFilingIn, GSTFilingEditIn, GSTReturnStatusUpdateIn
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_filing_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
 from zoneinfo import ZoneInfo
 import json
 import uuid
-from datetime import datetime
 import re
+import calendar
 
 router = APIRouter(
     prefix="/api/v1/gst-filings",
     tags=["GST Filings"]
 )
 
+# Calendar buffer before earliest due for next_auto_generate_at (prep / auto-generation window).
+_LEAD_DAYS_MONTHLY = 10
+_LEAD_DAYS_QUARTERLY = 12
+_LEAD_DAYS_YEARLY_ANNUAL = 7
+
+
+def _lead_days_for_periodic_frequency(filing_frequency: str) -> int:
+    if filing_frequency == "MONTHLY":
+        return _LEAD_DAYS_MONTHLY
+    if filing_frequency == "QUARTERLY":
+        return _LEAD_DAYS_QUARTERLY
+    return _LEAD_DAYS_YEARLY_ANNUAL
+
+
+def _compute_next_auto_generate_at(*due_dates, lead_days: int = _LEAD_DAYS_YEARLY_ANNUAL):
+    valid = [d for d in due_dates if d is not None]
+    if not valid:
+        return None
+    return min(valid) - timedelta(days=lead_days)
 # -------------------------------------------------------------------
-# FILTER GST FILINGS (ENTERPRISE PRODUCTION READY - FINAL)
+# FILTER GST FILINGS (FINAL - WITH USERNAME + PASSWORD + RENT + EMAIL + ESTIMATED INVOICE)
 # -------------------------------------------------------------------
 @router.get(
     "/gst-filings/filter",
@@ -35,11 +54,10 @@ async def filter_gst_filings(
 
     # SERVICE / TYPE
     service_id: Optional[int] = None,
-    filing_type: Optional[str] = None,
     filing_category: Optional[str] = None,
     filing_period: Optional[str] = None,
 
-    # 🔥 NEW BUSINESS FILTERS
+    # BUSINESS
     filing_frequency: Optional[str] = None,
     taxpayer_type: Optional[str] = None,
     turnover_details: Optional[str] = None,
@@ -53,28 +71,28 @@ async def filter_gst_filings(
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
 
-    # DATE FILTERS
+    # EXTRA
+    username: Optional[str] = None,
+    email_id: Optional[str] = None,
+    rent_min: Optional[float] = None,
+    rent_max: Optional[float] = None,
+    rule14a: Optional[bool] = None,
+
+    # 🔥 DUE DATE FILTER (FROM RETURN TABLE)
     due_from: Optional[datetime] = None,
     due_to: Optional[datetime] = None,
 
+    # DATES
     created_from: Optional[datetime] = None,
     created_to: Optional[datetime] = None,
-
-    # 🔥 NEW DATE FILTERS
     data_received_from: Optional[datetime] = None,
     data_received_to: Optional[datetime] = None,
-
-    next_auto_from: Optional[datetime] = None,
-    next_auto_to: Optional[datetime] = None,
 
     # FLAGS
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
-
     is_overdue: Optional[bool] = None,
     is_upcoming: Optional[bool] = None,
-
-    # EXISTING FLAGS
     is_auto_enabled: Optional[bool] = None,
     is_auto_generated: Optional[bool] = None,
 
@@ -84,6 +102,7 @@ async def filter_gst_filings(
 
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
+
     request_id = generate_uuid()
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
@@ -92,19 +111,8 @@ async def filter_gst_filings(
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": emp_id, "api": "filter_gst_filings"},
+        {"request_id": request_id, "emp_id": emp_id},
     )
-
-    log.info("Incoming GST filings filter | limit=%s offset=%s", limit, offset)
-
-    # --------------------------------------------------
-    # DATE VALIDATION
-    # --------------------------------------------------
-    if due_from and due_to and due_from > due_to:
-        raise HTTPException(400, "due_from cannot be greater than due_to")
-
-    if created_from and created_to and created_from > created_to:
-        raise HTTPException(400, "created_from cannot be greater than created_to")
 
     try:
         pool = await get_db_pool()
@@ -122,162 +130,157 @@ async def filter_gst_filings(
         # ----------------------------
         if id:
             conditions.append(f"f.id = ${idx}")
-            values.append(id)
-            idx += 1
+            values.append(id); idx += 1
 
         if customer_id:
             conditions.append(f"f.customer_id = ${idx}")
-            values.append(customer_id)
-            idx += 1
+            values.append(customer_id); idx += 1
 
         if gst_registration_id:
             conditions.append(f"f.gst_registration_id = ${idx}")
-            values.append(gst_registration_id)
-            idx += 1
+            values.append(gst_registration_id); idx += 1
 
-        if gstin and gstin.strip():
+        if gstin:
             conditions.append(f"upper(f.gstin) = ${idx}")
-            values.append(gstin.strip().upper())
-            idx += 1
+            values.append(gstin.upper()); idx += 1
 
         if service_id:
             conditions.append(f"f.service_id = ${idx}")
-            values.append(service_id)
-            idx += 1
+            values.append(service_id); idx += 1
 
-        if filing_type and filing_type.strip():
-            conditions.append(f"f.filing_type = ${idx}")
-            values.append(filing_type.strip().upper())
-            idx += 1
-
-        if filing_category and filing_category.strip():
+        if filing_category:
             conditions.append(f"f.filing_category = ${idx}")
-            values.append(filing_category.strip().upper())
-            idx += 1
+            values.append(filing_category.upper()); idx += 1
 
-        if filing_period and filing_period.strip():
+        if filing_period:
             conditions.append(f"f.filing_period = ${idx}")
-            values.append(filing_period.strip().upper())
-            idx += 1
+            values.append(filing_period.upper()); idx += 1
 
         # ----------------------------
-        # 🔥 NEW BUSINESS FILTERS
+        # BUSINESS
         # ----------------------------
         if filing_frequency:
             conditions.append(f"f.filing_frequency = ${idx}")
-            values.append(filing_frequency.upper())
-            idx += 1
+            values.append(filing_frequency.upper()); idx += 1
 
         if taxpayer_type:
             conditions.append(f"f.taxpayer_type = ${idx}")
-            values.append(taxpayer_type.upper())
-            idx += 1
+            values.append(taxpayer_type.upper()); idx += 1
 
         if turnover_details:
             conditions.append(f"f.turnover_details = ${idx}")
-            values.append(turnover_details.upper())
-            idx += 1
+            values.append(turnover_details.upper()); idx += 1
 
         if state:
             conditions.append(f"upper(f.state) = ${idx}")
-            values.append(state.upper())
-            idx += 1
+            values.append(state.upper()); idx += 1
 
         # ----------------------------
         # STATUS
         # ----------------------------
         if status:
             conditions.append(f"f.status = ${idx}")
-            values.append(status.upper())
-            idx += 1
+            values.append(status.upper()); idx += 1
 
         if statuses:
             conditions.append(f"f.status = ANY(${idx})")
-            values.append([s.upper() for s in statuses])
-            idx += 1
+            values.append([s.upper() for s in statuses]); idx += 1
 
         # ----------------------------
-        # USERS
+        # EXTRA FILTERS
         # ----------------------------
-        if rm_id:
-            conditions.append(f"f.rm_id = ${idx}")
-            values.append(rm_id)
-            idx += 1
+        if username:
+            conditions.append(f"f.username ILIKE ${idx}")
+            values.append(f"%{username}%"); idx += 1
 
-        if op_id:
-            conditions.append(f"f.op_id = ${idx}")
-            values.append(op_id)
-            idx += 1
+        if email_id:
+            conditions.append(f"lower(f.email_id) = ${idx}")
+            values.append(email_id.lower()); idx += 1
+
+        if rent_min is not None:
+            conditions.append(f"f.rent >= ${idx}")
+            values.append(rent_min); idx += 1
+
+        if rent_max is not None:
+            conditions.append(f"f.rent <= ${idx}")
+            values.append(rent_max); idx += 1
+
+        if rule14a is not None:
+            conditions.append(f"f.rule14a = ${idx}")
+            values.append(rule14a); idx += 1
 
         # ----------------------------
-        # DATE FILTERS
+        # 🔥 DUE DATE FILTER (RETURN TABLE)
         # ----------------------------
         if due_from:
-            conditions.append(f"f.due_date >= ${idx}")
-            values.append(due_from)
-            idx += 1
+            conditions.append(f"""
+                GREATEST(
+                    COALESCE(d.gstr1_due_date, '-infinity'::timestamptz),
+                    COALESCE(d.gstr3b_due_date, '-infinity'::timestamptz),
+                    COALESCE(d.gstr9_due_date, '-infinity'::timestamptz),
+                    COALESCE(d.gstr9c_due_date, '-infinity'::timestamptz),
+                    COALESCE(d.cmp08_due_date, '-infinity'::timestamptz),
+                    COALESCE(d.gstr4_due_date, '-infinity'::timestamptz)
+                ) >= ${idx}
+            """)
+            values.append(due_from); idx += 1
 
         if due_to:
-            conditions.append(f"f.due_date <= ${idx}")
-            values.append(due_to)
-            idx += 1
-
-        if created_from:
-            conditions.append(f"f.created_at >= ${idx}")
-            values.append(created_from)
-            idx += 1
-
-        if created_to:
-            conditions.append(f"f.created_at <= ${idx}")
-            values.append(created_to)
-            idx += 1
-
-        # 🔥 NEW DATE FILTERS
-        if data_received_from:
-            conditions.append(f"f.data_received_at >= ${idx}")
-            values.append(data_received_from)
-            idx += 1
-
-        if data_received_to:
-            conditions.append(f"f.data_received_at <= ${idx}")
-            values.append(data_received_to)
-            idx += 1
-
-        if next_auto_from:
-            conditions.append(f"f.next_auto_generate_at >= ${idx}")
-            values.append(next_auto_from)
-            idx += 1
-
-        if next_auto_to:
-            conditions.append(f"f.next_auto_generate_at <= ${idx}")
-            values.append(next_auto_to)
-            idx += 1
+            conditions.append(f"""
+                LEAST(
+                    COALESCE(d.gstr1_due_date, 'infinity'::timestamptz),
+                    COALESCE(d.gstr3b_due_date, 'infinity'::timestamptz),
+                    COALESCE(d.gstr9_due_date, 'infinity'::timestamptz),
+                    COALESCE(d.gstr9c_due_date, 'infinity'::timestamptz),
+                    COALESCE(d.cmp08_due_date, 'infinity'::timestamptz),
+                    COALESCE(d.gstr4_due_date, 'infinity'::timestamptz)
+                ) <= ${idx}
+            """)
+            values.append(due_to); idx += 1
 
         # ----------------------------
         # FLAGS
         # ----------------------------
+        if is_overdue:
+            conditions.append("""
+                (
+                    (d.gstr1_status = 'NOT_FILED' AND d.gstr1_due_date < NOW())
+                    OR (d.gstr3b_status = 'NOT_FILED' AND d.gstr3b_due_date < NOW())
+                    OR (d.gstr9_status = 'NOT_FILED' AND d.gstr9_due_date < NOW())
+                    OR (d.gstr9c_status = 'NOT_FILED' AND d.gstr9c_due_date < NOW())
+                    OR (d.cmp08_status = 'NOT_FILED' AND d.cmp08_due_date < NOW())
+                    OR (d.gstr4_status = 'NOT_FILED' AND d.gstr4_due_date < NOW())
+                )
+            """)
+
+        if is_upcoming:
+            conditions.append("""
+                (
+                    (d.gstr1_status = 'NOT_FILED' AND d.gstr1_due_date >= NOW())
+                    OR (d.gstr3b_status = 'NOT_FILED' AND d.gstr3b_due_date >= NOW())
+                    OR (d.gstr9_status = 'NOT_FILED' AND d.gstr9_due_date >= NOW())
+                    OR (d.gstr9c_status = 'NOT_FILED' AND d.gstr9c_due_date >= NOW())
+                    OR (d.cmp08_status = 'NOT_FILED' AND d.cmp08_due_date >= NOW())
+                    OR (d.gstr4_status = 'NOT_FILED' AND d.gstr4_due_date >= NOW())
+                )
+            """)
+
         if is_active is not None:
             conditions.append(f"f.is_active = ${idx}")
-            values.append(is_active)
-            idx += 1
+            values.append(is_active); idx += 1
         elif not include_inactive:
             conditions.append("f.is_active = TRUE")
 
-        if is_overdue:
-            conditions.append("(f.status != 'FILED' AND f.due_date < NOW())")
-
-        if is_upcoming:
-            conditions.append("(f.status = 'DATA_PENDING' AND f.due_date >= NOW())")
-
         if is_auto_enabled is not None:
             conditions.append(f"f.is_auto_enabled = ${idx}")
-            values.append(is_auto_enabled)
-            idx += 1
+            values.append(is_auto_enabled); idx += 1
 
         if is_auto_generated is not None:
-            conditions.append(f"f.is_auto_generated = ${idx}")
-            values.append(is_auto_generated)
-            idx += 1
+            conditions.append(
+                f"EXISTS (SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details d_auto "
+                f"WHERE d_auto.gst_filing_id = f.id AND d_auto.is_auto_generated = ${idx})"
+            )
+            values.append(is_auto_generated); idx += 1
 
         # ----------------------------
         # VISIBILITY
@@ -290,53 +293,43 @@ async def filter_gst_filings(
             conditions.append(visibility_sql)
             values.extend(visibility_values)
 
-        # ----------------------------
-        # QUERY BUILD
-        # ----------------------------
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        count_sql = f"""
-            SELECT COUNT(*)
+        # ----------------------------
+        # FINAL QUERY
+        # ----------------------------
+        query = f"""
+            SELECT f.*, d.*
             FROM {DB_SCHEMA}.gst_filings f
+            LEFT JOIN {DB_SCHEMA}.gst_filing_return_details d
+                ON d.gst_filing_id = f.id
             {where_clause}
-        """
-
-        data_sql = f"""
-            SELECT f.*,
-                   rm.first_name AS rm_name,
-                   op.first_name AS op_name
-            FROM {DB_SCHEMA}.gst_filings f
-            LEFT JOIN {DB_SCHEMA}.employees rm
-                ON rm.emp_id = f.rm_id
-            LEFT JOIN {DB_SCHEMA}.employees op
-                ON op.emp_id = f.op_id
-            {where_clause}
-            ORDER BY f.due_date ASC, f.id DESC
+            ORDER BY f.created_at DESC
             LIMIT ${idx} OFFSET ${idx+1}
         """
 
-        values_with_pagination = values + [limit, offset]
+        values += [limit, offset]
 
         async with pool.acquire() as conn:
-            total = await conn.fetchval(count_sql, *values)
-            rows = await conn.fetch(data_sql, *values_with_pagination)
+            rows = await conn.fetch(query, *values)
 
-        log.info("GST filings filter success | returned=%s total=%s", len(rows), total)
+        data = [dict(r) for r in rows]
+
+        # 🔥 PASSWORD MASK
+        for d in data:
+            d["password"] = None
 
         return {
-            "data": [dict(r) for r in rows],
-            "count": total,
+            "data": data,
+            "count": len(data),
             "limit": limit,
             "offset": offset,
             "request_id": request_id
         }
 
     except Exception:
-        log.exception("Error filtering GST filings")
+        log.exception("Filter error")
         raise HTTPException(500, "Internal server error")
-# -------------------------------------------------------------------
-# CREATE GST FILING (FINAL - FULL WITH SERVICE + VERSION LOG)
-# -------------------------------------------------------------------
 @router.post(
     "/gst-filings",
     status_code=status.HTTP_201_CREATED,
@@ -344,6 +337,414 @@ async def filter_gst_filings(
 )
 async def create_gst_filing(
     payload: GSTFilingIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+
+    request_id = generate_uuid()
+
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "create_gst_filing"},
+    )
+
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
+
+    GROUP_2_STATES = {
+        "DELHI","UTTAR_PRADESH","BIHAR","WEST_BENGAL","ODISHA",
+        "JHARKHAND","CHHATTISGARH","MADHYA_PRADESH","RAJASTHAN",
+        "HARYANA","PUNJAB","HIMACHAL_PRADESH","UTTARAKHAND",
+        "JAMMU_AND_KASHMIR","LADAKH","SIKKIM","ARUNACHAL_PRADESH",
+        "NAGALAND","MANIPUR","MIZORAM","TRIPURA","MEGHALAYA",
+        "ASSAM","CHANDIGARH"
+    }
+
+    from dateutil.relativedelta import relativedelta
+
+    def generate_previous_period(freq: str):
+        prev = now - relativedelta(months=1)
+        if freq == "MONTHLY":
+            return prev.strftime("%b-%Y").upper()
+        elif freq == "QUARTERLY":
+            q = (prev.month - 1) // 3 + 1
+            return f"Q{q}-{prev.year}"
+        else:
+            return f"{prev.year}-{str(prev.year+1)[-2:]}" if prev.month >= 4 else f"{prev.year-1}-{str(prev.year)[-2:]}"
+
+    def parse_filing_period_to_date(filing_period: str):
+        try:
+            return datetime.strptime(filing_period, "%b-%Y")
+        except:
+            pass
+
+        if filing_period.startswith("Q"):
+            q = int(filing_period[1])
+            year = int(filing_period.split("-")[1])
+            month = (q - 1) * 3 + 1
+            return datetime(year, month, 1)
+
+        if "-" in filing_period:
+            year = int(filing_period[:4])
+            return datetime(year, 4, 1)
+
+        raise HTTPException(400, "Invalid filing_period format")
+
+    def build_due_date(base_date, month_offset, day):
+        target = base_date + relativedelta(months=month_offset)
+        return datetime(target.year, target.month, day, tzinfo=IST)
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("DB connection failed")
+        raise HTTPException(500, "Database connection error")
+
+    filing_frequency = payload.filing_frequency.upper()
+    filing_category = payload.filing_category.upper()
+    state = payload.state.strip().upper()
+
+    username = payload.username.strip() if payload.username else None
+    password = payload.password.strip() if payload.password else None
+    email_id = payload.email_id.strip().lower() if payload.email_id else None
+
+    # --------------------------------------------------
+    # DEFAULT ASSIGNMENT BASED ON ROLE
+    # --------------------------------------------------
+    rm_id = payload.rm_id
+    op_id = payload.op_id
+
+    if role == "RM" and rm_id is None:
+        rm_id = emp_id
+    if role == "OP" and op_id is None:
+        op_id = emp_id
+
+    status = "DATA_PENDING"
+
+    if payload.mode != "MANUAL":
+        raise HTTPException(400, "Only MANUAL mode is allowed for first-time filing creation")
+
+    filing_period = payload.filing_period or generate_previous_period(filing_frequency)
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+
+                # ================= CUSTOMER =================
+                customer = await conn.fetchrow(
+                    f"""SELECT customer_id, is_active
+                        FROM {DB_SCHEMA}.customers
+                        WHERE customer_id = $1""",
+                    payload.customer_id,
+                )
+
+                if not customer or not customer["is_active"]:
+                    raise HTTPException(400, "Invalid or inactive customer")
+
+                # ================= GST =================
+                if payload.gst_registration_id:
+                    gst = await conn.fetchrow(
+                        f"""SELECT id, gstin, is_active
+                              , username, password
+                            FROM {DB_SCHEMA}.gst_registration
+                            WHERE id = $1""",
+                        payload.gst_registration_id,
+                    )
+
+                    if not gst or not gst["is_active"]:
+                        raise HTTPException(400, "Invalid GST registration")
+
+                    gstin = gst["gstin"]
+                    # If caller didn't pass credentials explicitly, fall back to GST registration credentials.
+                    if username is None:
+                        username = gst.get("username")
+                    if password is None:
+                        password = gst.get("password")
+                else:
+                    gstin = payload.gstin
+
+                # ================= DUPLICATE =================
+                duplicate = await conn.fetchval(
+                    f"""
+                    SELECT 1 FROM {DB_SCHEMA}.gst_filings
+                    WHERE customer_id = $1
+                      AND gst_registration_id IS NOT DISTINCT FROM $2
+                      AND gstin IS NOT DISTINCT FROM $3
+                      AND filing_period = $4
+                      AND is_active = TRUE
+                    """,
+                    payload.customer_id,
+                    payload.gst_registration_id,
+                    gstin,
+                    filing_period,
+                )
+
+                if duplicate:
+                    return {
+                        "message": "Filing already exists",
+                        "request_id": request_id,
+                    }
+
+                # ================= INSERT GST FILING =================
+                service_id = {"MONTHLY":4,"QUARTERLY":5,"YEARLY":6}[filing_frequency]
+
+                filing_row = await conn.fetchrow(
+                    f"""INSERT INTO {DB_SCHEMA}.gst_filings (
+                        customer_id, gst_registration_id, gstin,
+                        filing_category, filing_period, status,
+                        service_id, priority, remarks,
+                        rm_id, op_id,
+                        is_auto_enabled,
+                        taxpayer_type, filing_frequency,
+                        turnover_details, state,
+                        username, password, email_id, rent, rule14a,
+                        created_at, updated_at
+                    )
+                    VALUES (
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                        $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+                        $21,$22,$23
+                    )
+                    RETURNING *""",
+                    payload.customer_id,
+                    payload.gst_registration_id,
+                    gstin,
+                    filing_category,
+                    filing_period,
+                    status,
+                    service_id,
+                    payload.priority,
+                    payload.remarks,
+                    rm_id,
+                    op_id,
+                    True,
+                    payload.taxpayer_type,
+                    filing_frequency,
+                    payload.turnover_details,
+                    state,
+                    username,
+                    password,
+                    email_id,
+                    payload.rent,
+                    payload.rule14a,
+                    now,
+                    now,
+                )
+
+                filing_id = filing_row["id"]
+
+                base_date = parse_filing_period_to_date(filing_period)
+
+                def build_due_date_safe(base_dt, month_offset: int, day: int):
+                    target = base_dt + relativedelta(months=month_offset)
+                    last_day = calendar.monthrange(target.year, target.month)[1]
+                    safe_day = min(day, last_day)
+                    return datetime(target.year, target.month, safe_day, tzinfo=IST)
+
+                if payload.taxpayer_type == "REGULAR":
+                    # Row 1: GSTR1 + GSTR3B
+                    if filing_frequency == "MONTHLY":
+                        gstr1_due = build_due_date_safe(base_date, 1, 11)
+                        gstr3b_due = build_due_date_safe(base_date, 1, 20)
+                    elif filing_frequency == "QUARTERLY":
+                        gstr1_due = build_due_date_safe(base_date, 1, 13)
+                        due_day_3b = 24 if state in GROUP_2_STATES else 22
+                        gstr3b_due = build_due_date_safe(base_date, 1, due_day_3b)
+                    else:
+                        raise HTTPException(400, "REGULAR taxpayer requires MONTHLY or QUARTERLY frequency for returns")
+
+                    next_auto_periodic = _compute_next_auto_generate_at(
+                        gstr1_due,
+                        gstr3b_due,
+                        lead_days=_lead_days_for_periodic_frequency(filing_frequency),
+                    )
+                    await conn.execute(
+                        f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                            gst_filing_id,
+                            gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
+                            gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
+                            is_auto_generated, next_auto_generate_at
+                        )
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                        filing_id,
+                        "NOT_FILED",
+                        "NOT_FILED",
+                        None,
+                        None,
+                        None,
+                        None,
+                        gstr1_due,
+                        gstr3b_due,
+                        None,
+                        None,
+                        None,
+                        None,
+                        False,
+                        next_auto_periodic,
+                    )
+
+                    # Row 2: GSTR9 (+ GSTR9C when turnover > 5CR)
+                    gstr9_due = build_due_date_safe(base_date, 9, 31)
+                    gstr9c_status = "NOT_FILED" if payload.turnover_details == "MORE_THAN_5CR" else None
+                    gstr9c_due = build_due_date_safe(base_date, 9, 31) if gstr9c_status else None
+
+                    next_auto_annual = _compute_next_auto_generate_at(
+                        gstr9_due,
+                        gstr9c_due,
+                        lead_days=_LEAD_DAYS_YEARLY_ANNUAL,
+                    )
+                    await conn.execute(
+                        f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                            gst_filing_id,
+                            gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
+                            gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
+                            is_auto_generated, next_auto_generate_at
+                        )
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                        filing_id,
+                        None,
+                        None,
+                        "NOT_FILED",
+                        gstr9c_status,
+                        None,
+                        None,
+                        None,
+                        None,
+                        gstr9_due,
+                        gstr9c_due,
+                        None,
+                        None,
+                        False,
+                        next_auto_annual,
+                    )
+
+                elif payload.taxpayer_type == "COMPOSITION":
+                    # Row 1: CMP08
+                    cmp08_due = build_due_date_safe(base_date, 1, 18)
+                    next_auto_cmp = _compute_next_auto_generate_at(
+                        cmp08_due,
+                        lead_days=_LEAD_DAYS_QUARTERLY,
+                    )
+                    await conn.execute(
+                        f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                            gst_filing_id,
+                            gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
+                            gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
+                            is_auto_generated, next_auto_generate_at
+                        )
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                        filing_id,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "NOT_FILED",
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        cmp08_due,
+                        None,
+                        False,
+                        next_auto_cmp,
+                    )
+
+                    # Row 2: GSTR4
+                    gstr4_due = build_due_date_safe(base_date, 9, 30)
+                    next_auto_g4 = _compute_next_auto_generate_at(
+                        gstr4_due,
+                        lead_days=_LEAD_DAYS_YEARLY_ANNUAL,
+                    )
+                    await conn.execute(
+                        f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                            gst_filing_id,
+                            gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
+                            gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
+                            is_auto_generated, next_auto_generate_at
+                        )
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                        filing_id,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "NOT_FILED",
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        gstr4_due,
+                        False,
+                        next_auto_g4,
+                    )
+
+                # ================= CUSTOMER SERVICE =================
+                await conn.execute(
+                    f"""INSERT INTO {DB_SCHEMA}.customer_services (
+                        customer_id, service_id, service_status,
+                        rm_id, op_id, entity_type, entity_id, created_at
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    ON CONFLICT DO NOTHING""",
+                    payload.customer_id,
+                    service_id,
+                    "PENDING",
+                    rm_id,
+                    op_id,
+                    "GST_FILING",
+                    filing_id,
+                    now,
+                )
+
+                # ================= VERSION LOG =================
+                await conn.execute(
+                    f"""INSERT INTO {DB_SCHEMA}.versions (
+                        emp_id, entity_type, entity_id,
+                        customer_id, action, json, updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)""",
+                    emp_id,
+                    "GST_FILING",
+                    filing_id,
+                    payload.customer_id,
+                    "CREATE",
+                    json.dumps(dict(filing_row), default=str),
+                    None,
+                )
+
+                return {
+                    "data": {
+                        **dict(filing_row),
+                        # UI: don't expose credentials in API responses
+                        "password": None,
+                    },
+                    "message": "GST filing created successfully",
+                    "request_id": request_id,
+                }
+
+        except asyncpg.exceptions.UniqueViolationError:
+            raise HTTPException(409, "Duplicate GST filing")
+
+        except asyncpg.PostgresError:
+            log.exception("Database error")
+            raise HTTPException(500, "Database error")
+
+        except Exception:
+            log.exception("Unexpected error")
+            raise HTTPException(500, "Internal server error")
+# -------------------------------------------------------------------
+# UPDATE GST FILING (FINAL - WITH USERNAME + PASSWORD + RENT + EMAIL 
+# -------------------------------------------------------------------
+@router.patch("/gst-filings/{filing_id}")
+async def update_gst_filing(
+    filing_id: int,
+    payload: GSTFilingEditIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
 
@@ -360,566 +761,33 @@ async def create_gst_filing(
     IST = ZoneInfo("Asia/Kolkata")
     now = datetime.now(IST)
 
-    # =====================================================
-    # NORMALIZATION
-    # =====================================================
-    filing_type = payload.filing_type.upper()
-    filing_frequency = payload.filing_frequency.upper()
-    filing_category = payload.filing_category.upper() if payload.filing_category else None
-    status = payload.status.upper()
+    GROUP_2_STATES = {
+        "DELHI","UTTAR_PRADESH","BIHAR","WEST_BENGAL","ODISHA",
+        "JHARKHAND","CHHATTISGARH","MADHYA_PRADESH","RAJASTHAN",
+        "HARYANA","PUNJAB","HIMACHAL_PRADESH","UTTARAKHAND",
+        "JAMMU_AND_KASHMIR","LADAKH","SIKKIM","ARUNACHAL_PRADESH",
+        "NAGALAND","MANIPUR","MIZORAM","TRIPURA","MEGHALAYA",
+        "ASSAM","CHANDIGARH"
+    }
 
-    # =====================================================
-    # GENERATE filing_period
-    # =====================================================
-    def generate_filing_period(freq: str) -> str:
-        if freq == "MONTHLY":
-            return now.strftime("%b-%Y").upper()
-        elif freq == "QUARTERLY":
-            quarter = (now.month - 1) // 3 + 1
-            return f"Q{quarter}-{now.year}"
-        elif freq == "YEARLY":
-            if now.month >= 4:
-                return f"{now.year}-{str(now.year + 1)[-2:]}"
-            else:
-                return f"{now.year - 1}-{str(now.year)[-2:]}"
-        else:
-            raise HTTPException(400, "Invalid filing frequency")
+    from dateutil.relativedelta import relativedelta
 
-    filing_period = payload.filing_period.upper() if payload.filing_period else generate_filing_period(filing_frequency)
-
-    try:
-        pool = await get_db_pool()
-    except Exception:
-        log.exception("DB connection failed")
-        raise HTTPException(500, "Database connection error")
-
-    async with pool.acquire() as conn:
+    def parse_filing_period(fp: str):
         try:
-            async with conn.transaction():
-
-                # =====================================================
-                # CUSTOMER VALIDATION
-                # =====================================================
-                customer = await conn.fetchrow(
-                    f"""
-                    SELECT customer_id, is_active
-                    FROM {DB_SCHEMA}.customers
-                    WHERE customer_id = $1
-                    """,
-                    payload.customer_id,
-                )
-
-                if not customer:
-                    raise HTTPException(400, "Customer not found")
-
-                if not customer["is_active"]:
-                    raise HTTPException(400, "Customer inactive")
-
-                # =====================================================
-                # GST VALIDATION
-                # =====================================================
-                if payload.gst_registration_id:
-
-                    if payload.gstin:
-                        raise HTTPException(
-                            400,
-                            "Do not pass gstin when gst_registration_id is provided"
-                        )
-
-                    gst = await conn.fetchrow(
-                        f"""
-                        SELECT id, gstin, is_active
-                        FROM {DB_SCHEMA}.gst_registration
-                        WHERE id = $1
-                        """,
-                        payload.gst_registration_id,
-                    )
-
-                    if not gst:
-                        raise HTTPException(400, "Invalid GST registration")
-
-                    if not gst["is_active"]:
-                        raise HTTPException(400, "GST registration inactive")
-
-                    gstin = gst["gstin"]
-
-                else:
-                    if not payload.gstin:
-                        raise HTTPException(
-                            400,
-                            "gstin is required when GST is not registered with us"
-                        )
-
-                    gstin = payload.gstin
-
-                # =====================================================
-                # DUPLICATE CHECK
-                # =====================================================
-                duplicate = await conn.fetchval(
-                    f"""
-                    SELECT 1
-                    FROM {DB_SCHEMA}.gst_filings
-                    WHERE gst_registration_id IS NOT DISTINCT FROM $1
-                      AND gstin IS NOT DISTINCT FROM $2
-                      AND filing_type = $3
-                      AND filing_period = $4
-                      AND is_active = TRUE
-                    """,
-                    payload.gst_registration_id,
-                    gstin,
-                    filing_type,
-                    filing_period,
-                )
-
-                if duplicate:
-                    raise HTTPException(409, "Filing already exists")
-
-                # =====================================================
-                # RULE ENGINE
-                # =====================================================
-                rule = await conn.fetchrow(
-                    f"""
-                    SELECT *
-                    FROM {DB_SCHEMA}.gst_filing_rule_engine
-                    WHERE filing_type = $1
-                      AND frequency = $2
-                      AND taxpayer_type = COALESCE($3, taxpayer_type)
-                      AND (turnover_details = $4 OR turnover_details = 'ALL')
-                      AND is_active = TRUE
-                    ORDER BY sort_order
-                    LIMIT 1
-                    """,
-                    filing_type,
-                    filing_frequency,
-                    payload.taxpayer_type,
-                    payload.turnover_details,
-                )
-
-                if not rule:
-                    raise HTTPException(400, "No filing rule configured")
-
-                # =====================================================
-                # DUE DATE CALCULATION
-                # =====================================================
-                import calendar, re
-
-                if filing_frequency == "MONTHLY":
-                    match = re.match(r"^([A-Z]{3})-(\d{4})$", filing_period)
-                    if not match:
-                        raise HTTPException(400, "Invalid monthly filing_period")
-
-                    month_str, year = match.groups()
-                    month = list(calendar.month_abbr).index(month_str.title())
-                    year = int(year)
-
-                    month = month + 1 if month < 12 else 1
-                    year = year + 1 if month == 1 else year
-
-                    due_date = datetime(year, month, rule["due_day"], tzinfo=IST)
-
-                elif filing_frequency == "QUARTERLY":
-                    match = re.match(r"^Q([1-4])-(\d{4})$", filing_period)
-                    if not match:
-                        raise HTTPException(400, "Invalid quarterly filing_period")
-
-                    q, year = match.groups()
-                    q, year = int(q), int(year)
-
-                    month = q * 3 + 1
-                    if month > 12:
-                        month = 1
-                        year += 1
-
-                    due_date = datetime(year, month, rule["due_day"], tzinfo=IST)
-
-                else:
-                    match = re.match(r"^(\d{4})-(\d{2})$", filing_period)
-                    if not match:
-                        raise HTTPException(400, "Invalid yearly filing_period")
-
-                    year = int(match.group(1)) + 1
-
-                    due_date = datetime(
-                        year,
-                        rule["due_month_offset"],
-                        rule["due_day"],
-                        tzinfo=IST
-                    )
-
-                # =====================================================
-                # SERVICE MAPPING
-                # =====================================================
-                service_map = {
-                    "MONTHLY": 4,
-                    "QUARTERLY": 5,
-                    "YEARLY": 6,
-                }
-
-                service_id = service_map[filing_frequency]
-
-                # =====================================================
-                # INSERT GST FILING
-                # =====================================================
-                filing_row = await conn.fetchrow(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.gst_filings (
-                        customer_id,
-                        gst_registration_id,
-                        gstin,
-                        filing_type,
-                        filing_category,
-                        filing_period,
-                        due_date,
-                        status,
-                        service_id,
-                        priority,
-                        remarks,
-                        rm_id,
-                        op_id,
-                        is_auto_generated,
-                        is_auto_enabled,
-                        taxpayer_type,
-                        filing_frequency,
-                        turnover_details,
-                        state,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                        $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
-                    )
-                    RETURNING *
-                    """,
-                    payload.customer_id,
-                    payload.gst_registration_id,
-                    gstin,
-                    filing_type,
-                    filing_category,
-                    filing_period,
-                    due_date,
-                    status,
-                    service_id,
-                    payload.priority,
-                    payload.remarks,
-                    payload.rm_id or emp_id,
-                    payload.op_id,
-                    False,
-                    payload.is_auto_enabled,
-                    payload.taxpayer_type,
-                    filing_frequency,
-                    payload.turnover_details,
-                    payload.state,
-                    now,
-                    now,
-                )
-
-                # =====================================================
-                # CUSTOMER SERVICE INSERT (🔥 IMPORTANT)
-                # =====================================================
-                await conn.execute(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.customer_services (
-                        customer_id,
-                        service_id,
-                        service_status,
-                        rm_id,
-                        op_id,
-                        entity_type,
-                        entity_id,
-                        created_at
-                    )
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    payload.customer_id,
-                    service_id,
-                    "PENDING",
-                    payload.rm_id,
-                    emp_id,
-                    "GST_FILING",
-                    filing_row["id"],
-                    now,
-                )
-
-                # =====================================================
-                # VERSION LOG (🔥 AUDIT)
-                # =====================================================
-                await conn.execute(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.versions (
-                        emp_id,
-                        entity_type,
-                        entity_id,
-                        customer_id,
-                        action,
-                        json,
-                        updated_json
-                    )
-                    VALUES ($1,$2,$3,$4,$5,$6,$7)
-                    """,
-                    emp_id,
-                    "GST_FILING",
-                    filing_row["id"],
-                    payload.customer_id,
-                    "CREATE",
-                    json.dumps(dict(filing_row), default=str),
-                    None,
-                )
-
-                return {
-                    "data": dict(filing_row),
-                    "message": "GST filing created successfully",
-                    "request_id": request_id,
-                }
-
-        # =====================================================
-        # DB ERROR HANDLING (🔥 FULL)
-        # =====================================================
-        except asyncpg.exceptions.UniqueViolationError:
-            raise HTTPException(409, "Duplicate GST filing")
-
-        except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(400, "Invalid foreign key reference")
-
-        except asyncpg.exceptions.CheckViolationError as e:
-            constraint = getattr(e, "constraint_name", None)
-
-            raise HTTPException(
-                status_code=400,
-                detail=f"Constraint violated: {constraint}"
-            )
-
-        except asyncpg.PostgresError:
-            log.exception("Database error during GST filing create")
-            raise HTTPException(500, "Database error.")
-
-        except HTTPException:
-            raise
-
-        except Exception:
-            log.exception("Unexpected error during GST filing create")
-            raise HTTPException(500, "Internal server error.")
-
-@router.get("/gst-filings/ui_love")
-async def get_gst_filings(
-    request: Request,
-    customer_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None),
-    filing_type: Optional[str] = Query(None),
-    filing_frequency: Optional[str] = Query(None),
-    taxpayer_type: Optional[str] = Query(None),
-    from_due_date: Optional[datetime] = Query(None),
-    to_due_date: Optional[datetime] = Query(None),
-
-    search: Optional[str] = Query(None),
-    quick_filter: Optional[str] = Query(None),
-
-    sort_by: Optional[str] = Query("due_date"),
-    sort_order: Optional[str] = Query("asc"),
-
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-):
-    try:
-        async with request.app.state.pool.acquire() as conn:
-
-            user = request.state.user
-            emp_id = user.get("emp_id")
-            role = user.get("role")
-
-            conditions = []
-            values = []
-            idx = 1
-
-            # =====================================================
-            # BASE CONDITION
-            # =====================================================
-            conditions.append("f.is_active = TRUE")
-
-            # =====================================================
-            # 🔐 VISIBILITY (YOUR FUNCTION)
-            # =====================================================
-            visibility_sql, visibility_values, idx = build_gst_filing_visibility(
-                role, emp_id, idx, DB_SCHEMA
-            )
-
-            if visibility_sql:
-                conditions.append(visibility_sql)
-                values.extend(visibility_values)
-
-            # =====================================================
-            # FILTERS
-            # =====================================================
-            if customer_id:
-                conditions.append(f"f.customer_id = ${idx}")
-                values.append(customer_id)
-                idx += 1
-
-            if status:
-                conditions.append(f"f.status = ${idx}")
-                values.append(status.upper())
-                idx += 1
-
-            if filing_type:
-                conditions.append(f"f.filing_type = ${idx}")
-                values.append(filing_type.upper())
-                idx += 1
-
-            if filing_frequency:
-                conditions.append(f"f.filing_frequency = ${idx}")
-                values.append(filing_frequency.upper())
-                idx += 1
-
-            if taxpayer_type:
-                conditions.append(f"f.taxpayer_type = ${idx}")
-                values.append(taxpayer_type.upper())
-                idx += 1
-
-            if from_due_date:
-                conditions.append(f"f.due_date >= ${idx}")
-                values.append(from_due_date)
-                idx += 1
-
-            if to_due_date:
-                conditions.append(f"f.due_date <= ${idx}")
-                values.append(to_due_date)
-                idx += 1
-
-            # =====================================================
-            # SEARCH
-            # =====================================================
-            if search and search.strip():
-                conditions.append(f"""
-                    (
-                        f.gstin ILIKE ${idx}
-                        OR f.filing_type ILIKE ${idx}
-                        OR f.filing_period ILIKE ${idx}
-                    )
-                """)
-                values.append(f"%{search.strip()}%")
-                idx += 1
-
-            # =====================================================
-            # QUICK FILTERS
-            # =====================================================
-            if quick_filter == "TODAY":
-                conditions.append("DATE(f.due_date) = CURRENT_DATE")
-
-            elif quick_filter == "OVERDUE":
-                conditions.append("(f.status != 'FILED' AND f.due_date < NOW())")
-
-            elif quick_filter == "THIS_MONTH":
-                conditions.append(
-                    "date_trunc('month', f.due_date) = date_trunc('month', NOW())"
-                )
-
-            # =====================================================
-            # WHERE
-            # =====================================================
-            where_clause = " AND ".join(conditions)
-
-            # =====================================================
-            # SORTING
-            # =====================================================
-            SORT_FIELDS = {
-                "due_date": "f.due_date",
-                "created_at": "f.created_at",
-                "status": "f.status",
-                "priority": "f.priority",
-            }
-
-            sort_column = SORT_FIELDS.get(sort_by, "f.due_date")
-            order = "ASC" if sort_order.lower() == "asc" else "DESC"
-
-            # =====================================================
-            # PAGINATION
-            # =====================================================
-            offset = (page - 1) * limit
-
-            # =====================================================
-            # MAIN QUERY
-            # =====================================================
-            query = f"""
-            SELECT
-                f.*,
-                c.name AS customer_name
-            FROM {DB_SCHEMA}.gst_filings f
-            LEFT JOIN {DB_SCHEMA}.customers c
-                ON c.customer_id = f.customer_id
-            WHERE {where_clause}
-            ORDER BY {sort_column} {order}, f.id DESC
-            LIMIT ${idx} OFFSET ${idx+1}
-            """
-
-            values.extend([limit, offset])
-
-            rows = await conn.fetch(query, *values)
-
-            # =====================================================
-            # COUNT
-            # =====================================================
-            count_query = f"""
-            SELECT COUNT(*)
-            FROM {DB_SCHEMA}.gst_filings f
-            WHERE {where_clause}
-            """
-
-            total = await conn.fetchval(count_query, *values[:-2])
-
-            # =====================================================
-            # SUMMARY
-            # =====================================================
-            summary_query = f"""
-            SELECT
-                COUNT(*) FILTER (WHERE status = 'DATA_PENDING') AS pending,
-                COUNT(*) FILTER (WHERE status = 'FILED') AS filed,
-                COUNT(*) FILTER (
-                    WHERE status != 'FILED' AND due_date < NOW()
-                ) AS overdue
-            FROM {DB_SCHEMA}.gst_filings f
-            WHERE {where_clause}
-            """
-
-            summary = await conn.fetchrow(summary_query, *values[:-2])
-
-            # =====================================================
-            # RESPONSE
-            # =====================================================
-            return {
-                "data": [dict(row) for row in rows],
-                "pagination": {
-                    "page": page,
-                    "limit": limit,
-                    "total": total,
-                    "pages": (total // limit) + (1 if total % limit else 0),
-                },
-                "summary": dict(summary) if summary else {},
-            }
-
-    except Exception:
-        log.exception("Error fetching GST filings")
-        raise HTTPException(500, "Internal server error")
-# -------------------------------------------------------------------
-# UPDATE GST FILING (FINAL - RULE ENGINE + FULL ERROR HANDLING)
-# -------------------------------------------------------------------
-@router.patch("/gst-filings/{filing_id}")
-async def update_gst_filing(
-    filing_id: int,
-    payload: GSTFilingEditIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
-):
-
-    request_id = generate_uuid()
-    emp_id = int(current_user.get("emp_id") or current_user.get("sub") or 0)
-
-    log = logging.LoggerAdapter(
-        logger,
-        {"request_id": request_id, "emp_id": emp_id},
-    )
-
-    IST = ZoneInfo("Asia/Kolkata")
-    now = datetime.now(IST)
+            return datetime.strptime(fp, "%b-%Y")
+        except:
+            pass
+
+        if fp.startswith("Q"):
+            q = int(fp[1])
+            year = int(fp.split("-")[1])
+            return datetime(year, (q - 1) * 3 + 1, 1)
+
+        if "-" in fp:
+            year = int(fp[:4])
+            return datetime(year, 4, 1)
+
+        raise HTTPException(400, "Invalid filing_period")
 
     try:
         pool = await get_db_pool()
@@ -931,9 +799,9 @@ async def update_gst_filing(
         try:
             async with conn.transaction():
 
-                # --------------------------------------------------
-                # LOCK EXISTING
-                # --------------------------------------------------
+                # =====================================================
+                # LOCK EXISTING RECORD
+                # =====================================================
                 old = await conn.fetchrow(
                     f"""
                     SELECT *
@@ -952,150 +820,66 @@ async def update_gst_filing(
                 if not update_data:
                     raise HTTPException(400, "No fields to update")
 
-                # --------------------------------------------------
-                # NORMALIZATION (EXISTING LOGIC KEPT)
-                # --------------------------------------------------
-                if "filing_category" in update_data and update_data["filing_category"]:
-                    update_data["filing_category"] = update_data["filing_category"].upper()
+                # =====================================================
+                # NORMALIZATION
+                # =====================================================
+                for key in [
+                    "filing_category",
+                    "filing_frequency",
+                    "taxpayer_type",
+                    "turnover_details",
+                    "state",
+                    "filing_period",
+                ]:
+                    if key in update_data and update_data[key]:
+                        update_data[key] = update_data[key].upper()
 
-                if "filing_frequency" in update_data and update_data["filing_frequency"]:
-                    update_data["filing_frequency"] = update_data["filing_frequency"].upper()
+                if "email_id" in update_data and update_data["email_id"]:
+                    update_data["email_id"] = update_data["email_id"].lower().strip()
 
-                if "taxpayer_type" in update_data and update_data["taxpayer_type"]:
-                    update_data["taxpayer_type"] = update_data["taxpayer_type"].upper()
+                if "username" in update_data and update_data["username"]:
+                    update_data["username"] = update_data["username"].strip()
 
-                if "turnover_details" in update_data and update_data["turnover_details"]:
-                    update_data["turnover_details"] = update_data["turnover_details"].upper()
+                if "password" in update_data and update_data["password"]:
+                    update_data["password"] = update_data["password"].strip()
 
-                if "status" in update_data:
-                    update_data["status"] = update_data["status"].upper()
-
-                # --------------------------------------------------
-                # GST SAFETY (EXISTING)
-                # --------------------------------------------------
+                # =====================================================
+                # GST VALIDATION
+                # =====================================================
                 new_reg = update_data.get("gst_registration_id", old["gst_registration_id"])
                 new_gstin = update_data.get("gstin", old["gstin"])
 
                 if not new_reg and not new_gstin:
                     raise HTTPException(400, "GST reference required")
 
-                # --------------------------------------------------
-                # FINAL MERGED VALUES
-                # --------------------------------------------------
-                filing_type = old["filing_type"]
+                # =====================================================
+                # MERGED VALUES (FINAL STATE)
+                # =====================================================
+                filing_category = update_data.get("filing_category", old["filing_category"])
                 filing_frequency = update_data.get("filing_frequency", old["filing_frequency"])
                 taxpayer_type = update_data.get("taxpayer_type", old["taxpayer_type"])
                 turnover_details = update_data.get("turnover_details", old["turnover_details"])
+                state = update_data.get("state", old["state"])
+                filing_period = update_data.get("filing_period", old["filing_period"])
 
-                # --------------------------------------------------
-                # RULE ENGINE RE-CALC (🔥 NEW)
-                # --------------------------------------------------
+                # =====================================================
+                # 🔥 RECALCULATION CHECK
+                # =====================================================
                 recalc_required = any(
                     k in update_data
-                    for k in ["filing_frequency", "taxpayer_type", "turnover_details"]
+                    for k in [
+                        "filing_category",
+                        "filing_frequency",
+                        "taxpayer_type",
+                        "turnover_details",
+                        "state",
+                        "filing_period",
+                    ]
                 )
 
-                if recalc_required:
-
-                    rule = await conn.fetchrow(
-                        f"""
-                        SELECT *
-                        FROM {DB_SCHEMA}.gst_filing_rule_engine
-                        WHERE filing_type = $1
-                          AND frequency = $2
-                          AND taxpayer_type = COALESCE($3, taxpayer_type)
-                          AND (turnover_details = $4 OR turnover_details = 'ALL')
-                          AND is_active = TRUE
-                        ORDER BY sort_order
-                        LIMIT 1
-                        """,
-                        filing_type,
-                        filing_frequency,
-                        taxpayer_type,
-                        turnover_details,
-                    )
-
-                    if not rule:
-                        raise HTTPException(400, "No matching rule found")
-
-                    import calendar
-
-                    filing_period = old["filing_period"]
-
-                    # -------- MONTHLY --------
-                    if filing_frequency == "MONTHLY":
-                        month_str, year = filing_period.split("-")
-                        month = list(calendar.month_abbr).index(month_str.title())
-                        year = int(year)
-
-                        month = month + 1 if month < 12 else 1
-                        year = year + 1 if month == 1 else year
-
-                        update_data["due_date"] = datetime(
-                            year, month, rule["due_day"], tzinfo=IST
-                        )
-
-                    # -------- QUARTERLY --------
-                    elif filing_frequency == "QUARTERLY":
-                        q, year = filing_period.split("-")
-                        q = int(q.replace("Q", ""))
-                        year = int(year)
-
-                        month = q * 3 + 1
-                        if month > 12:
-                            month = 1
-                            year += 1
-
-                        update_data["due_date"] = datetime(
-                            year, month, rule["due_day"], tzinfo=IST
-                        )
-
-                    # -------- YEARLY --------
-                    else:
-                        year = int(filing_period.split("-")[0]) + 1
-
-                        update_data["due_date"] = datetime(
-                            year,
-                            rule["due_month_offset"],
-                            rule["due_day"],
-                            tzinfo=IST
-                        )
-
-                    # SERVICE UPDATE
-                    service_map = {
-                        "MONTHLY": 4,
-                        "QUARTERLY": 5,
-                        "YEARLY": 6,
-                    }
-
-                    update_data["service_id"] = service_map[filing_frequency]
-
-                # --------------------------------------------------
-                # STATUS TRANSITION (EXISTING + IMPROVED)
-                # --------------------------------------------------
-                VALID = {
-                    "DATA_PENDING": ["DATA_RECEIVED"],
-                    "DATA_RECEIVED": ["IN_PREPARATION"],
-                    "IN_PREPARATION": ["PENDING_OTP"],
-                    "PENDING_OTP": ["READY_TO_FILE"],
-                    "READY_TO_FILE": ["FILED"],
-                    "FILED": [],
-                    "OVERDUE": ["DATA_RECEIVED"],
-                }
-
-                if "status" in update_data:
-                    old_status = old["status"]
-                    new_status = update_data["status"]
-
-                    if new_status not in VALID.get(old_status, []):
-                        raise HTTPException(400, "Invalid status transition")
-
-                    if new_status == "FILED":
-                        update_data["filed_at"] = now
-
-                # --------------------------------------------------
-                # BUILD QUERY (EXISTING)
-                # --------------------------------------------------
+                # =====================================================
+                # UPDATE MAIN TABLE
+                # =====================================================
                 fields, values, idx = [], [], 1
 
                 for k, v in update_data.items():
@@ -1119,14 +903,197 @@ async def update_gst_filing(
                     *values,
                 )
 
-                # --------------------------------------------------
-                # VERSION AUDIT (EXISTING)
-                # --------------------------------------------------
+                # =====================================================
+                # 🔥 REBUILD RETURN DETAILS (IF REQUIRED)
+                # =====================================================
+                if recalc_required:
+                    def build_due_date_safe(base_dt, month_offset: int, day: int):
+                        target = base_dt + relativedelta(months=month_offset)
+                        last_day = calendar.monthrange(target.year, target.month)[1]
+                        safe_day = min(day, last_day)
+                        return datetime(target.year, target.month, safe_day, tzinfo=IST)
+
+                    base_date = parse_filing_period(filing_period)
+
+                    # DELETE OLD DETAILS (rebuild using your fixed two-row model)
+                    await conn.execute(
+                        f"""
+                        DELETE FROM {DB_SCHEMA}.gst_filing_return_details
+                        WHERE gst_filing_id = $1
+                        """,
+                        filing_id,
+                    )
+
+                    if taxpayer_type == "REGULAR":
+                        # Row 1: GSTR1 + GSTR3B (only for MONTHLY/QUARTERLY)
+                        if filing_frequency in ("MONTHLY", "QUARTERLY"):
+                            if filing_frequency == "MONTHLY":
+                                gstr1_due = build_due_date_safe(base_date, 1, 11)
+                                gstr3b_due = build_due_date_safe(base_date, 1, 20)
+                            else:
+                                gstr1_due = build_due_date_safe(base_date, 1, 13)
+                                due_day_3b = 24 if state in GROUP_2_STATES else 22
+                                gstr3b_due = build_due_date_safe(base_date, 1, due_day_3b)
+
+                            next_auto_periodic = _compute_next_auto_generate_at(
+                                gstr1_due,
+                                gstr3b_due,
+                                lead_days=_lead_days_for_periodic_frequency(filing_frequency),
+                            )
+                            await conn.execute(
+                                f"""
+                                INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                                    gst_filing_id,
+                                    gstr1_status, gstr3b_status, gstr9_status, gstr9c_status,
+                                    cmp08_status, gstr4_status,
+                                    gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date,
+                                    cmp08_due_date, gstr4_due_date,
+                                    is_auto_generated, next_auto_generate_at
+                                )
+                                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                                """,
+                                filing_id,
+                                "NOT_FILED",
+                                "NOT_FILED",
+                                None,
+                                None,
+                                None,
+                                None,
+                                gstr1_due,
+                                gstr3b_due,
+                                None,
+                                None,
+                                None,
+                                None,
+                                False,
+                                next_auto_periodic,
+                            )
+
+                        # Row 2: GSTR9 (+ GSTR9C when turnover > 5CR)
+                        gstr9_due = build_due_date_safe(base_date, 9, 31)
+                        gstr9c_status = (
+                            "NOT_FILED" if turnover_details == "MORE_THAN_5CR" else None
+                        )
+                        gstr9c_due = gstr9_due if gstr9c_status else None
+
+                        next_auto_annual = _compute_next_auto_generate_at(
+                            gstr9_due,
+                            gstr9c_due,
+                            lead_days=_LEAD_DAYS_YEARLY_ANNUAL,
+                        )
+                        await conn.execute(
+                            f"""
+                            INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                                gst_filing_id,
+                                gstr1_status, gstr3b_status, gstr9_status, gstr9c_status,
+                                cmp08_status, gstr4_status,
+                                gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date,
+                                cmp08_due_date, gstr4_due_date,
+                                is_auto_generated, next_auto_generate_at
+                            )
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                            """,
+                            filing_id,
+                            None,
+                            None,
+                            "NOT_FILED",
+                            gstr9c_status,
+                            None,
+                            None,
+                            None,
+                            None,
+                            gstr9_due,
+                            gstr9c_due,
+                            None,
+                            None,
+                            False,
+                            next_auto_annual,
+                        )
+
+                    elif taxpayer_type == "COMPOSITION":
+                        # Row 1: CMP08
+                        cmp08_due = build_due_date_safe(base_date, 1, 18)
+                        next_auto_cmp = _compute_next_auto_generate_at(
+                            cmp08_due,
+                            lead_days=_LEAD_DAYS_QUARTERLY,
+                        )
+                        await conn.execute(
+                            f"""
+                            INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                                gst_filing_id,
+                                gstr1_status, gstr3b_status, gstr9_status, gstr9c_status,
+                                cmp08_status, gstr4_status,
+                                gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date,
+                                cmp08_due_date, gstr4_due_date,
+                                is_auto_generated, next_auto_generate_at
+                            )
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                            """,
+                            filing_id,
+                            None,
+                            None,
+                            None,
+                            None,
+                            "NOT_FILED",
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            cmp08_due,
+                            None,
+                            False,
+                            next_auto_cmp,
+                        )
+
+                        # Row 2: GSTR4
+                        gstr4_due = build_due_date_safe(base_date, 9, 30)
+                        next_auto_g4 = _compute_next_auto_generate_at(
+                            gstr4_due,
+                            lead_days=_LEAD_DAYS_YEARLY_ANNUAL,
+                        )
+                        await conn.execute(
+                            f"""
+                            INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                                gst_filing_id,
+                                gstr1_status, gstr3b_status, gstr9_status, gstr9c_status,
+                                cmp08_status, gstr4_status,
+                                gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date,
+                                cmp08_due_date, gstr4_due_date,
+                                is_auto_generated, next_auto_generate_at
+                            )
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                            """,
+                            filing_id,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            "NOT_FILED",
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            gstr4_due,
+                            False,
+                            next_auto_g4,
+                        )
+
+                    else:
+                        raise HTTPException(400, "Invalid taxpayer_type for recalc")
+
+                # =====================================================
+                # VERSION LOG
+                # =====================================================
                 await conn.execute(
                     f"""
-                    INSERT INTO {DB_SCHEMA}.versions
-                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json, created_at)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    INSERT INTO {DB_SCHEMA}.versions (
+                        emp_id, entity_type, entity_id,
+                        customer_id, action, json, updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
                     """,
                     emp_id,
                     "GST_FILING",
@@ -1135,39 +1102,639 @@ async def update_gst_filing(
                     "UPDATE",
                     json.dumps(dict(old), default=str),
                     json.dumps(dict(new), default=str),
-                    now,
                 )
 
+                result = dict(new)
+                result["password"] = None
+
                 return {
-                    "data": dict(new),
+                    "data": result,
                     "message": "GST filing updated successfully",
                     "request_id": request_id,
                 }
 
-        # =====================================================
-        # DB ERROR HANDLING (🔥 NOW INCLUDED)
-        # =====================================================
         except asyncpg.exceptions.UniqueViolationError:
             raise HTTPException(409, "Duplicate GST filing")
 
-        except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(400, "Invalid foreign key reference")
+        except asyncpg.PostgresError:
+            log.exception("Database error")
+            raise HTTPException(500, "Database error")
 
-        except asyncpg.exceptions.CheckViolationError as e:
-            constraint = getattr(e, "constraint_name", None)
+        except Exception:
+            log.exception("Unexpected error")
+            raise HTTPException(500, "Internal server error")
 
-            raise HTTPException(
-                status_code=400,
-                detail=f"Constraint violated: {constraint}"
+# -------------------------------------------------------------------
+# SOFT DELETE GST FILING (WITH CUSTOMER CHECK + DOC CASCADE)
+# -------------------------------------------------------------------
+@router.delete(
+    "/gst-filings/{filing_id}/deactivate",
+    summary="Deactivate GST Filing (Cascade Documents + Audit)",
+)
+async def deactivate_gst_filing(
+    filing_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {
+            "request_id": request_id,
+            "emp_id": emp_id,
+            "api": "deactivate_gst_filing",
+        },
+    )
+
+    log.info("Incoming deactivate GST filing | filing_id=%s", filing_id)
+
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("DB connection failed")
+        raise HTTPException(500, "Database connection error")
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+
+                # --------------------------------------------------
+                # 1️⃣ FETCH GST FILING
+                # --------------------------------------------------
+                filing = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                    FROM {DB_SCHEMA}.gst_filings
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    filing_id,
+                )
+
+                if not filing:
+                    raise HTTPException(404, "GST filing not found")
+
+                if not filing["is_active"]:
+                    raise HTTPException(400, "GST filing already inactive")
+
+                # 🔥 OPTIONAL SAFETY (REAL WORLD)
+                if filing["status"] == "FILED":
+                    raise HTTPException(400, "Cannot deactivate completed filing")
+
+                # --------------------------------------------------
+                # 2️⃣ CUSTOMER VALIDATION
+                # --------------------------------------------------
+                customer = await conn.fetchrow(
+                    f"""
+                    SELECT customer_id, is_active
+                    FROM {DB_SCHEMA}.customers
+                    WHERE customer_id = $1
+                    """,
+                    filing["customer_id"],
+                )
+
+                if not customer:
+                    raise HTTPException(400, "Customer not found")
+
+                if not customer["is_active"]:
+                    raise HTTPException(
+                        400,
+                        "Customer is inactive. Cannot deactivate filing"
+                    )
+
+                # --------------------------------------------------
+                # 3️⃣ DEACTIVATE GST FILING
+                # --------------------------------------------------
+                updated_filing = await conn.fetchrow(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_filings
+                    SET is_active = FALSE,
+                        updated_at = $2
+                    WHERE id = $1
+                      AND is_active = TRUE
+                    RETURNING *
+                    """,
+                    filing_id,
+                    now,
+                )
+
+                if not updated_filing:
+                    raise HTTPException(400, "Unable to deactivate GST filing")
+
+                # --------------------------------------------------
+                # 4️⃣ CASCADE DEACTIVATE DOCUMENTS
+                # --------------------------------------------------
+                deactivated_docs = await conn.fetch(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_filings_documents
+                    SET is_active = FALSE,
+                        updated_at = $2
+                    WHERE gst_filing_id = $1
+                      AND is_active = TRUE
+                    RETURNING document_id
+                    """,
+                    filing_id,
+                    now,
+                )
+
+                # ==================================================
+                # 🔥 NEW: DEACTIVATE RETURN DETAILS
+                # ==================================================
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_filing_return_details
+                    SET is_active = FALSE,
+                        updated_at = $2
+                    WHERE gst_filing_id = $1
+                      AND is_active = TRUE
+                    """,
+                    filing_id,
+                    now,
+                )
+
+                # ==================================================
+                # 🔥 NEW: CUSTOMER SERVICE SYNC
+                # ==================================================
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.customer_services
+                    SET status = 'INACTIVE'
+                    WHERE entity_type = 'GST_FILING'
+                      AND entity_id = $1
+                    """,
+                    filing_id,
+                )
+
+                # --------------------------------------------------
+                # 5️⃣ VERSION AUDIT
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    emp_id,
+                    "GST_FILING",
+                    filing_id,
+                    filing["customer_id"],
+                    "DELETE",
+                    None,
+                    None,
+                )
+
+            log.info(
+                "GST filing deactivated | filing_id=%s | docs_deactivated=%s",
+                filing_id,
+                len(deactivated_docs),
             )
 
+            return {
+                "data": dict(updated_filing),
+                "documents_deactivated_count": len(deactivated_docs),
+                "message": "GST filing deactivated successfully. Documents also deactivated.",
+                "request_id": request_id,
+            }
+
+        except asyncpg.exceptions.ForeignKeyViolationError:
+            raise HTTPException(400, "Foreign key constraint violation")
+
+        except asyncpg.exceptions.CheckViolationError as e:
+            raise HTTPException(400, f"Constraint violated: {e}")
+
+        except asyncpg.exceptions.DataError:
+            raise HTTPException(400, "Invalid data format")
+
         except asyncpg.PostgresError:
-            log.exception("Database error during GST filing update")
-            raise HTTPException(500, "Database error.")
+            log.exception("Database error during GST filing deactivate")
+            raise HTTPException(500, "Database error")
 
         except HTTPException:
             raise
 
         except Exception:
-            log.exception("Unexpected error during GST filing update")
-            raise HTTPException(500, "Internal server error.")
+            log.exception("Unexpected error during GST filing deactivate")
+            raise HTTPException(500, "Internal server error")
+# -------------------------------------------------------------------
+# ACTIVATE GST FILING (ENTERPRISE FINAL - CLEAN VALIDATION + CASCADE)
+# -------------------------------------------------------------------
+@router.post(
+    "/gst-filings/{filing_id}/activate",
+    summary="Activate GST Filing (Cascade Documents + Audit)",
+)
+async def activate_gst_filing(
+    filing_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+
+    # --------------------------------------------------
+    # REQUEST CONTEXT
+    # --------------------------------------------------
+    request_id = generate_uuid()
+
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {
+            "request_id": request_id,
+            "emp_id": emp_id,
+            "api": "activate_gst_filing",
+        },
+    )
+
+    log.info("Incoming activate GST filing | filing_id=%s", filing_id)
+
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
+
+    # --------------------------------------------------
+    # DB CONNECTION
+    # --------------------------------------------------
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("DB connection failed")
+        raise HTTPException(500, "Database connection error")
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+
+                # --------------------------------------------------
+                # 1️⃣ FETCH GST FILING (LOCK ROW)
+                # --------------------------------------------------
+                filing = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                    FROM {DB_SCHEMA}.gst_filings
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    filing_id,
+                )
+
+                if not filing:
+                    raise HTTPException(404, "GST filing not found")
+
+                if filing["is_active"]:
+                    raise HTTPException(400, "GST filing already active")
+
+                # --------------------------------------------------
+                # 2️⃣ FETCH CUSTOMER (SEPARATE VALIDATION 🔥)
+                # --------------------------------------------------
+                customer = await conn.fetchrow(
+                    f"""
+                    SELECT customer_id, is_active
+                    FROM {DB_SCHEMA}.customers
+                    WHERE customer_id = $1
+                    """,
+                    filing["customer_id"],
+                )
+
+                if not customer:
+                    raise HTTPException(400, "Customer not found")
+
+                if not customer["is_active"]:
+                    raise HTTPException(
+                        400,
+                        "Cannot activate GST filing: Customer is inactive"
+                    )
+
+                # --------------------------------------------------
+                # 3️⃣ ACTIVATE GST FILING
+                # --------------------------------------------------
+                activated_filing = await conn.fetchrow(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_filings
+                    SET is_active = TRUE,
+                        updated_at = $2
+                    WHERE id = $1
+                      AND is_active = FALSE
+                    RETURNING *
+                    """,
+                    filing_id,
+                    now,
+                )
+
+                if not activated_filing:
+                    raise HTTPException(
+                        409,
+                        "GST filing state changed. Please retry."
+                    )
+
+                # --------------------------------------------------
+                # 4️⃣ CASCADE ACTIVATE DOCUMENTS
+                # --------------------------------------------------
+                activated_docs = await conn.fetch(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_filings_documents
+                    SET is_active = TRUE,
+                        updated_at = $2
+                    WHERE gst_filing_id = $1
+                      AND is_active = FALSE
+                    RETURNING document_id
+                    """,
+                    filing_id,
+                    now,
+                )
+
+                # --------------------------------------------------
+                # 4.1️⃣ CASCADE ACTIVATE RETURN DETAILS
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_filing_return_details
+                    SET is_active = TRUE,
+                        updated_at = $2
+                    WHERE gst_filing_id = $1
+                      AND is_active = FALSE
+                    """,
+                    filing_id,
+                    now,
+                )
+
+                # --------------------------------------------------
+                # 4.2️⃣ RESTORE CUSTOMER SERVICE (PENDING)
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.customer_services
+                    SET status = 'ACTIVE'
+                    WHERE entity_type = 'GST_FILING'
+                      AND entity_id = $1
+                      AND status = 'INACTIVE'
+                    """,
+                    filing_id
+                )
+
+                # --------------------------------------------------
+                # 5️⃣ VERSION AUDIT
+                # --------------------------------------------------
+                await conn.execute(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    emp_id,
+                    "GST_FILING",
+                    filing_id,
+                    filing["customer_id"],
+                    "ACTIVATE",
+                    None,
+                    None,
+                )
+
+            # --------------------------------------------------
+            # SUCCESS RESPONSE
+            # --------------------------------------------------
+            log.info(
+                "GST filing activated successfully | filing_id=%s | docs_activated=%s",
+                filing_id,
+                len(activated_docs),
+            )
+
+            return {
+                "data": dict(activated_filing),
+                "documents_activated_count": len(activated_docs),
+                "message": "GST filing activated successfully. Documents also activated.",
+                "request_id": request_id,
+            }
+
+        # --------------------------------------------------
+        # ERROR HANDLING
+        # --------------------------------------------------
+        except asyncpg.exceptions.ForeignKeyViolationError:
+            raise HTTPException(400, "Foreign key constraint violation")
+
+        except asyncpg.exceptions.CheckViolationError as e:
+            constraint = getattr(e, "constraint_name", None)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Constraint violated: {constraint}"
+            )
+
+        except asyncpg.exceptions.DataError:
+            raise HTTPException(400, "Invalid data format")
+
+        except asyncpg.PostgresError:
+            log.exception("Database error during GST filing activation")
+            raise HTTPException(500, "Database error")
+
+        except HTTPException:
+            raise
+
+        except Exception:
+            log.exception("Unexpected error during GST filing activation")
+            raise HTTPException(500, "Internal server error")
+
+# -------------------------------------------------------------------
+# UPDATE RETURN STATUSES (FILED/NOT_FILED + ACTIVATE/DEACTIVATE ROWS)
+# -------------------------------------------------------------------
+@router.patch(
+    "/gst-filings/{filing_id}/returns/status",
+    summary="Update GST return statuses (GSTR1/3B/9/9C/CMP08/GSTR4) and optional activation",
+)
+async def update_return_statuses(
+    filing_id: int,
+    payload: GSTReturnStatusUpdateIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+
+    request_id = generate_uuid()
+
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "update_return_statuses"},
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("DB connection failed")
+        raise HTTPException(500, "Database connection error")
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+
+                # 1️⃣ Ensure filing exists
+                filing = await conn.fetchrow(
+                    f"""
+                    SELECT id
+                    FROM {DB_SCHEMA}.gst_filings
+                    WHERE id = $1
+                    """,
+                    filing_id,
+                )
+
+                if not filing:
+                    raise HTTPException(404, "GST filing not found")
+
+                detail_rows = await conn.fetch(
+                    f"""
+                    SELECT *
+                    FROM {DB_SCHEMA}.gst_filing_return_details
+                    WHERE gst_filing_id = $1
+                    ORDER BY id
+                    """,
+                    filing_id,
+                )
+
+                if not detail_rows:
+                    raise HTTPException(
+                        404,
+                        "No return detail rows found for this GST filing",
+                    )
+
+                # 2️⃣ Optional: activate/deactivate detail rows
+                if payload.is_active is not None:
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.gst_filing_return_details
+                        SET is_active = $2,
+                            updated_at = NOW()
+                        WHERE gst_filing_id = $1
+                        """,
+                        filing_id,
+                        payload.is_active,
+                    )
+
+                # 3️⃣ Build status updates only for provided fields
+                status_fields = {
+                    "gstr1_status": payload.gstr1_status,
+                    "gstr3b_status": payload.gstr3b_status,
+                    "gstr9_status": payload.gstr9_status,
+                    "gstr9c_status": payload.gstr9c_status,
+                    "cmp08_status": payload.cmp08_status,
+                    "gstr4_status": payload.gstr4_status,
+                }
+
+                if any(v is not None for v in status_fields.values()):
+                    requested_fields = [
+                        field_name for field_name, field_value in status_fields.items()
+                        if field_value is not None
+                    ]
+                    applicable_fields = []
+                    non_applicable_fields = []
+
+                    for field_name in requested_fields:
+                        has_applicable_row = any(
+                            row[field_name] is not None for row in detail_rows
+                        )
+                        if has_applicable_row:
+                            applicable_fields.append(field_name)
+                        else:
+                            non_applicable_fields.append(field_name)
+
+                    if non_applicable_fields:
+                        raise HTTPException(
+                            400,
+                            f"Requested return statuses are not applicable for this filing: {', '.join(non_applicable_fields)}",
+                        )
+
+                    set_clauses = []
+                    values = [filing_id]
+                    idx = 2
+
+                    for column in applicable_fields:
+                        new_value = status_fields[column]
+                        if new_value is not None:
+                            set_clauses.append(
+                                f"{column} = CASE WHEN ${idx} IS NOT NULL AND {column} IS NOT NULL THEN ${idx} ELSE {column} END"
+                            )
+                            values.append(new_value)
+                            idx += 1
+
+                    if set_clauses:
+                        update_result = await conn.execute(
+                            f"""
+                            UPDATE {DB_SCHEMA}.gst_filing_return_details
+                            SET {', '.join(set_clauses)},
+                                updated_at = NOW()
+                            WHERE gst_filing_id = $1
+                            """,
+                            *values,
+                        )
+                        updated_count = int(update_result.split(" ")[-1])
+                        if updated_count == 0:
+                            raise HTTPException(
+                                400,
+                                "No return status was updated. Check filing state and requested status fields.",
+                            )
+
+                rows = await conn.fetch(
+                    f"""
+                    SELECT *
+                    FROM {DB_SCHEMA}.gst_filing_return_details
+                    WHERE gst_filing_id = $1
+                    ORDER BY id
+                    """,
+                    filing_id,
+                )
+
+                updated_fields = [
+                    k for k, v in status_fields.items()
+                    if v is not None
+                ]
+                active_rows = sum(1 for r in rows if r["is_active"])
+
+                return {
+                    "data": [dict(r) for r in rows],
+                    "message": "Return statuses updated successfully",
+                    "updated_fields": updated_fields,
+                    "active_return_details_count": active_rows,
+                    "total_return_details_count": len(rows),
+                    "request_id": request_id,
+                }
+
+        except asyncpg.exceptions.ForeignKeyViolationError:
+            log.exception("Foreign key error during return status update")
+            raise HTTPException(400, "Invalid GST filing reference")
+
+        except asyncpg.exceptions.CheckViolationError as e:
+            log.exception("Constraint violation during return status update")
+            constraint = getattr(e, "constraint_name", None)
+            if constraint:
+                raise HTTPException(400, f"Constraint violation: {constraint}")
+            raise HTTPException(400, "Constraint violation while updating return status")
+
+        except asyncpg.exceptions.DataError:
+            log.exception("Invalid data format during return status update")
+            raise HTTPException(400, "Invalid data format in return status update payload")
+
+        except asyncpg.PostgresError:
+            log.exception("Database error during return status update")
+            raise HTTPException(500, "Database error")
+
+        except HTTPException:
+            raise
+
+        except Exception:
+            log.exception("Unexpected error during return status update")
+            raise HTTPException(500, "Internal server error")

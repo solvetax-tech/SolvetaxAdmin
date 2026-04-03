@@ -41,7 +41,28 @@ class RegistrationPaymentIn(BaseSchema):
         default=None,
         example="Advance collected"
     )
-class RegistrationPaymentEditIn(BaseSchema):
-    discount: Optional[condecimal(max_digits=12, decimal_places=2)] = None
-    paid_amount: Optional[condecimal(max_digits=12, decimal_places=2)] = None
-    remarks: Optional[str] = None
+
+
+class FilingPaymentIn(BaseSchema):
+
+    entity_id: int = Field(..., example=55)
+
+    amount: condecimal(max_digits=12, decimal_places=2) = Field(
+        ...,
+        example=699.00
+    )
+
+    discount: Optional[condecimal(max_digits=12, decimal_places=2)] = Field(
+        default=0,
+        example=100
+    )
+
+    paid_amount: Optional[condecimal(max_digits=12, decimal_places=2)] = Field(
+        default=0,
+        example=500
+    )
+
+    remarks: Optional[str] = Field(
+        default=None,
+        example="Advance collected"
+    )

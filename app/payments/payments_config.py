@@ -3,7 +3,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from app.security.rbac import require_permission
-from app.payments.schemas import RegistrationPaymentIn, RegistrationPaymentEditIn
+from app.payments.schemas import RegistrationPaymentIn
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.logger import logger
 from datetime import datetime

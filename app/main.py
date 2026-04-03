@@ -13,7 +13,6 @@ load_dotenv()
 
 import logging
 import multiprocessing
-import asyncio  # 🔥 ADDED
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,65 +23,17 @@ app = FastAPI(title="Slove Tax", version="1.0.0")
 
 # Ensure DB pool is created once per process and closed on shutdown.
 from app.utils import get_db_pool, close_db_pool
-
-# --------------------------------------------------
-# 🔥 BACKGROUND SCHEDULER (IMPROVED)
-# --------------------------------------------------
-
-async def background_jobs():
-    pool = await get_db_pool()
-
-    while True:
-        try:
-            async with pool.acquire() as conn:
-
-                logging.info("Running background scheduler...")
-
-                # --------------------------------------------------
-                # 1️⃣ MARK MISSED FOLLOWUPS (IMPROVED)
-                # --------------------------------------------------
-                result = await conn.execute("""
-                    UPDATE solvetax.customer_service_followups
-                    SET status = 'MISSED',
-                        updated_at = NOW()
-                    WHERE status = 'PENDING'
-                    AND followup_at < NOW()
-                    AND followup_at IS NOT NULL
-                """)
-
-                # 🔥 LOG UPDATED COUNT
-                logging.info(f"MISSED followups updated: {result}")
-
-                # --------------------------------------------------
-                # 2️⃣ EXPIRE SESSION TOKENS (UNCHANGED)
-                # --------------------------------------------------
-                await conn.execute("""
-                    UPDATE solvetax.session_token
-                    SET is_active = FALSE
-                    WHERE is_active = TRUE
-                    AND expires_at IS NOT NULL
-                    AND expires_at < NOW()
-                """)
-
-                logging.info("Scheduler completed successfully")
-
-        except Exception as e:
-            logging.error("Scheduler error: %s", e, exc_info=True)
-
-        # Run every 1 minute
-        await asyncio.sleep(60)
+from app.schedular.schedular import start_scheduler_if_enabled, stop_scheduler
 
 @app.on_event("startup")
 async def _startup_init_db_pool():
     await get_db_pool()
-
-    # 🔥 RUN SCHEDULER ONLY ON MAIN PROCESS (IMPORTANT)
-    if os.getenv("RUN_SCHEDULER", "true") == "true":
-        asyncio.create_task(background_jobs())
+    start_scheduler_if_enabled()
 
 
 @app.on_event("shutdown")
 async def _shutdown_close_db_pool():
+    await stop_scheduler()
     await close_db_pool()
 
 # Add middleware in correct order (they execute in reverse order)
@@ -140,14 +91,17 @@ from app.gst_registration.gst_registration_config import router as gst_registrat
 from app.Dashboard.dashboard import router as dashboard_router
 from app.version.version import router as version_router
 from app.payments.registration_payments import router as registration_payments_router
+from app.payments.filing_payments import router as filing_payments_router
 from app.payments.payments_config import router as payments_config
 from app.gst_registration.gst_blob import router as gst_blob
 from app.gst_registration.document_config import router as document_config
 from app.customer_registration.services import router as services
 from app.follow_ups.gst_reg_manual_followups import router as gst_reg_manual_followups
+from app.follow_ups.gst_filing_manual_followups import router as gst_filing_manual_followups
 from app.customer_registration.service_config import router as service_config
 from app.gst_registration_filing.gst_filing_config import router as gst_filing_config
 from app.gst_registration_filing.gst_registation_filing import router as gst_registation_filing
+from app.gst_registration_filing.gst_filing_document import router as gst_filing_document_router
 
 
 
@@ -175,6 +129,8 @@ if gst_registration_config_router:
     app.include_router(gst_registration_config_router)
 if gst_registation_filing:
     app.include_router(gst_registation_filing)
+if gst_filing_document_router:
+    app.include_router(gst_filing_document_router)
 if dashboard_router:
     app.include_router(dashboard_router)
 if gst_filing_config:
@@ -183,6 +139,8 @@ if version_router:
     app.include_router(version_router)
 if registration_payments_router:
     app.include_router(registration_payments_router)
+if filing_payments_router:
+    app.include_router(filing_payments_router)
 if payments_config:
     app.include_router(payments_config)
 if gst_blob:
@@ -191,6 +149,8 @@ if document_config:
     app.include_router(document_config)
 if gst_reg_manual_followups:
     app.include_router(gst_reg_manual_followups)
+if gst_filing_manual_followups:
+    app.include_router(gst_filing_manual_followups)
 if services:
     app.include_router(services)
 if service_config:
