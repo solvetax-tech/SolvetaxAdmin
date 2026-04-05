@@ -43,15 +43,15 @@ class GSTFilingIn(BaseSchema):
     # =====================================================
     filing_category: Literal["RETURN", "ANNUAL"]
 
-    taxpayer_type: Literal["REGULAR", "COMPOSITION"]
+    taxpayer_type: Optional[Literal["REGULAR", "COMPOSITION"]] = None
 
-    filing_frequency: Literal["MONTHLY", "QUARTERLY", "YEARLY"]
+    filing_frequency:Optional[Literal["MONTHLY", "QUARTERLY", "YEARLY"]] = None
 
     turnover_details: Optional[
         Literal["LESS_THAN_2CR", "BETWEEN_2CR_5CR", "MORE_THAN_5CR"]
     ] = None
 
-    state: Annotated[str, Field(min_length=2, max_length=50)]
+    state: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
 
     # =====================================================
     # 🔥 FILING PERIOD

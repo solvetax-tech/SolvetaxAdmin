@@ -18,6 +18,118 @@ router = APIRouter(
     tags=["GST Filings"]
 )
 
+class GstFilingApiMessages:
+    """User-facing strings for HTTP responses in this module (UI copy)."""
+
+    DB_UNAVAILABLE = (
+        "We could not reach the database. Please wait a moment and try again."
+    )
+    DB_SAVE_FAILED = (
+        "Your changes could not be saved because of a database error. Please try again."
+    )
+    SERVER_ERROR = (
+        "Something unexpected happened on the server. Please try again or contact support."
+    )
+    INVALID_DATA_FORMAT = (
+        "The submitted data could not be processed. Check the format and try again."
+    )
+    FOREIGN_KEY_BLOCKED = (
+        "This action cannot be completed because related records are missing or invalid."
+    )
+    FILING_NOT_FOUND = "No GST filing was found for this ID."
+    FILTER_FAILED = SERVER_ERROR
+    FILING_PERIOD_FORMAT_INVALID = (
+        "Filing period must look like APR-2024, Q1-2024, or 2024-25. Please correct it."
+    )
+    CREATE_MODE_MANUAL_ONLY = (
+        "New GST filings can only be created in MANUAL mode. Choose MANUAL and try again."
+    )
+    CREATE_CUSTOMER_INVALID = (
+        "The customer is missing or inactive. Pick an active customer before continuing."
+    )
+    CREATE_GST_REGISTRATION_INVALID = (
+        "The GST registration is missing or inactive. Link a valid registration or GSTIN."
+    )
+    CREATE_ALREADY_EXISTS = (
+        "A GST filing for this customer, period, and GSTIN already exists."
+    )
+    CREATE_REGULAR_FREQUENCY_INVALID = (
+        "Regular taxpayers need MONTHLY or QUARTERLY filing frequency for return schedules."
+    )
+    CREATE_SUCCESS = "GST filing was created successfully."
+    CREATE_DUPLICATE = (
+        "This GST filing already exists (duplicate record). Open the existing filing instead."
+    )
+    FILING_PERIOD_INVALID = (
+        "Filing period is not valid. Use formats like APR-2024, Q1-2024, or 2024-25."
+    )
+    UPDATE_NO_CHANGES = "No changes were sent. Update at least one field and try again."
+    UPDATE_GST_REFERENCE_REQUIRED = (
+        "Either a GST registration ID or a GSTIN is required to save this filing."
+    )
+    UPDATE_TAXPAYER_TYPE_INVALID_RECALC = (
+        "Taxpayer type must be REGULAR or COMPOSITION when return schedules are rebuilt."
+    )
+    UPDATE_SUCCESS = "GST filing was updated successfully."
+    UPDATE_DUPLICATE = CREATE_DUPLICATE
+    DEACTIVATE_ALREADY_INACTIVE = "This GST filing is already inactive."
+    DEACTIVATE_FILED_BLOCK = (
+        "Completed (filed) GST filings cannot be deactivated. Contact support if you need a correction."
+    )
+    CUSTOMER_NOT_FOUND = "The linked customer could not be found."
+    DEACTIVATE_CUSTOMER_INACTIVE = (
+        "The customer is inactive. Activate the customer before deactivating this filing."
+    )
+    DEACTIVATE_FAILED = (
+        "The GST filing could not be deactivated. Refresh the page and try again."
+    )
+    DEACTIVATE_SUCCESS = (
+        "GST filing was deactivated. Related documents were deactivated as well."
+    )
+    CONSTRAINT_RULE_BLOCKED = "The action was blocked because a data rule was violated."
+    CONSTRAINT_NAMED = "This action was blocked by validation rule: {constraint}."
+    ACTIVATE_ALREADY_ACTIVE = "This GST filing is already active."
+    ACTIVATE_CUSTOMER_INACTIVE = (
+        "The customer is inactive. Activate the customer before reactivating this filing."
+    )
+    ACTIVATE_CONFLICT_RETRY = (
+        "This filing changed while you were working. Refresh the page and try again."
+    )
+    ACTIVATE_SUCCESS = (
+        "GST filing was activated. Related documents were activated as well."
+    )
+    RETURN_DETAILS_NOT_FOUND_BY_ID = (
+        "No GST return-detail row exists for this ID. Confirm the return-detail ID from the filing screen."
+    )
+    RETURN_DETAILS_ROWS_MISSING = (
+        "Return schedule rows are missing for this filing. Contact support if this looks wrong."
+    )
+    RETURN_STATUS_NOT_APPLICABLE_PREFIX = (
+        "These return fields do not apply to this filing and cannot be updated here: "
+    )
+    RETURN_STATUS_NONE_UPDATED = (
+        "Return statuses were not updated. The filing may not support the fields you chose, or nothing changed."
+    )
+    RETURN_STATUS_SUCCESS = "Return statuses were saved successfully."
+    RETURN_STATUS_FK_INVALID = (
+        "Return status could not be saved because a linked GST filing reference is invalid."
+    )
+    RETURN_STATUS_CONSTRAINT = (
+        "Return status could not be saved because it breaks a validation rule."
+    )
+    RETURN_STATUS_CONSTRAINT_NAMED = "Return status blocked by rule: {constraint}."
+    RETURN_STATUS_PAYLOAD_INVALID = (
+        "Return status values could not be read. Use only allowed status values and try again."
+    )
+
+    @staticmethod
+    def return_status_not_applicable(field_names):
+        return (
+            GstFilingApiMessages.RETURN_STATUS_NOT_APPLICABLE_PREFIX
+            + ", ".join(field_names)
+        )
+
+
 # Calendar buffer before earliest due for next_auto_generate_at (prep / auto-generation window).
 _LEAD_DAYS_MONTHLY = 10
 _LEAD_DAYS_QUARTERLY = 12
@@ -118,7 +230,7 @@ async def filter_gst_filings(
         pool = await get_db_pool()
     except Exception:
         log.exception("DB connection failed")
-        raise HTTPException(500, "Database connection error")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
 
     try:
         conditions = []
@@ -329,7 +441,7 @@ async def filter_gst_filings(
 
     except Exception:
         log.exception("Filter error")
-        raise HTTPException(500, "Internal server error")
+        raise HTTPException(500, GstFilingApiMessages.FILTER_FAILED)
 @router.post(
     "/gst-filings",
     status_code=status.HTTP_201_CREATED,
@@ -391,7 +503,7 @@ async def create_gst_filing(
             year = int(filing_period[:4])
             return datetime(year, 4, 1)
 
-        raise HTTPException(400, "Invalid filing_period format")
+        raise HTTPException(400, GstFilingApiMessages.FILING_PERIOD_FORMAT_INVALID)
 
     def build_due_date(base_date, month_offset, day):
         target = base_date + relativedelta(months=month_offset)
@@ -401,7 +513,7 @@ async def create_gst_filing(
         pool = await get_db_pool()
     except Exception:
         log.exception("DB connection failed")
-        raise HTTPException(500, "Database connection error")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
 
     filing_frequency = payload.filing_frequency.upper()
     filing_category = payload.filing_category.upper()
@@ -425,7 +537,7 @@ async def create_gst_filing(
     status = "DATA_PENDING"
 
     if payload.mode != "MANUAL":
-        raise HTTPException(400, "Only MANUAL mode is allowed for first-time filing creation")
+        raise HTTPException(400, GstFilingApiMessages.CREATE_MODE_MANUAL_ONLY)
 
     filing_period = payload.filing_period or generate_previous_period(filing_frequency)
 
@@ -442,7 +554,7 @@ async def create_gst_filing(
                 )
 
                 if not customer or not customer["is_active"]:
-                    raise HTTPException(400, "Invalid or inactive customer")
+                    raise HTTPException(400, GstFilingApiMessages.CREATE_CUSTOMER_INVALID)
 
                 # ================= GST =================
                 if payload.gst_registration_id:
@@ -455,7 +567,7 @@ async def create_gst_filing(
                     )
 
                     if not gst or not gst["is_active"]:
-                        raise HTTPException(400, "Invalid GST registration")
+                        raise HTTPException(400, GstFilingApiMessages.CREATE_GST_REGISTRATION_INVALID)
 
                     gstin = gst["gstin"]
                     # If caller didn't pass credentials explicitly, fall back to GST registration credentials.
@@ -484,7 +596,7 @@ async def create_gst_filing(
 
                 if duplicate:
                     return {
-                        "message": "Filing already exists",
+                        "message": GstFilingApiMessages.CREATE_ALREADY_EXISTS,
                         "request_id": request_id,
                     }
 
@@ -554,7 +666,7 @@ async def create_gst_filing(
                         due_day_3b = 24 if state in GROUP_2_STATES else 22
                         gstr3b_due = build_due_date_safe(base_date, 1, due_day_3b)
                     else:
-                        raise HTTPException(400, "REGULAR taxpayer requires MONTHLY or QUARTERLY frequency for returns")
+                        raise HTTPException(400, GstFilingApiMessages.CREATE_REGULAR_FREQUENCY_INVALID)
 
                     next_auto_periodic = _compute_next_auto_generate_at(
                         gstr1_due,
@@ -724,20 +836,20 @@ async def create_gst_filing(
                         # UI: don't expose credentials in API responses
                         "password": None,
                     },
-                    "message": "GST filing created successfully",
+                    "message": GstFilingApiMessages.CREATE_SUCCESS,
                     "request_id": request_id,
                 }
 
         except asyncpg.exceptions.UniqueViolationError:
-            raise HTTPException(409, "Duplicate GST filing")
+            raise HTTPException(409, GstFilingApiMessages.CREATE_DUPLICATE)
 
         except asyncpg.PostgresError:
             log.exception("Database error")
-            raise HTTPException(500, "Database error")
+            raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
 
         except Exception:
             log.exception("Unexpected error")
-            raise HTTPException(500, "Internal server error")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
 # -------------------------------------------------------------------
 # UPDATE GST FILING (FINAL - WITH USERNAME + PASSWORD + RENT + EMAIL 
 # -------------------------------------------------------------------
@@ -787,13 +899,13 @@ async def update_gst_filing(
             year = int(fp[:4])
             return datetime(year, 4, 1)
 
-        raise HTTPException(400, "Invalid filing_period")
+        raise HTTPException(400, GstFilingApiMessages.FILING_PERIOD_INVALID)
 
     try:
         pool = await get_db_pool()
     except Exception:
         log.exception("DB connection error")
-        raise HTTPException(500, "Database connection error")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
 
     async with pool.acquire() as conn:
         try:
@@ -813,12 +925,12 @@ async def update_gst_filing(
                 )
 
                 if not old:
-                    raise HTTPException(404, "GST filing not found")
+                    raise HTTPException(404, GstFilingApiMessages.FILING_NOT_FOUND)
 
                 update_data = payload.model_dump(exclude_unset=True)
 
                 if not update_data:
-                    raise HTTPException(400, "No fields to update")
+                    raise HTTPException(400, GstFilingApiMessages.UPDATE_NO_CHANGES)
 
                 # =====================================================
                 # NORMALIZATION
@@ -843,6 +955,11 @@ async def update_gst_filing(
                 if "password" in update_data and update_data["password"]:
                     update_data["password"] = update_data["password"].strip()
 
+                if "filing_frequency" in update_data:
+                    update_data["service_id"] = _FILING_FREQUENCY_TO_SERVICE_ID[
+                        update_data["filing_frequency"]
+                    ]
+
                 # =====================================================
                 # GST VALIDATION
                 # =====================================================
@@ -850,7 +967,7 @@ async def update_gst_filing(
                 new_gstin = update_data.get("gstin", old["gstin"])
 
                 if not new_reg and not new_gstin:
-                    raise HTTPException(400, "GST reference required")
+                    raise HTTPException(400, GstFilingApiMessages.UPDATE_GST_REFERENCE_REQUIRED)
 
                 # =====================================================
                 # MERGED VALUES (FINAL STATE)
@@ -1082,7 +1199,7 @@ async def update_gst_filing(
                         )
 
                     else:
-                        raise HTTPException(400, "Invalid taxpayer_type for recalc")
+                        raise HTTPException(400, GstFilingApiMessages.UPDATE_TAXPAYER_TYPE_INVALID_RECALC)
 
                 # =====================================================
                 # VERSION LOG
@@ -1109,20 +1226,20 @@ async def update_gst_filing(
 
                 return {
                     "data": result,
-                    "message": "GST filing updated successfully",
+                    "message": GstFilingApiMessages.UPDATE_SUCCESS,
                     "request_id": request_id,
                 }
 
         except asyncpg.exceptions.UniqueViolationError:
-            raise HTTPException(409, "Duplicate GST filing")
+            raise HTTPException(409, GstFilingApiMessages.CREATE_DUPLICATE)
 
         except asyncpg.PostgresError:
             log.exception("Database error")
-            raise HTTPException(500, "Database error")
+            raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
 
         except Exception:
             log.exception("Unexpected error")
-            raise HTTPException(500, "Internal server error")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
 
 # -------------------------------------------------------------------
 # SOFT DELETE GST FILING (WITH CUSTOMER CHECK + DOC CASCADE)
@@ -1158,7 +1275,7 @@ async def deactivate_gst_filing(
         pool = await get_db_pool()
     except Exception:
         log.exception("DB connection failed")
-        raise HTTPException(500, "Database connection error")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
 
     async with pool.acquire() as conn:
         try:
@@ -1178,14 +1295,14 @@ async def deactivate_gst_filing(
                 )
 
                 if not filing:
-                    raise HTTPException(404, "GST filing not found")
+                    raise HTTPException(404, GstFilingApiMessages.FILING_NOT_FOUND)
 
                 if not filing["is_active"]:
-                    raise HTTPException(400, "GST filing already inactive")
+                    raise HTTPException(400, GstFilingApiMessages.DEACTIVATE_ALREADY_INACTIVE)
 
                 # 🔥 OPTIONAL SAFETY (REAL WORLD)
                 if filing["status"] == "FILED":
-                    raise HTTPException(400, "Cannot deactivate completed filing")
+                    raise HTTPException(400, GstFilingApiMessages.DEACTIVATE_FILED_BLOCK)
 
                 # --------------------------------------------------
                 # 2️⃣ CUSTOMER VALIDATION
@@ -1200,12 +1317,12 @@ async def deactivate_gst_filing(
                 )
 
                 if not customer:
-                    raise HTTPException(400, "Customer not found")
+                    raise HTTPException(400, GstFilingApiMessages.CUSTOMER_NOT_FOUND)
 
                 if not customer["is_active"]:
                     raise HTTPException(
                         400,
-                        "Customer is inactive. Cannot deactivate filing"
+                        GstFilingApiMessages.DEACTIVATE_CUSTOMER_INACTIVE,
                     )
 
                 # --------------------------------------------------
@@ -1225,7 +1342,7 @@ async def deactivate_gst_filing(
                 )
 
                 if not updated_filing:
-                    raise HTTPException(400, "Unable to deactivate GST filing")
+                    raise HTTPException(400, GstFilingApiMessages.DEACTIVATE_FAILED)
 
                 # --------------------------------------------------
                 # 4️⃣ CASCADE DEACTIVATE DOCUMENTS
@@ -1305,29 +1422,32 @@ async def deactivate_gst_filing(
             return {
                 "data": dict(updated_filing),
                 "documents_deactivated_count": len(deactivated_docs),
-                "message": "GST filing deactivated successfully. Documents also deactivated.",
+                "message": GstFilingApiMessages.DEACTIVATE_SUCCESS,
                 "request_id": request_id,
             }
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(400, "Foreign key constraint violation")
+            raise HTTPException(400, GstFilingApiMessages.FOREIGN_KEY_BLOCKED)
 
         except asyncpg.exceptions.CheckViolationError as e:
-            raise HTTPException(400, f"Constraint violated: {e}")
+            raise HTTPException(
+                400,
+                f"{GstFilingApiMessages.CONSTRAINT_RULE_BLOCKED} ({e})",
+            )
 
         except asyncpg.exceptions.DataError:
-            raise HTTPException(400, "Invalid data format")
+            raise HTTPException(400, GstFilingApiMessages.INVALID_DATA_FORMAT)
 
         except asyncpg.PostgresError:
             log.exception("Database error during GST filing deactivate")
-            raise HTTPException(500, "Database error")
+            raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during GST filing deactivate")
-            raise HTTPException(500, "Internal server error")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
 # -------------------------------------------------------------------
 # ACTIVATE GST FILING (ENTERPRISE FINAL - CLEAN VALIDATION + CASCADE)
 # -------------------------------------------------------------------
@@ -1369,7 +1489,7 @@ async def activate_gst_filing(
         pool = await get_db_pool()
     except Exception:
         log.exception("DB connection failed")
-        raise HTTPException(500, "Database connection error")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
 
     async with pool.acquire() as conn:
         try:
@@ -1389,10 +1509,10 @@ async def activate_gst_filing(
                 )
 
                 if not filing:
-                    raise HTTPException(404, "GST filing not found")
+                    raise HTTPException(404, GstFilingApiMessages.FILING_NOT_FOUND)
 
                 if filing["is_active"]:
-                    raise HTTPException(400, "GST filing already active")
+                    raise HTTPException(400, GstFilingApiMessages.ACTIVATE_ALREADY_ACTIVE)
 
                 # --------------------------------------------------
                 # 2️⃣ FETCH CUSTOMER (SEPARATE VALIDATION 🔥)
@@ -1407,12 +1527,12 @@ async def activate_gst_filing(
                 )
 
                 if not customer:
-                    raise HTTPException(400, "Customer not found")
+                    raise HTTPException(400, GstFilingApiMessages.CUSTOMER_NOT_FOUND)
 
                 if not customer["is_active"]:
                     raise HTTPException(
                         400,
-                        "Cannot activate GST filing: Customer is inactive"
+                        GstFilingApiMessages.ACTIVATE_CUSTOMER_INACTIVE,
                     )
 
                 # --------------------------------------------------
@@ -1434,7 +1554,7 @@ async def activate_gst_filing(
                 if not activated_filing:
                     raise HTTPException(
                         409,
-                        "GST filing state changed. Please retry."
+                        GstFilingApiMessages.ACTIVATE_CONFLICT_RETRY,
                     )
 
                 # --------------------------------------------------
@@ -1519,7 +1639,7 @@ async def activate_gst_filing(
             return {
                 "data": dict(activated_filing),
                 "documents_activated_count": len(activated_docs),
-                "message": "GST filing activated successfully. Documents also activated.",
+                "message": GstFilingApiMessages.ACTIVATE_SUCCESS,
                 "request_id": request_id,
             }
 
@@ -1527,28 +1647,32 @@ async def activate_gst_filing(
         # ERROR HANDLING
         # --------------------------------------------------
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(400, "Foreign key constraint violation")
+            raise HTTPException(400, GstFilingApiMessages.FOREIGN_KEY_BLOCKED)
 
         except asyncpg.exceptions.CheckViolationError as e:
             constraint = getattr(e, "constraint_name", None)
             raise HTTPException(
                 status_code=400,
-                detail=f"Constraint violated: {constraint}"
+                detail=(
+                    GstFilingApiMessages.CONSTRAINT_NAMED.format(constraint=constraint)
+                    if constraint
+                    else GstFilingApiMessages.CONSTRAINT_RULE_BLOCKED
+                ),
             )
 
         except asyncpg.exceptions.DataError:
-            raise HTTPException(400, "Invalid data format")
+            raise HTTPException(400, GstFilingApiMessages.INVALID_DATA_FORMAT)
 
         except asyncpg.PostgresError:
             log.exception("Database error during GST filing activation")
-            raise HTTPException(500, "Database error")
+            raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during GST filing activation")
-            raise HTTPException(500, "Internal server error")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
 
 # -------------------------------------------------------------------
 # UPDATE RETURN STATUSES (FILED/NOT_FILED + ACTIVATE/DEACTIVATE ROWS)
@@ -1577,7 +1701,7 @@ async def update_return_statuses(
         pool = await get_db_pool()
     except Exception:
         log.exception("DB connection failed")
-        raise HTTPException(500, "Database connection error")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
 
     async with pool.acquire() as conn:
         try:
@@ -1587,20 +1711,20 @@ async def update_return_statuses(
                 filing = await conn.fetchrow(
                     f"""
                     SELECT id
-                    FROM {DB_SCHEMA}.gst_filings
+                    FROM {DB_SCHEMA}.gst_filing_return_details
                     WHERE id = $1
                     """,
                     filing_id,
                 )
 
                 if not filing:
-                    raise HTTPException(404, "GST filing not found")
+                    raise HTTPException(404, GstFilingApiMessages.RETURN_DETAILS_NOT_FOUND_BY_ID)
 
                 detail_rows = await conn.fetch(
                     f"""
                     SELECT *
                     FROM {DB_SCHEMA}.gst_filing_return_details
-                    WHERE gst_filing_id = $1
+                    WHERE id = $1
                     ORDER BY id
                     """,
                     filing_id,
@@ -1609,7 +1733,7 @@ async def update_return_statuses(
                 if not detail_rows:
                     raise HTTPException(
                         404,
-                        "No return detail rows found for this GST filing",
+                        GstFilingApiMessages.RETURN_DETAILS_ROWS_MISSING,
                     )
 
                 # 2️⃣ Optional: activate/deactivate detail rows
@@ -1619,7 +1743,7 @@ async def update_return_statuses(
                         UPDATE {DB_SCHEMA}.gst_filing_return_details
                         SET is_active = $2,
                             updated_at = NOW()
-                        WHERE gst_filing_id = $1
+                        WHERE id = $1
                         """,
                         filing_id,
                         payload.is_active,
@@ -1655,7 +1779,7 @@ async def update_return_statuses(
                     if non_applicable_fields:
                         raise HTTPException(
                             400,
-                            f"Requested return statuses are not applicable for this filing: {', '.join(non_applicable_fields)}",
+                            GstFilingApiMessages.return_status_not_applicable(non_applicable_fields),
                         )
 
                     set_clauses = []
@@ -1666,7 +1790,7 @@ async def update_return_statuses(
                         new_value = status_fields[column]
                         if new_value is not None:
                             set_clauses.append(
-                                f"{column} = CASE WHEN ${idx} IS NOT NULL AND {column} IS NOT NULL THEN ${idx} ELSE {column} END"
+                                f"{column} = CASE WHEN {column} IS NOT NULL THEN ${idx}::varchar ELSE {column} END"
                             )
                             values.append(new_value)
                             idx += 1
@@ -1677,7 +1801,7 @@ async def update_return_statuses(
                             UPDATE {DB_SCHEMA}.gst_filing_return_details
                             SET {', '.join(set_clauses)},
                                 updated_at = NOW()
-                            WHERE gst_filing_id = $1
+                            WHERE id = $1
                             """,
                             *values,
                         )
@@ -1685,14 +1809,14 @@ async def update_return_statuses(
                         if updated_count == 0:
                             raise HTTPException(
                                 400,
-                                "No return status was updated. Check filing state and requested status fields.",
+                                GstFilingApiMessages.RETURN_STATUS_NONE_UPDATED,
                             )
 
                 rows = await conn.fetch(
                     f"""
                     SELECT *
                     FROM {DB_SCHEMA}.gst_filing_return_details
-                    WHERE gst_filing_id = $1
+                    WHERE id = $1
                     ORDER BY id
                     """,
                     filing_id,
@@ -1706,7 +1830,7 @@ async def update_return_statuses(
 
                 return {
                     "data": [dict(r) for r in rows],
-                    "message": "Return statuses updated successfully",
+                    "message": GstFilingApiMessages.RETURN_STATUS_SUCCESS,
                     "updated_fields": updated_fields,
                     "active_return_details_count": active_rows,
                     "total_return_details_count": len(rows),
@@ -1715,26 +1839,29 @@ async def update_return_statuses(
 
         except asyncpg.exceptions.ForeignKeyViolationError:
             log.exception("Foreign key error during return status update")
-            raise HTTPException(400, "Invalid GST filing reference")
+            raise HTTPException(400, GstFilingApiMessages.RETURN_STATUS_FK_INVALID)
 
         except asyncpg.exceptions.CheckViolationError as e:
             log.exception("Constraint violation during return status update")
             constraint = getattr(e, "constraint_name", None)
             if constraint:
-                raise HTTPException(400, f"Constraint violation: {constraint}")
-            raise HTTPException(400, "Constraint violation while updating return status")
+                raise HTTPException(
+                    400,
+                    GstFilingApiMessages.RETURN_STATUS_CONSTRAINT_NAMED.format(constraint=constraint),
+                )
+            raise HTTPException(400, GstFilingApiMessages.RETURN_STATUS_CONSTRAINT)
 
         except asyncpg.exceptions.DataError:
             log.exception("Invalid data format during return status update")
-            raise HTTPException(400, "Invalid data format in return status update payload")
+            raise HTTPException(400, GstFilingApiMessages.RETURN_STATUS_PAYLOAD_INVALID)
 
         except asyncpg.PostgresError:
             log.exception("Database error during return status update")
-            raise HTTPException(500, "Database error")
+            raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
 
         except HTTPException:
             raise
 
         except Exception:
             log.exception("Unexpected error during return status update")
-            raise HTTPException(500, "Internal server error")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
