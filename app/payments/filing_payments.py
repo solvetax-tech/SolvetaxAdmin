@@ -1,12 +1,10 @@
 import logging
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Depends, status
-from typing import Optional, List
+from fastapi import APIRouter, HTTPException, Depends, status
 from app.security.rbac import require_permission
 from app.payments.schemas import FilingPaymentIn
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_customer_visibility
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.logger import logger
-from datetime import datetime
 import json
 
 router = APIRouter(
@@ -32,10 +30,7 @@ async def create_gst_filing_payment(
 
     entity_type = "GST_FILING"
 
-    try:
-        pool = await get_db_pool()
-    except Exception:
-        raise HTTPException(500, "Database connection error.")
+    pool = await get_db_pool()
 
     async with pool.acquire() as conn:
         try:
@@ -64,6 +59,7 @@ async def create_gst_filing_payment(
             # --------------------------------------------------
             # 2️⃣ Reject if already PAID
             # --------------------------------------------------
+
             already_paid = await conn.fetchrow(
                 f"""
                 SELECT 1
@@ -84,7 +80,7 @@ async def create_gst_filing_payment(
                 raise HTTPException(409, "Payment already completed.")
 
             # --------------------------------------------------
-            # 3️⃣ LOCK rows
+            # 3️⃣ LOCK rows (race condition safety)
             # --------------------------------------------------
 
             await conn.fetch(
@@ -102,8 +98,9 @@ async def create_gst_filing_payment(
             )
 
             # --------------------------------------------------
-            # 4️⃣ Fetch ORIGINAL + TOTAL DISCOUNT
+            # 4️⃣ Fetch ORIGINAL + TOTAL DISCOUNT (FIXED)
             # --------------------------------------------------
+
             base_row = await conn.fetchrow(
                 f"""
                 SELECT
@@ -119,7 +116,9 @@ async def create_gst_filing_payment(
                         ORDER BY created_at ASC
                         LIMIT 1
                     ) AS original_amount,
+
                     COALESCE(SUM(discount), 0) AS total_discount
+
                 FROM {DB_SCHEMA}.registration_payments
                 WHERE
                     customer_id = $1
@@ -133,6 +132,7 @@ async def create_gst_filing_payment(
                 entity_type,
             )
 
+            # First payment
             if not base_row or base_row["original_amount"] is None:
                 original_amount = float(payload.amount)
                 total_discount = 0.0
@@ -143,6 +143,7 @@ async def create_gst_filing_payment(
             # --------------------------------------------------
             # 5️⃣ Total paid
             # --------------------------------------------------
+
             paid_row = await conn.fetchrow(
                 f"""
                 SELECT COALESCE(SUM(paid_amount),0) AS total_paid
@@ -157,12 +158,15 @@ async def create_gst_filing_payment(
                 payload.entity_id,
                 entity_type,
             )
+
             total_paid = float(paid_row["total_paid"])
 
             # --------------------------------------------------
             # 6️⃣ Remaining BEFORE discount
             # --------------------------------------------------
+
             remaining_before_discount = original_amount - total_discount - total_paid
+
             if remaining_before_discount <= 0:
                 raise HTTPException(409, "Payment already completed.")
 
@@ -171,7 +175,6 @@ async def create_gst_filing_payment(
             # --------------------------------------------------
 
             new_discount = float(payload.discount or 0)
-            paid_amount = float(payload.paid_amount or 0)
 
             if new_discount < 0:
                 raise HTTPException(400, "Discount cannot be negative.")
@@ -187,7 +190,11 @@ async def create_gst_filing_payment(
             # --------------------------------------------------
             # 8️⃣ Remaining AFTER discount
             # --------------------------------------------------
+
             remaining_after_discount = original_amount - total_discount - total_paid
+
+            paid_amount = float(payload.paid_amount or 0)
+
             if paid_amount <= 0:
                 raise HTTPException(400, "Paid amount must be greater than 0.")
 
@@ -198,9 +205,14 @@ async def create_gst_filing_payment(
                 )
 
             # --------------------------------------------------
-            # 9️⃣ Net amount + status
+            # 9️⃣ Net amount
             # --------------------------------------------------
+
             net_amount = original_amount - total_discount
+
+            # --------------------------------------------------
+            # 🔟 Status
+            # --------------------------------------------------
 
             if paid_amount == remaining_after_discount:
                 payment_status = "PAID"
@@ -208,7 +220,7 @@ async def create_gst_filing_payment(
                 payment_status = "PENDING"
 
             # --------------------------------------------------
-            # 🔟 INSERT
+            # 1️⃣1️⃣ INSERT
             # --------------------------------------------------
 
             async with conn.transaction():
@@ -274,6 +286,10 @@ async def create_gst_filing_payment(
                     None,
                 )
 
+            # --------------------------------------------------
+            # RESPONSE
+            # --------------------------------------------------
+
             return {
                 **dict(payment_row),
                 "message": "GST filing payment created successfully.",
@@ -290,224 +306,48 @@ async def create_gst_filing_payment(
             raise HTTPException(500, "Internal server error.")
 
 
+# Filing payment listing: GET /api/v1/payments/dynamic_filter?entity_type=GST_FILING
+
 # -------------------------------------------------------------------
-# LIST FILING PAYMENTS (DYNAMIC FILTER + PAGINATION)
+# SOFT DELETE FILING PAYMENT (Production Ready + Audit)
 # -------------------------------------------------------------------
-@router.get(
-    "/dynamic_filter",
-    summary="Filter Filing Payments (Table Only)",
+@router.delete(
+    "/{payment_id}/soft_delete",
+    summary="Soft delete Filing Payment",
+    responses={
+        200: {"description": "Filing payment soft deleted successfully."},
+        400: {"description": "Validation failed or already inactive."},
+        404: {"description": "Filing payment not found."},
+        409: {"description": "Conflict detected."},
+        500: {"description": "Database or internal error."},
+    },
 )
-async def list_filing_payments(
-    payment_id: Optional[int] = None,
-    customer_id: Optional[int] = None,
-    entity_id: Optional[int] = None,
-    entity_type: Optional[str] = None,
-    payment_status: Optional[str] = None,
-    payment_mode: Optional[str] = None,
-    min_amount: Optional[float] = None,
-    max_amount: Optional[float] = None,
-    amount: Optional[float] = None,
-    amount_operator: Optional[str] = None,
-    min_remaining: Optional[float] = None,
-    max_remaining: Optional[float] = None,
-    is_active: Optional[bool] = None,
-    include_inactive: bool = Query(False),
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+async def soft_delete_filing_payment(
+    payment_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
+
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
-    role = current_user.get("role")
+    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
         {"request_id": request_id, "emp_id": current_emp_id},
     )
 
-    if from_date and to_date and from_date > to_date:
-        raise HTTPException(400, "from_date cannot be greater than to_date.")
-
-    if min_amount is not None and max_amount is not None and min_amount > max_amount:
-        raise HTTPException(400, "min_amount cannot be greater than max_amount.")
-
-    if min_remaining is not None and max_remaining is not None and min_remaining > max_remaining:
-        raise HTTPException(400, "min_remaining cannot be greater than max_remaining.")
-
-    allowed_operators = {">", "<", "="}
-    if amount_operator and amount_operator not in allowed_operators:
-        raise HTTPException(400, "Invalid amount_operator. Allowed values are > < =")
-
-    allowed_status = {"PENDING", "PAID", "CANCELLED"}
-    if payment_status and payment_status.strip():
-        payment_status = payment_status.strip().upper()
-        if payment_status not in allowed_status:
-            raise HTTPException(400, "Invalid payment_status value.")
-
-    allowed_modes = {"CASH", "UPI", "BANK_TRANSFER", "CARD", "GATEWAY"}
-    if payment_mode and payment_mode.strip():
-        payment_mode = payment_mode.strip().upper()
-        if payment_mode not in allowed_modes:
-            raise HTTPException(400, "Invalid payment_mode value.")
+    log.info("Incoming filing payment soft delete | payment_id=%s", payment_id)
 
     try:
         pool = await get_db_pool()
     except Exception:
-        raise HTTPException(500, "Database connection error.")
-
-    try:
-        conditions = ["rp.entity_type = 'GST_FILING'"]
-        values = []
-        param_index = 1
-
-        if payment_id is not None:
-            conditions.append(f"rp.id = ${param_index}")
-            values.append(payment_id)
-            param_index += 1
-        if customer_id is not None:
-            conditions.append(f"rp.customer_id = ${param_index}")
-            values.append(customer_id)
-            param_index += 1
-        if entity_id is not None:
-            conditions.append(f"rp.entity_id = ${param_index}")
-            values.append(entity_id)
-            param_index += 1
-        if entity_type and entity_type.strip():
-            conditions.append(f"rp.entity_type = ${param_index}")
-            values.append(entity_type.strip().upper())
-            param_index += 1
-        if payment_status:
-            conditions.append(f"rp.payment_status = ${param_index}")
-            values.append(payment_status)
-            param_index += 1
-        if payment_mode:
-            conditions.append(f"rp.payment_mode = ${param_index}")
-            values.append(payment_mode)
-            param_index += 1
-        if min_amount is not None:
-            conditions.append(f"rp.net_amount >= ${param_index}")
-            values.append(min_amount)
-            param_index += 1
-        if max_amount is not None:
-            conditions.append(f"rp.net_amount <= ${param_index}")
-            values.append(max_amount)
-            param_index += 1
-        if min_remaining is not None:
-            conditions.append(f"rp.remaining_amount >= ${param_index}")
-            values.append(min_remaining)
-            param_index += 1
-        if max_remaining is not None:
-            conditions.append(f"rp.remaining_amount <= ${param_index}")
-            values.append(max_remaining)
-            param_index += 1
-        if amount is not None:
-            operator = amount_operator if amount_operator else "="
-            conditions.append(f"rp.net_amount {operator} ${param_index}")
-            values.append(amount)
-            param_index += 1
-        if is_active is not None:
-            conditions.append(f"rp.is_active = ${param_index}")
-            values.append(is_active)
-            param_index += 1
-        elif not include_inactive:
-            conditions.append("rp.is_active = TRUE")
-        if from_date:
-            conditions.append(f"rp.created_at >= ${param_index}")
-            values.append(from_date)
-            param_index += 1
-        if to_date:
-            conditions.append(f"rp.created_at <= ${param_index}")
-            values.append(to_date)
-            param_index += 1
-
-        visibility_sql, visibility_values, param_index = build_customer_visibility(
-            role,
-            int(current_emp_id) if str(current_emp_id).isdigit() else None,
-            param_index,
-            DB_SCHEMA,
-        )
-        if visibility_sql:
-            conditions.append(visibility_sql)
-            values.extend(visibility_values)
-
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        count_sql = f"""
-            SELECT COUNT(*)
-            FROM {DB_SCHEMA}.registration_payments rp
-            LEFT JOIN {DB_SCHEMA}.customers c
-                   ON rp.customer_id = c.customer_id
-            {where_clause}
-        """
-
-        data_sql = f"""
-            SELECT
-                rp.*,
-                rp.remaining_amount,
-                c.full_name,
-                c.rm_id,
-                c.op_id,
-                e_rm.first_name AS rm_name,
-                e_op.first_name AS op_name
-            FROM {DB_SCHEMA}.registration_payments rp
-            LEFT JOIN {DB_SCHEMA}.customers c
-                   ON rp.customer_id = c.customer_id
-            LEFT JOIN {DB_SCHEMA}.employees e_rm
-                   ON c.rm_id = e_rm.emp_id
-            LEFT JOIN {DB_SCHEMA}.employees e_op
-                   ON c.op_id = e_op.emp_id
-            {where_clause}
-            ORDER BY rp.created_at DESC, rp.id DESC
-            LIMIT ${param_index} OFFSET ${param_index + 1}
-        """
-
-        values_with_pagination = values + [limit, offset]
-
-        async with pool.acquire() as conn:
-            total_count = await conn.fetchval(count_sql, *values)
-            rows = await conn.fetch(data_sql, *values_with_pagination)
-
-        return {
-            "data": [dict(row) for row in rows],
-            "total": total_count,
-            "limit": limit,
-            "offset": offset,
-            "request_id": request_id,
-        }
-
-    except asyncpg.PostgresError:
-        raise HTTPException(500, "Database error occurred during filtering.")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(500, "Internal server error.")
-
-
-# -------------------------------------------------------------------
-# SOFT DELETE FILING PAYMENT
-# -------------------------------------------------------------------
-@router.delete(
-    "/{payment_id}/soft_delete",
-    summary="Soft delete Filing Payment",
-)
-async def soft_delete_filing_payment(
-    payment_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
-):
-    request_id = generate_uuid()
-    current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
-    emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
-
-    try:
-        pool = await get_db_pool()
-    except Exception:
-        raise HTTPException(500, "Database connection error.")
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(status_code=500, detail="Database connection error.")
 
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
+
                 row = await conn.fetchrow(
                     f"""
                     SELECT *
@@ -517,14 +357,30 @@ async def soft_delete_filing_payment(
                     """,
                     payment_id,
                 )
+
                 if not row:
-                    raise HTTPException(404, "Filing payment not found.")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Filing payment not found.",
+                    )
+
                 if row["entity_type"] != "GST_FILING":
-                    raise HTTPException(400, "This payment does not belong to GST filing.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This payment does not belong to GST filing.",
+                    )
+
                 if not row["is_active"]:
-                    raise HTTPException(400, "Filing payment already inactive.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Filing payment already inactive.",
+                    )
+
                 if row["payment_status"] == "PAID":
-                    raise HTTPException(400, "Cannot delete a completed (PAID) payment.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot delete a completed (PAID) payment.",
+                    )
 
                 deleted_row = await conn.fetchrow(
                     f"""
@@ -537,10 +393,21 @@ async def soft_delete_filing_payment(
                     payment_id,
                 )
 
+                # --------------------------------------------------
+                # Version Audit
+                # --------------------------------------------------
                 await conn.execute(
                     f"""
                     INSERT INTO {DB_SCHEMA}.versions
-                    (emp_id, entity_type, entity_id, customer_id, action, json, updated_json)
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
                     VALUES ($1,$2,$3,$4,$5,$6,$7)
                     """,
                     emp_id,
@@ -552,6 +419,11 @@ async def soft_delete_filing_payment(
                     None,
                 )
 
+            log.info(
+                "Filing payment soft deleted successfully | payment_id=%s",
+                payment_id,
+            )
+
             return {
                 **dict(deleted_row),
                 "message": "GST filing payment soft deleted successfully.",
@@ -559,15 +431,21 @@ async def soft_delete_filing_payment(
             }
 
         except asyncpg.exceptions.ForeignKeyViolationError:
-            raise HTTPException(400, "Foreign key constraint violation.")
+            raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
+
         except asyncpg.exceptions.DataError:
-            raise HTTPException(400, "Invalid data format.")
+            raise HTTPException(status_code=400, detail="Invalid data format.")
+
         except asyncpg.PostgresError:
-            raise HTTPException(500, "Database error occurred.")
+            log.exception("Database error during filing payment soft delete")
+            raise HTTPException(status_code=500, detail="Database error occurred.")
+
         except HTTPException:
             raise
+
         except Exception:
-            raise HTTPException(500, "Internal server error.")
+            log.exception("Unexpected error during filing payment soft delete")
+            raise HTTPException(status_code=500, detail="Internal server error.")
 
 
 # -------------------------------------------------------------------

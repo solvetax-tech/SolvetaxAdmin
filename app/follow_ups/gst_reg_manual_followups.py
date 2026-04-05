@@ -21,6 +21,11 @@ router = APIRouter(
 @router.get(
     "/customer-service-followups/filter",
     summary="Filter Customer Service Followups (Dynamic + Advanced Filters)",
+    description=(
+        "Unified list for all followups. Examples: GST registration manual → "
+        "entity_type=GST_REGISTRATION&mode=MANUAL; GST filing manual → "
+        "entity_type=GST_FILING&mode=MANUAL."
+    ),
     responses={
         200: {"description": "Followups fetched successfully."},
         400: {"description": "Validation failed."},
@@ -550,6 +555,12 @@ async def create_followup(
                 if not cs_row:
                     raise HTTPException(404, "Customer service not found")
 
+                if cs_row["entity_type"] != "GST_REGISTRATION":
+                    raise HTTPException(
+                        400,
+                        "Followup allowed only for GST registration services",
+                    )
+
                 if cs_row["status"] != "ACTIVE":
                     raise HTTPException(400, "Service is not active")
 
@@ -701,7 +712,7 @@ class UpdateFollowupRequest(BaseModel):
         None,
         description="If JWT role is RM or OP, API sets assigned_to to current emp_id (ignores other values).",
     )
-    status: Optional[str] = None  # COMPLETED / CANCELLED
+    status: Optional[str] = None  # PENDING / COMPLETED / CANCELLED
 
 
 class UpdateFollowupResponse(BaseModel):
@@ -779,7 +790,8 @@ async def update_followup(
                     SELECT
                         f.*,
                         cs.rm_id,
-                        cs.op_id
+                        cs.op_id,
+                        cs.entity_type AS cs_entity_type
                     FROM {DB_SCHEMA}.customer_service_followups f
                     JOIN {DB_SCHEMA}.customer_services cs
                         ON cs.id = f.customer_service_id
@@ -791,6 +803,12 @@ async def update_followup(
 
                 if not row:
                     raise HTTPException(404, "Followup not found")
+
+                if row["cs_entity_type"] != "GST_REGISTRATION":
+                    raise HTTPException(
+                        400,
+                        "This followup does not belong to GST registration",
+                    )
 
                 # ❌ Prevent modifying finalized followups
                 if row["status"] in ["CANCELLED", "COMPLETED" ]:

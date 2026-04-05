@@ -311,9 +311,14 @@ async def create_registration_payment(
 # -------------------------------------------------------------------
 @router.get(
     "/dynamic_filter",
-    summary="Filter Registration Payments (Table Only)",
+    summary="Filter payments (unified ledger)",
+    description=(
+        "Lists rows from `registration_payments` with the same filters and joins for all flows. "
+        "Pass `entity_type=GST_REGISTRATION` or `entity_type=GST_FILING` to match the old scoped lists; "
+        "omit `entity_type` to return every payment type."
+    ),
     responses={
-        200: {"description": "Registration payments filtered successfully."},
+        200: {"description": "Payments filtered successfully."},
         400: {"description": "Validation failed."},
         500: {"description": "Database or internal error."},
     },
@@ -362,9 +367,10 @@ async def list_registration_payments(
     )
 
     log.info(
-        "Incoming registration payments filter | limit=%s offset=%s",
+        "Incoming payments dynamic_filter | limit=%s offset=%s entity_type=%s",
         limit,
         offset,
+        entity_type,
     )
 
     # --------------------------------------------------
@@ -635,7 +641,7 @@ async def list_registration_payments(
             rows = await conn.fetch(data_sql, *values_with_pagination)
 
         log.info(
-            "Registration payments filter success | returned=%s total=%s",
+            "Payments dynamic_filter success | returned=%s total=%s",
             len(rows),
             total_count,
         )
@@ -645,12 +651,13 @@ async def list_registration_payments(
             "total": total_count,
             "limit": limit,
             "offset": offset,
+            "request_id": request_id,
         }
 
     except asyncpg.PostgresError as e:
 
         log.error(
-            "Database error during registration payments filtering | error=%s",
+            "Database error during payments filtering | error=%s",
             str(e),
             exc_info=True,
         )
@@ -665,7 +672,7 @@ async def list_registration_payments(
 
     except Exception:
 
-        log.exception("Unexpected error during registration payments filtering")
+        log.exception("Unexpected error during payments filtering")
 
         raise HTTPException(
             status_code=500,

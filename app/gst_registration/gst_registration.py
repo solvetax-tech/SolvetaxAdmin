@@ -40,13 +40,14 @@ async def create_gst_registration(
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
     role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else ""
 
-    # Assignment: mirror customer create — RM defaults rm_id; created_by is OP-only on gst_registration.
+    # Assignment: mirror customer create — RM defaults rm_id; created_by = current emp_id only when role is OP.
     rm_id = payload.rm_id
-    if role == "RM" and rm_id is None:
+    if role_norm == "RM" and rm_id is None:
         rm_id = emp_id
-    created_by_val = emp_id if role == "OP" else None
-    op_id_for_service = emp_id if role == "OP" else None
+    created_by_val = emp_id if role_norm == "OP" else None
+    op_id_for_service = emp_id if role_norm == "OP" else None
 
     log = logging.LoggerAdapter(
         logger,
