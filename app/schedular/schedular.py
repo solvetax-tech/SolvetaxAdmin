@@ -100,6 +100,15 @@ def _build_next_row_from_source(src: dict, filing_frequency: str):
 
 
 async def _run_gst_filing_auto_generation(conn):
+    """
+    Forward-only return-detail chaining (does **not** create `gst_filings` rows and does **not**
+    backfill historical months/quarters/years).
+
+    Picks active return-detail rows whose `next_auto_generate_at` is due, inserts **one** new
+    `gst_filing_return_details` row on the **same** `gst_filing_id` with due dates shifted forward,
+    then clears `next_auto_generate_at` on the source row. Manual backlog filings use the create API;
+    this job only continues an existing auto-enabled chain from the latest row.
+    """
     # Lock due rows so parallel scheduler ticks/workers don't duplicate inserts.
     rows = await conn.fetch(
         f"""
@@ -168,6 +177,62 @@ async def _run_gst_filing_auto_generation(conn):
     return generated
 
 
+async def _mark_overdue_gst_return_statuses(conn) -> str:
+    """
+    For each return column, if due_date < NOW() and status is NOT_FILED, set status to MISSED.
+    Only touches rows under active parent filings and active return-detail rows.
+    """
+    return await conn.execute(
+        f"""
+        UPDATE {DB_SCHEMA}.gst_filing_return_details AS d
+        SET
+            gstr1_status = CASE
+                WHEN d.gstr1_due_date IS NOT NULL
+                     AND d.gstr1_due_date < NOW()
+                     AND d.gstr1_status = 'NOT_FILED' THEN 'MISSED'
+                ELSE d.gstr1_status END,
+            gstr3b_status = CASE
+                WHEN d.gstr3b_due_date IS NOT NULL
+                     AND d.gstr3b_due_date < NOW()
+                     AND d.gstr3b_status = 'NOT_FILED' THEN 'MISSED'
+                ELSE d.gstr3b_status END,
+            gstr9_status = CASE
+                WHEN d.gstr9_due_date IS NOT NULL
+                     AND d.gstr9_due_date < NOW()
+                     AND d.gstr9_status = 'NOT_FILED' THEN 'MISSED'
+                ELSE d.gstr9_status END,
+            gstr9c_status = CASE
+                WHEN d.gstr9c_due_date IS NOT NULL
+                     AND d.gstr9c_due_date < NOW()
+                     AND d.gstr9c_status = 'NOT_FILED' THEN 'MISSED'
+                ELSE d.gstr9c_status END,
+            cmp08_status = CASE
+                WHEN d.cmp08_due_date IS NOT NULL
+                     AND d.cmp08_due_date < NOW()
+                     AND d.cmp08_status = 'NOT_FILED' THEN 'MISSED'
+                ELSE d.cmp08_status END,
+            gstr4_status = CASE
+                WHEN d.gstr4_due_date IS NOT NULL
+                     AND d.gstr4_due_date < NOW()
+                     AND d.gstr4_status = 'NOT_FILED' THEN 'MISSED'
+                ELSE d.gstr4_status END,
+            updated_at = NOW()
+        FROM {DB_SCHEMA}.gst_filings AS f
+        WHERE f.id = d.gst_filing_id
+          AND f.is_active = TRUE
+          AND d.is_active = TRUE
+          AND (
+              (d.gstr1_due_date IS NOT NULL AND d.gstr1_due_date < NOW() AND d.gstr1_status = 'NOT_FILED')
+              OR (d.gstr3b_due_date IS NOT NULL AND d.gstr3b_due_date < NOW() AND d.gstr3b_status = 'NOT_FILED')
+              OR (d.gstr9_due_date IS NOT NULL AND d.gstr9_due_date < NOW() AND d.gstr9_status = 'NOT_FILED')
+              OR (d.gstr9c_due_date IS NOT NULL AND d.gstr9c_due_date < NOW() AND d.gstr9c_status = 'NOT_FILED')
+              OR (d.cmp08_due_date IS NOT NULL AND d.cmp08_due_date < NOW() AND d.cmp08_status = 'NOT_FILED')
+              OR (d.gstr4_due_date IS NOT NULL AND d.gstr4_due_date < NOW() AND d.gstr4_status = 'NOT_FILED')
+          )
+        """
+    )
+
+
 async def background_jobs():
     pool = await get_db_pool()
 
@@ -200,7 +265,16 @@ async def background_jobs():
                     """
                 )
 
-                # 3) Auto-generate next GST filing return detail rows
+                # 3) GST return-detail: NOT_FILED -> MISSED when due date has passed
+                overdue_status = await _mark_overdue_gst_return_statuses(conn)
+                _n = overdue_status.split()[-1] if overdue_status else "0"
+                if _n.isdigit() and int(_n) > 0:
+                    logging.info(
+                        "GST return-detail rows updated (NOT_FILED -> MISSED where due < now): %s",
+                        overdue_status,
+                    )
+
+                # 4) Auto-generate next GST filing return detail rows
                 generated = await _run_gst_filing_auto_generation(conn)
                 if generated:
                     logging.info("Auto generated gst filing return-detail rows: %s", generated)

@@ -3,7 +3,12 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from datetime import datetime, timedelta
-from app.gst_registration_filing.schemas import GSTFilingIn, GSTFilingEditIn, GSTReturnStatusUpdateIn
+from app.gst_registration_filing.schemas import (
+    GSTFilingIn,
+    GSTFilingYearlyIn,
+    GSTFilingEditIn,
+    GSTReturnStatusUpdateIn,
+)
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_filing_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
@@ -517,7 +522,7 @@ async def create_gst_filing(
 
     filing_frequency = payload.filing_frequency.upper()
     filing_category = payload.filing_category.upper()
-    state = payload.state.strip().upper()
+    state = payload.state.strip().upper() if payload.state else None
 
     username = payload.username.strip() if payload.username else None
     password = payload.password.strip() if payload.password else None
@@ -656,8 +661,78 @@ async def create_gst_filing(
                     safe_day = min(day, last_day)
                     return datetime(target.year, target.month, safe_day, tzinfo=IST)
 
-                if payload.taxpayer_type == "REGULAR":
-                    # Row 1: GSTR1 + GSTR3B
+                if filing_category == "ANNUAL" and filing_frequency == "YEARLY":
+                    # Annual returns only (same as legacy `/gst-filings/yearly`): one row — no GSTR-1/3B/CMP-08.
+                    if payload.taxpayer_type == "REGULAR":
+                        gstr9_due = build_due_date_safe(base_date, 9, 31)
+                        gstr9c_status = (
+                            "NOT_FILED" if payload.turnover_details == "MORE_THAN_5CR" else None
+                        )
+                        gstr9c_due = (
+                            build_due_date_safe(base_date, 9, 31) if gstr9c_status else None
+                        )
+                        next_auto = _compute_next_auto_generate_at(
+                            gstr9_due,
+                            gstr9c_due,
+                            lead_days=_LEAD_DAYS_YEARLY_ANNUAL,
+                        )
+                        await conn.execute(
+                            f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                                gst_filing_id,
+                                gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
+                                gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
+                                is_auto_generated, next_auto_generate_at
+                            )
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                            filing_id,
+                            None,
+                            None,
+                            "NOT_FILED",
+                            gstr9c_status,
+                            None,
+                            None,
+                            None,
+                            None,
+                            gstr9_due,
+                            gstr9c_due,
+                            None,
+                            None,
+                            False,
+                            next_auto,
+                        )
+                    else:
+                        gstr4_due = build_due_date_safe(base_date, 9, 30)
+                        next_auto = _compute_next_auto_generate_at(
+                            gstr4_due,
+                            lead_days=_LEAD_DAYS_YEARLY_ANNUAL,
+                        )
+                        await conn.execute(
+                            f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
+                                gst_filing_id,
+                                gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
+                                gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
+                                is_auto_generated, next_auto_generate_at
+                            )
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                            filing_id,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            "NOT_FILED",
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            gstr4_due,
+                            False,
+                            next_auto,
+                        )
+
+                elif payload.taxpayer_type == "REGULAR":
+                    # Row 1: GSTR1 + GSTR3B (RETURN category — MONTHLY / QUARTERLY only here)
                     if filing_frequency == "MONTHLY":
                         gstr1_due = build_due_date_safe(base_date, 1, 11)
                         gstr3b_due = build_due_date_safe(base_date, 1, 20)
@@ -850,6 +925,45 @@ async def create_gst_filing(
         except Exception:
             log.exception("Unexpected error")
             raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
+
+
+@router.post(
+    "/gst-filings/yearly",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create GST Filing (ANNUAL + YEARLY only)",
+)
+async def create_gst_filing_yearly(
+    payload: GSTFilingYearlyIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    """
+    Convenience alias for `POST /gst-filings` with `filing_category=ANNUAL`,
+    `filing_frequency=YEARLY`, `mode=MANUAL` — same handler and annual-only return-detail seeding.
+    """
+    merged = GSTFilingIn(
+        customer_id=payload.customer_id,
+        gst_registration_id=payload.gst_registration_id,
+        gstin=payload.gstin,
+        filing_category="ANNUAL",
+        taxpayer_type=payload.taxpayer_type,
+        filing_frequency="YEARLY",
+        turnover_details=payload.turnover_details,
+        state=payload.state,
+        filing_period=payload.filing_period,
+        mode="MANUAL",
+        rm_id=payload.rm_id,
+        op_id=payload.op_id,
+        priority=payload.priority,
+        remarks=payload.remarks,
+        username=payload.username,
+        password=payload.password,
+        rent=payload.rent,
+        email_id=payload.email_id,
+        rule14a=payload.rule14a,
+    )
+    return await create_gst_filing(merged, current_user)
+
+
 # -------------------------------------------------------------------
 # UPDATE GST FILING (FINAL - WITH USERNAME + PASSWORD + RENT + EMAIL 
 # -------------------------------------------------------------------

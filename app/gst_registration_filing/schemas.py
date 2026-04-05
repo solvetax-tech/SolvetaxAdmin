@@ -163,14 +163,20 @@ class GSTFilingIn(BaseSchema):
         if self.filing_frequency == "YEARLY" and not self.turnover_details:
             raise ValueError("Turnover required for yearly filings")
 
+        # ANNUAL + YEARLY (annual returns only): taxpayer type required for return-detail seeding
+        if (
+            self.filing_category == "ANNUAL"
+            and self.filing_frequency == "YEARLY"
+            and not self.taxpayer_type
+        ):
+            raise ValueError("taxpayer_type is required for ANNUAL YEARLY filings")
+
         # MODE VALIDATION (first-time create must be MANUAL)
         if self.mode != "MANUAL":
             raise ValueError("Only MANUAL mode is allowed for first-time filing creation")
 
         # FILING PERIOD FORMAT
         if self.filing_period:
-            import re
-
             if not (
                 re.match(r"^[A-Z]{3}-\d{4}$", self.filing_period) or
                 re.match(r"^Q[1-4]-\d{4}$", self.filing_period) or
@@ -252,6 +258,97 @@ class GSTFilingIn(BaseSchema):
 # "Filing Period (Optional)"
 # Helper text:
 # "Leave empty to use previous period automatically"
+
+
+class GSTFilingYearlyIn(BaseSchema):
+    """
+    **Optional** body for `POST /gst-filings/yearly` (alias of `GSTFilingIn` with ANNUAL + YEARLY + MANUAL).
+
+    Same persistence as `POST /gst-filings` when `filing_category=ANNUAL`, `filing_frequency=YEARLY`:
+    one return-detail row (GSTR-9/9C or GSTR-4). For return schedules + annual rows use `GSTFilingIn`
+    with `filing_category=RETURN` and MONTHLY/QUARTERLY.
+
+    No `mode` field (always manual). `filing_period` optional — if omitted, server picks previous FY (YYYY-YY).
+    """
+
+    customer_id: int = Field(..., gt=0)
+
+    gst_registration_id: Optional[int] = Field(None, gt=0)
+    gstin: Optional[
+        Annotated[str, Field(
+            pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
+        )]
+    ] = None
+
+    taxpayer_type: Literal["REGULAR", "COMPOSITION"]
+    turnover_details: Literal[
+        "LESS_THAN_2CR", "BETWEEN_2CR_5CR", "MORE_THAN_5CR"
+    ]
+
+    state: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
+    filing_period: Optional[str] = None
+
+    rm_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="RM emp_id; omitted + JWT role RM → current emp_id.",
+    )
+    op_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="OP emp_id; omitted + JWT role OP → current emp_id.",
+    )
+
+    priority: Literal["LOW", "NORMAL", "HIGH"] = "NORMAL"
+    remarks: Optional[str] = Field(None, max_length=500)
+    username: Optional[str] = Field(None, max_length=100)
+    password: Optional[str] = Field(None, max_length=100)
+    rent: Optional[float] = Field(None, ge=0)
+    email_id: Optional[EmailStr] = None
+    rule14a: Optional[bool] = None
+
+    @field_validator("gstin", mode="before")
+    @classmethod
+    def normalize_gstin(cls, v):
+        return v.strip().upper() if v else None
+
+    @field_validator(
+        "taxpayer_type",
+        "turnover_details",
+        "filing_period",
+        "state",
+        mode="before",
+    )
+    @classmethod
+    def normalize_upper(cls, v):
+        return v.strip().upper() if isinstance(v, str) else v
+
+    @field_validator("username", "password", mode="before")
+    @classmethod
+    def sanitize_credentials(cls, v):
+        if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("Invalid empty value")
+        return v
+
+    @field_validator("remarks", mode="before")
+    @classmethod
+    def sanitize_remarks(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def validate_logic(self):
+        if not self.gst_registration_id and not self.gstin:
+            raise ValueError("Provide gst_registration_id or gstin")
+        if self.gst_registration_id and self.gstin:
+            raise ValueError("Provide only one: gst_registration_id or gstin")
+        if self.taxpayer_type == "COMPOSITION" and self.turnover_details == "MORE_THAN_5CR":
+            raise ValueError("Invalid turnover for Composition")
+        if self.filing_period:
+            if not re.match(r"^\d{4}-\d{2}$", self.filing_period):
+                raise ValueError("YEARLY filing_period must be YYYY-YY (e.g. 2024-25)")
+        return self
 
 
 class GSTFilingEditIn(BaseSchema):
