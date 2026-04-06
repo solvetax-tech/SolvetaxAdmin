@@ -59,11 +59,6 @@ class GSTFilingIn(BaseSchema):
     filing_period: Optional[str] = None
 
     # =====================================================
-    # MODE
-    # =====================================================
-    mode: Literal["AUTO", "MANUAL"] = "MANUAL"
-
-    # =====================================================
     # ASSIGNMENT
     # =====================================================
     rm_id: Optional[int] = Field(
@@ -170,11 +165,6 @@ class GSTFilingIn(BaseSchema):
             and not self.taxpayer_type
         ):
             raise ValueError("taxpayer_type is required for ANNUAL YEARLY filings")
-
-        # MODE VALIDATION (first-time create must be MANUAL)
-        if self.mode != "MANUAL":
-            raise ValueError("Only MANUAL mode is allowed for first-time filing creation")
-
         # FILING PERIOD FORMAT
         if self.filing_period:
             if not (
@@ -194,6 +184,37 @@ class GSTFilingIn(BaseSchema):
                 raise ValueError("YEARLY filing_frequency requires YYYY-YY filing_period")
 
         return self
+
+
+class GSTRegistrationFilingPrefillOut(BaseSchema):
+    """
+    Minimal fields from `gst_registration` for the create-filing screen.
+    `taxpayer_type` aligns with DB `taxpayer_type` or legacy `registration_type`;
+    `filing_frequency` with DB `filing_frequency` or legacy `filing_preference`.
+    Password is never returned; use `password_set`.
+    """
+
+    request_id: str
+    gst_registration_id: int
+    gstin: Optional[str] = None
+    is_active: bool
+    username: str
+    password_set: bool = Field(
+        ...,
+        description="True when a non-empty password exists on the registration record.",
+    )
+    taxpayer_type: Optional[str] = Field(
+        None,
+        description="Same meaning as GST filing `taxpayer_type` (e.g. REGULAR, COMPOSITION).",
+    )
+    filing_frequency: Optional[str] = Field(
+        None,
+        description="Same meaning as GST filing `filing_frequency` (e.g. MONTHLY, QUARTERLY).",
+    )
+    turnover_details: Optional[str] = None
+    state: Optional[str] = None
+
+
 # =====================================================
 # 🔥 FILING PERIOD (CONTROLLED FIELD)
 # =====================================================

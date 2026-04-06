@@ -12,6 +12,7 @@ from typing import Dict, Any
 from asyncpg.exceptions import PostgresError
 from dotenv import load_dotenv
 from typing import Optional
+from dataclasses import dataclass
 from azure.storage.blob import BlobServiceClient
 from urllib.parse import urlparse
 
@@ -21,6 +22,49 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # Make DB_SCHEMA available at module level
 DB_SCHEMA = os.getenv("DB_SCHEMA", "solvetax")
+
+
+# --------------------------------------------------
+# Business description — Azure OpenAI only (Microsoft Foundry)
+# .env:
+#   AZURE_OPENAI_ENDPOINT     — https://YOUR_RESOURCE.openai.azure.com (no trailing slash)
+#   AZURE_OPENAI_API_KEY      — key from portal
+#   AZURE_OPENAI_DEPLOYMENT   — e.g. gpt-4.1-mini
+#   AZURE_OPENAI_API_VERSION  — optional, default 2024-12-01-preview
+#   AZURE_OPENAI_TIMEOUT_SEC  — optional HTTP timeout, default 45
+# --------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AzureOpenAIBusinessDescriptionSettings:
+    endpoint: str
+    api_key: str
+    deployment: str
+    api_version: str
+    timeout_sec: int
+
+
+def get_azure_openai_business_description_settings() -> AzureOpenAIBusinessDescriptionSettings:
+    raw_timeout = os.getenv("AZURE_OPENAI_TIMEOUT_SEC", "45").strip() or "45"
+    try:
+        timeout_sec = max(5, int(raw_timeout))
+    except ValueError:
+        timeout_sec = 45
+    return AzureOpenAIBusinessDescriptionSettings(
+        endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", "").strip().rstrip("/"),
+        api_key=os.getenv("AZURE_OPENAI_API_KEY", "").strip(),
+        deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "").strip(),
+        api_version=(
+            os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview").strip()
+            or "2024-12-01-preview"
+        ),
+        timeout_sec=timeout_sec,
+    )
+
+
+def is_business_description_ai_configured() -> bool:
+    s = get_azure_openai_business_description_settings()
+    return bool(s.endpoint and s.deployment and s.api_key)
 
 # --------------------------------------------------
 # Asyncpg pool (singleton per process)
@@ -437,6 +481,8 @@ from azure.storage.blob import BlobServiceClient
 
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_STORAGE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER")
+# Customer business image uploads (separate container from GST documents)
+AZURE_STORAGE_CONTAINER1 = os.getenv("AZURE_STORAGE_CONTAINER1", "").strip()
 
 if not AZURE_STORAGE_CONNECTION_STRING:
     raise RuntimeError("AZURE_STORAGE_CONNECTION_STRING is missing in .env")

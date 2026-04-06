@@ -8,8 +8,15 @@ from app.gst_registration_filing.schemas import (
     GSTFilingYearlyIn,
     GSTFilingEditIn,
     GSTReturnStatusUpdateIn,
+    GSTRegistrationFilingPrefillOut,
 )
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_filing_visibility
+from app.utils import (
+    get_db_pool,
+    DB_SCHEMA,
+    generate_uuid,
+    build_gst_filing_visibility,
+    build_gst_visibility,
+)
 from app.security.rbac import require_permission
 from app.logger import logger
 from zoneinfo import ZoneInfo
@@ -54,6 +61,9 @@ class GstFilingApiMessages:
     )
     CREATE_GST_REGISTRATION_INVALID = (
         "The GST registration is missing or inactive. Link a valid registration or GSTIN."
+    )
+    PREFILL_GST_REGISTRATION_NOT_FOUND = (
+        "No active GST registration was found for this ID, or you do not have access."
     )
     CREATE_ALREADY_EXISTS = (
         "A GST filing for this customer, period, and GSTIN already exists."
@@ -447,6 +457,107 @@ async def filter_gst_filings(
     except Exception:
         log.exception("Filter error")
         raise HTTPException(500, GstFilingApiMessages.FILTER_FAILED)
+
+
+def _upper_or_none(v) -> Optional[str]:
+    if v is None:
+        return None
+    if isinstance(v, str):
+        s = v.strip()
+        return s.upper() if s else None
+    return str(v).upper()
+
+
+@router.get(
+    "/gst-registration/{gst_registration_id}/prefill",
+    summary="Load GST registration snapshot for new filing form",
+    response_model=GSTRegistrationFilingPrefillOut,
+)
+async def get_gst_registration_prefill_for_filing(
+    gst_registration_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    Returns identity + filing-related fields from `gst_registration` so the UI can
+    show them before `POST /gst-filings`. Does not change create logic, which only
+    needs a small SELECT for validation and credential fallback.
+    """
+    request_id = generate_uuid()
+
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else ""
+
+    log = logging.LoggerAdapter(
+        logger,
+        {
+            "request_id": request_id,
+            "emp_id": emp_id,
+            "api": "get_gst_registration_prefill_for_filing",
+        },
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("DB connection failed")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
+
+    conditions = ["g.id = $1", "g.is_active = TRUE"]
+    values = [gst_registration_id]
+    idx = 2
+
+    visibility_sql, visibility_values, idx = build_gst_visibility(
+        role_norm, emp_id, idx, DB_SCHEMA
+    )
+    if visibility_sql:
+        conditions.append(f"({visibility_sql})")
+        values.extend(visibility_values)
+
+    where_clause = " AND ".join(conditions)
+
+    query = f"""
+        SELECT g.*
+        FROM {DB_SCHEMA}.gst_registration g
+        WHERE {where_clause}
+    """
+
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, *values)
+    except Exception:
+        log.exception("Prefill query failed")
+        raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
+
+    if not row:
+        raise HTTPException(404, GstFilingApiMessages.PREFILL_GST_REGISTRATION_NOT_FOUND)
+
+    r = dict(row)
+    pwd = r.get("password")
+    password_set = bool(pwd and str(pwd).strip())
+
+    taxpayer_type = _upper_or_none(
+        r.get("taxpayer_type") or r.get("registration_type")
+    )
+    filing_frequency = _upper_or_none(
+        r.get("filing_frequency") or r.get("filing_preference")
+    )
+
+    return GSTRegistrationFilingPrefillOut(
+        request_id=request_id,
+        gst_registration_id=int(r["id"]),
+        gstin=_upper_or_none(r.get("gstin")),
+        is_active=bool(r["is_active"]),
+        username=(r.get("username") or "").strip(),
+        password_set=password_set,
+        taxpayer_type=taxpayer_type,
+        filing_frequency=filing_frequency,
+        turnover_details=_upper_or_none(r.get("turnover_details")),
+        state=_upper_or_none(r.get("state")),
+    )
+
+
 @router.post(
     "/gst-filings",
     status_code=status.HTTP_201_CREATED,

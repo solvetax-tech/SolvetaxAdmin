@@ -1,17 +1,30 @@
 import logging
 import uuid
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Depends, status
+from fastapi import APIRouter, HTTPException, Query, Depends, status, UploadFile, File
 from pydantic import constr, validator
 from typing import Optional, List
 from datetime import datetime
-from app.customer_registration.schemas import CustomerIn, CustomerEditIn, CustomerOut
-from app.utils import get_db_pool, DB_SCHEMA
+from app.customer_registration.schemas import (
+    CustomerIn,
+    CustomerEditIn,
+    CustomerOut,
+    BusinessDescriptionGenerateIn,
+)
+from app.utils import get_db_pool, DB_SCHEMA, is_business_description_ai_configured
 from app.security.rbac import require_permission
 from app.logger import logger
-from app.utils import mask_sensitive_data,generate_uuid,build_customer_visibility
+from app.utils import (
+    mask_sensitive_data,
+    generate_uuid,
+    build_customer_visibility,
+    get_blob_service_client,
+    AZURE_STORAGE_CONTAINER1,
+)
 import json
 from zoneinfo import ZoneInfo
+from app.customer_registration.business_description_ai import request_business_description
+
 IST = ZoneInfo("Asia/Kolkata")
 
 router = APIRouter(
@@ -424,6 +437,152 @@ async def create_customer(
                     }
                 },
             )
+
+
+# -------------------------------------------------------------------
+# GENERATE BUSINESS DESCRIPTION (configured AI / agent HTTP endpoint)
+# -------------------------------------------------------------------
+@router.post(
+    "/business-description/generate",
+    summary="Generate business description via configured AI endpoint",
+    responses={
+        200: {"description": "Generated text returned (not saved to DB)."},
+        503: {"description": "AI URL not configured or upstream failed."},
+    },
+)
+async def generate_business_description(
+    payload: BusinessDescriptionGenerateIn,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "generate_business_description"},
+    )
+
+    if not is_business_description_ai_configured():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "type": "server_error",
+                    "message": "AI not configured: set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT.",
+                    "fields": {},
+                }
+            },
+        )
+
+    body = payload.model_dump()
+    generated = await request_business_description(body, log=log)
+    if not generated:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "type": "server_error",
+                    "message": "Upstream did not return a usable description (check logs / response shape).",
+                    "fields": {},
+                }
+            },
+        )
+
+    log.info("Business description generated (not persisted) | request_id=%s", request_id)
+    return {
+        "business_description": generated,
+        "request_id": request_id,
+    }
+
+
+# -------------------------------------------------------------------
+# UPLOAD CUSTOMER BUSINESS IMAGE (Azure Blob → URL for business_image_url)
+# -------------------------------------------------------------------
+@router.post(
+    "/business-image/upload",
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload customer business image (blob only; use URL as business_image_url)",
+    responses={
+        201: {"description": "File uploaded successfully."},
+        400: {"description": "Invalid file."},
+        503: {"description": "Blob container not configured."},
+        500: {"description": "Blob upload failed."},
+    },
+)
+async def upload_customer_business_image(
+    file: UploadFile = File(...),
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    def upload_file_to_blob(file_bytes: bytes, filename: str, folder: str = "customer-business-images") -> str:
+        blob_service_client = get_blob_service_client()
+        unique_filename = f"{generate_uuid()}_{filename}"
+        blob_path = f"{folder}/{unique_filename}"
+        blob_client = blob_service_client.get_blob_client(
+            container=AZURE_STORAGE_CONTAINER1,
+            blob=blob_path,
+        )
+        blob_client.upload_blob(file_bytes, overwrite=True)
+        return blob_client.url
+
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "upload_customer_business_image"},
+    )
+
+    if not AZURE_STORAGE_CONTAINER1:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "type": "server_error",
+                    "message": "AZURE_STORAGE_CONTAINER1 is not set in environment.",
+                    "fields": {},
+                }
+            },
+        )
+
+    log.info("Incoming customer business image upload | filename=%s", file.filename)
+
+    ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Allowed: JPEG, PNG, WebP, GIF.",
+        )
+
+    contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail="File size exceeds 10MB limit.",
+        )
+
+    try:
+        blob_url = upload_file_to_blob(contents, file.filename or "image")
+    except Exception:
+        log.exception("Azure blob upload failed (customer business image)")
+        raise HTTPException(
+            status_code=500,
+            detail="Blob upload failed.",
+        )
+
+    log.info("Customer business image uploaded | blob_url=%s", blob_url)
+    return {
+        "business_image_url": blob_url,
+        "blob_url": blob_url,
+        "filename": file.filename,
+        "message": "File uploaded successfully.",
+        "request_id": request_id,
+    }
+
+
 # -------------------------------------------------------------------
 # GET CUSTOMER BY ID (Enterprise Production + Detail Audit)
 # -------------------------------------------------------------------

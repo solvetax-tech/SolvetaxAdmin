@@ -88,7 +88,39 @@ class CustomerIn(BaseSchema):
         return html.escape(v.strip()) if isinstance(v, str) else v
 
 
-    
+# =========================================================
+# Business description AI (POST body → configured agent URL)
+# =========================================================
+
+
+class BusinessDescriptionGenerateIn(BaseSchema):
+    full_name: str = Field(..., min_length=2, max_length=150)
+    business_name: Optional[str] = Field(None, max_length=200)
+    business_type: Optional[str] = Field(None, max_length=50)
+    state: Optional[str] = Field(None, max_length=100)
+    city: Optional[str] = Field(None, max_length=100)
+    remark: Optional[str] = None
+    business_url: Optional[str] = Field(
+        None,
+        max_length=500,
+        description="Website or public business URL passed through to the AI endpoint.",
+    )
+
+    @field_validator(
+        "full_name",
+        "business_name",
+        "business_type",
+        "state",
+        "city",
+        "remark",
+        "business_url",
+        mode="before",
+    )
+    @classmethod
+    def sanitize_strings(cls, v):
+        return html.escape(v.strip()) if isinstance(v, str) else v
+
+
 # =========================================================
 # Customer Response Schema
 # =========================================================
