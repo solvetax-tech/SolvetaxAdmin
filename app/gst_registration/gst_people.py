@@ -1237,16 +1237,6 @@ async def soft_delete_registration_person(
     person_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Soft delete a registration person and cascade deactivate all associated documents.
-
-    ✔ Atomic transaction
-    ✔ Concurrency safe
-    ✔ Cascade soft delete for person's documents
-    ✔ Version audit for person only (documents audit skipped)
-    ✔ Primary person protection
-    ✔ Structured logging
-    """
 
     # --------------------------------------------------
     # Request Context
@@ -1351,34 +1341,6 @@ async def soft_delete_registration_person(
                     """,
                     person_id,
                 )
-
-                # --------------------------------------------------
-                # 5️⃣ Version Audit for Each Document (SKIPPED)
-                # --------------------------------------------------
-                # for doc in deleted_docs:
-                #     await conn.execute(
-                #         f"""
-                #         INSERT INTO {DB_SCHEMA}.versions
-                #         (
-                #             emp_id,
-                #             entity_type,
-                #             entity_id,
-                #             customer_id,
-                #             action,
-                #             json,
-                #             updated_json
-                #         )
-                #         VALUES ($1,$2,$3,$4,$5,$6,$7)
-                #         """,
-                #         emp_id,
-                #         "REGISTRATION_DOCUMENT",
-                #         doc["document_id"],
-                #         person_row["customer_id"],
-                #         "DELETE",
-                #         None,
-                #         json.dumps(dict(doc), default=str),
-                #     )
-
                 # --------------------------------------------------
                 # 6️⃣ Version Audit for Person
                 # --------------------------------------------------
@@ -1462,18 +1424,6 @@ async def activate_registration_person(
     person_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Activate Registration Person and cascade activate all associated documents.
-
-    ✔ Atomic transaction
-    ✔ Concurrency safe
-    ✔ GST must be active
-    ✔ Customer must be active
-    ✔ Primary enforcement per GST
-    ✔ Cascade activation of person's documents
-    ✔ Version audit for person only
-    ✔ Structured logging
-    """
 
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"

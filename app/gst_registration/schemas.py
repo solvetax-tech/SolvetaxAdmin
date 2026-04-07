@@ -30,13 +30,6 @@ class GSTConfigOut(BaseModel):
     sort_order: int
 
 class GSTRegistrationIn(BaseModel):
-    """
-    Create GST Registration Schema
-    --------------------------------
-    • Strict validation aligned with DB constraints
-    • System fields (is_active, approved_at) NOT exposed
-    • Workflow validation enforced
-    """
 
     # ----------------------------
     # Identity

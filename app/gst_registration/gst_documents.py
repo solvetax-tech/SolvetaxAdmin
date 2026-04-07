@@ -499,12 +499,6 @@ async def edit_registration_document(
     payload: RegistrationDocumentEditIn,
     current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
-    """
-    Editable fields:
-    ✔ document_type
-    ✔ document_url
-    ✔ verified (flexible; verified_by set automatically)
-    """
 
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
@@ -734,16 +728,6 @@ async def soft_delete_registration_document(
     document_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    ✔ Atomic transaction (Soft Delete + Version Insert)
-    ✔ Concurrency safe (AND is_active = TRUE)
-    ✔ json = NULL (for DELETE)
-    ✔ updated_json = NEW snapshot
-    ✔ Person-state enforcement (must be active)
-    ✔ Verified flexible (optional log if verified=True)
-    ✔ Structured logging
-    ✔ Full exception mapping
-    """
 
     # --------------------------------------------------
     # Request Context

@@ -1,10 +1,3 @@
-"""
-GST filing documents (gst_filings_documents).
-
-Link-only flow: clients send an external Excel/Sheet/CSV URL in `document_url`;
-the API persists that string only — no Azure Blob upload or file storage here.
-Validation for URL shape lives in `schemas.GSTFilingDocumentIn` / `GSTFilingDocumentEditIn`.
-"""
 import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status

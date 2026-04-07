@@ -222,82 +222,8 @@ class GSTRegistrationFilingPrefillOut(BaseSchema):
     business_description: Optional[str] = None
 
 
-# =====================================================
-# 🔥 FILING PERIOD (CONTROLLED FIELD)
-# =====================================================
-# OPTIONAL FIELD
-#
-# 👉 Used ONLY in MANUAL mode
-#
-# 👉 Behavior:
-# - If NOT provided → system will auto-pick previous period
-# - If provided → system will use this value
-#
-# =====================================================
-# 📌 ACCEPTED FORMATS
-#
-# 1️⃣ MONTHLY
-# Format: MMM-YYYY
-# Examples:
-#   "APR-2026"
-#   "JAN-2025"
-#
-# 2️⃣ QUARTERLY
-# Format: Q[1-4]-YYYY
-# Examples:
-#   "Q1-2026"   # Apr–Jun
-#   "Q2-2026"   # Jul–Sep
-#   "Q3-2026"   # Oct–Dec
-#   "Q4-2026"   # Jan–Mar
-#
-# 3️⃣ YEARLY (FINANCIAL YEAR)
-# Format: YYYY-YY
-# Examples:
-#   "2025-26"
-#   "2024-25"
-#
-# =====================================================
-# 📌 UI USAGE
-#
-# CASE 1 → Default (Recommended)
-#   mode = "MANUAL"
-#   filing_period = None
-# 👉 System auto-selects previous period
-#
-# CASE 2 → Custom Period
-#   mode = "MANUAL"
-#   filing_period = "JAN-2026"
-# 👉 Used for backlog filing
-#
-# CASE 3 → AUTO MODE
-#   mode = "AUTO"
-#   filing_period MUST NOT be provided ❌
-#
-# =====================================================
-# 🚨 VALIDATION RULES
-#
-# ❌ Future periods not allowed
-# ❌ Invalid formats rejected
-# ❌ AUTO mode cannot accept filing_period
-#
-# =====================================================
-# 🎯 UI LABEL SUGGESTION
-#
-# "Filing Period (Optional)"
-# Helper text:
-# "Leave empty to use previous period automatically"
-
 
 class GSTFilingYearlyIn(BaseSchema):
-    """
-    **Optional** body for `POST /gst-filings/yearly` (alias of `GSTFilingIn` with ANNUAL + YEARLY + MANUAL).
-
-    Same persistence as `POST /gst-filings` when `filing_category=ANNUAL`, `filing_frequency=YEARLY`:
-    one return-detail row (GSTR-9/9C or GSTR-4). For return schedules + annual rows use `GSTFilingIn`
-    with `filing_category=RETURN` and MONTHLY/QUARTERLY.
-
-    No `mode` field (always manual). `filing_period` optional — if omitted, server picks previous FY (YYYY-YY).
-    """
 
     customer_id: int = Field(..., gt=0)
 
@@ -593,14 +519,6 @@ class GSTReturnDetailsBulkDeleteIn(BaseSchema):
         return list(dict.fromkeys(cleaned))
 
 class GSTFilingDocumentIn(BaseSchema):
-    """
-    Create GST Filing Document
-    ---------------------------
-    • Linked to gst_filings (source of truth)
-    • Link-only model: stores external Excel/Sheet URL in DB (no blob upload in this flow)
-    • No manual verified_at (DB trigger handles it)
-    • No manual verified_by (API handles it)
-    """
 
     # =====================================================
     # REQUIRED
@@ -665,14 +583,6 @@ class GSTFilingDocumentIn(BaseSchema):
 
 
 class GSTFilingDocumentEditIn(BaseSchema):
-    """
-    Edit GST Filing Document (SAFE + CONTROLLED)
-    -------------------------------------------
-    • No manual verified_at (DB trigger handles it)
-    • No manual created_at
-    • Partial updates allowed
-    • Link-only model: update stores external Excel/Sheet URL in DB (no blob upload)
-    """
 
     document_type: Optional[str] = Field(None, max_length=50)
 

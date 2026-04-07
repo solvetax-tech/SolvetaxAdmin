@@ -51,18 +51,6 @@ async def create_customer(
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
 
-    """
-    ✔ Atomic transaction (Customer + Version)
-    ✔ entity_type = 'CUSTOMER'
-    ✔ entity_id = customer_id
-    ✔ action = 'CREATE'
-    ✔ service_required / service_provided supported
-    ✔ json populated (NEW snapshot)
-    ✔ updated_json = NULL
-    ✔ Structured logging
-    ✔ Constraint-specific error handling
-    """
-
     # --------------------------------------------------
     # Request Context
     # --------------------------------------------------
@@ -1368,17 +1356,6 @@ async def soft_delete_customer(
     customer_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Soft delete customer conditionally based on ACTIVE GST count.
-
-    ✔ If 0 GST → Deactivate customer only
-    ✔ If 1 GST → Full cascade deactivate
-    ✔ If >1 GST → DO NOT deactivate customer (block operation)
-    ✔ Atomic transaction
-    ✔ Concurrency safe
-    ✔ Version audit (CUSTOMER only)
-    ✔ Structured logging
-    """
 
     # --------------------------------------------------
     # Request Context
@@ -1660,17 +1637,6 @@ async def activate_customer(
     customer_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Activate customer conditionally based on GST count.
-
-    ✔ If 0 GST → Activate customer only
-    ✔ If 1 GST → Full cascade activation
-    ✔ If >1 GST → Activate customer only + instruct manual GST activation
-    ✔ Atomic transaction
-    ✔ Concurrency safe (FOR UPDATE locking)
-    ✔ Version audit (CUSTOMER only)
-    ✔ Structured logging
-    """
 
     # --------------------------------------------------
     # 1️⃣ Request Context

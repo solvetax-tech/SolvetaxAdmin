@@ -24,17 +24,6 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 DB_SCHEMA = os.getenv("DB_SCHEMA", "solvetax")
 
 
-# --------------------------------------------------
-# Business description — Azure OpenAI only (Microsoft Foundry)
-# .env:
-#   AZURE_OPENAI_ENDPOINT     — https://YOUR_RESOURCE.openai.azure.com (no trailing slash)
-#   AZURE_OPENAI_API_KEY      — key from portal
-#   AZURE_OPENAI_DEPLOYMENT   — e.g. gpt-4.1-mini
-#   AZURE_OPENAI_API_VERSION  — optional, default 2024-12-01-preview
-#   AZURE_OPENAI_TIMEOUT_SEC  — optional HTTP timeout, default 45
-# --------------------------------------------------
-
-
 @dataclass(frozen=True)
 class AzureOpenAIBusinessDescriptionSettings:
     endpoint: str
@@ -66,10 +55,7 @@ def is_business_description_ai_configured() -> bool:
     s = get_azure_openai_business_description_settings()
     return bool(s.endpoint and s.deployment and s.api_key)
 
-# --------------------------------------------------
-# Asyncpg pool (singleton per process)
-# Keep pool sizes small for Azure Postgres connection limits.
-# --------------------------------------------------
+
 _db_pool = None
 _db_pool_lock = asyncio.Lock()
 
@@ -114,7 +100,7 @@ async def get_db_pool():
     DB_NAME = os.getenv("DB_NAME")
     DB_USER = os.getenv("DB_USER")
     DB_PASSWORD = os.getenv("DB_PASSWORD")
-    # DB_SCHEMA is now imported from module level
+   
 
     print(
         f"[DB DEBUG] DB_HOST={DB_HOST} DB_PORT={DB_PORT} "
@@ -189,27 +175,10 @@ def mask_sensitive_data(data: Optional[str]) -> str:
 
 
 def passwords_match(password1: str, password2: str) -> bool:
-    """
-    Returns True if both passwords are exactly the same, False otherwise.
-    """
+    
     return password1 == password2
 
 def build_customer_visibility(role: str, emp_id: int, idx: int, schema: str):
-    """
-    Enterprise customer visibility rules (customers table alias = c).
-
-    Role Access:
-    ADMIN           → All customers
-    RM              → Customers assigned as RM
-    OP              → Customers assigned as OP
-    SALES_MANAGER   → Customers of RM team
-    OP_MANAGER      → Customers of OP team
-
-    Returns:
-        sql_condition (str | None)
-        values (list)
-        new_idx (int)
-    """
 
     # --------------------------------------------------
     # ADMIN → Full Access
@@ -261,14 +230,7 @@ def build_customer_visibility(role: str, emp_id: int, idx: int, schema: str):
     # --------------------------------------------------
     return None, [], idx
 def build_gst_visibility(role: str, emp_id: int, idx: int, schema: str):
-    """
-    Enterprise GST visibility rules.
-
-    ADMIN → all
-    RM → gst.rm_id
-    OP → gst.created_by
-    MANAGERS → team RMs or team OPs
-    """
+    
 
     if role == "ADMIN":
         return None, [], idx
@@ -304,14 +266,6 @@ def build_gst_visibility(role: str, emp_id: int, idx: int, schema: str):
 
     return None, [], idx
 def build_gst_filing_visibility(role: str, emp_id: int, idx: int, schema: str):
-    """
-    GST Filing visibility rules
-
-    ADMIN → all
-    RM → gst_filings.rm_id
-    OP → gst_filings.op_id
-    MANAGERS → team members
-    """
 
     if role == "ADMIN":
         return None, [], idx
@@ -346,16 +300,6 @@ def build_gst_filing_visibility(role: str, emp_id: int, idx: int, schema: str):
 
     return None, [], idx
 def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: str):
-    """
-    Enterprise visibility for customer_services (alias = cs)
-
-    Role Access:
-    ADMIN           → All services
-    RM              → Services where cs.rm_id = emp_id
-    OP              → Services where cs.op_id = emp_id
-    SALES_MANAGER   → Services of RM team
-    OP_MANAGER      → Services of OP team
-    """
 
     # ADMIN → Full access
     if role == "ADMIN":
@@ -397,17 +341,6 @@ def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: 
     return None, [], idx
 
 async def get_user_permissions(emp_id: int, conn, DB_SCHEMA="solvetax") -> Dict[str, Any]:
-    """
-    Fetch permissions from DB based on employee_roles only (no group_roles).
-
-    Returns format:
-    {
-      "platform": {
-         "EMPLOYEE": ["READ", "WRITE"],
-         "USER_ACCESS": ["READ"]
-      }
-    }
-    """
     try:
         # ✅ 1) fetch role ids for this employee
         rows = await conn.fetch(
@@ -650,13 +583,6 @@ AZURE_SAS_EXPIRY_MINUTES = int(os.getenv("AZURE_SAS_EXPIRY_MINUTES", 15))
 
 
 def generate_blob_sas_url(blob_path: str, disposition: str = "inline") -> str:
-    """
-    Generate temporary SAS URL for viewing or downloading blob.
-
-    disposition:
-        inline      -> preview in browser
-        attachment  -> force download
-    """
 
     blob_service_client = get_blob_service_client()
 

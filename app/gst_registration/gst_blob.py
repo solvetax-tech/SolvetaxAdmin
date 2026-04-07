@@ -39,13 +39,6 @@ async def upload_registration_document_file(
     file: UploadFile = File(...),
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    ✔ Azure Blob upload only
-    ✔ File validation
-    ✔ Uses singleton blob client from utils
-    ✔ No DB interaction
-    ✔ Production structured logging
-    """
 
     # --------------------------------------------------
     # Local Upload Helper (Scoped to This API Only)

@@ -16,14 +16,6 @@ class BaseSchema(BaseModel):
         "from_attributes": True,        # Allows ORM objects (future safe)
     }
 
-
-# =========================================================
-# Customer Create Schema (DB-Aligned + Services Array)
-# =========================================================
-# Assignment: on create, API applies JWT defaults — if role is RM and rm_id is omitted,
-# rm_id is set to the caller's emp_id; if role is OP and op_id is omitted, op_id is set to emp_id.
-# (See create_customer in customer.py.)
-
 class CustomerIn(BaseSchema):
     full_name: str = Field(..., min_length=2, max_length=150)
     email: Optional[EmailStr] = Field(None, max_length=150)

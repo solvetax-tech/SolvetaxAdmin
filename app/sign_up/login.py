@@ -26,6 +26,7 @@ load_dotenv()
 JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+REFRESH_COOKIE_PATH = "/app/v1"
 
 router = APIRouter(prefix="/app/v1", tags=["Login"])
 from fastapi.responses import JSONResponse
@@ -184,7 +185,8 @@ async def login(
                 httponly=True,
                 secure=True,
                 samesite="Strict",
-                max_age=14 * 24 * 60 * 60
+                max_age=14 * 24 * 60 * 60,
+                path=REFRESH_COOKIE_PATH,
             )
 
             return response
@@ -336,7 +338,7 @@ async def refresh_token_endpoint(
                 secure=True,
                 samesite="Strict",
                 max_age=14 * 24 * 60 * 60,
-                path="/app/v1"
+                path=REFRESH_COOKIE_PATH,
             )
 
             return response
@@ -425,7 +427,8 @@ async def logout(
                 key="refresh_token",
                 httponly=True,
                 secure=True,
-                samesite="Strict"
+                samesite="Strict",
+                path=REFRESH_COOKIE_PATH,
             )
 
             return response

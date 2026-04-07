@@ -1089,16 +1089,6 @@ async def soft_delete_gst_registration(
     gst_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Soft delete GST registration and cascade deactivate all associated persons and documents.
-
-    ✔ Atomic transaction
-    ✔ Concurrency safe
-    ✔ Cascade via gst_registration_id → person_id
-    ✔ Version audit for GST only
-    ✔ Structured logging
-    ✔ Full exception mapping
-    """
 
     # --------------------------------------------------
     # Request Context
@@ -1303,16 +1293,6 @@ async def activate_gst_registration(
     gst_id: int,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
-    """
-    Activate GST Registration and cascade activate all associated persons and documents.
-
-    ✔ Atomic transaction
-    ✔ Concurrency safe
-    ✔ Customer must be active
-    ✔ Cascade activation via relational IDs
-    ✔ Version audit
-    ✔ Structured logging
-    """
 
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"

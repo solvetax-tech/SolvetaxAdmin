@@ -39,17 +39,6 @@ async def list_versions(
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-    """
-    Filter Versions (Enterprise Production Ready)
-
-    ✔ Fully aligned with DB constraints
-    ✔ Action validation safe
-    ✔ Indexed column optimization
-    ✔ Deterministic ordering
-    ✔ Pagination metadata
-    ✔ Structured logging
-    ✔ JSON-safe output
-    """
 
     # --------------------------------------------------
     # Request Context
