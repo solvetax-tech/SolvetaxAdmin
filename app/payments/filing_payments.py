@@ -63,7 +63,7 @@ async def create_gst_filing_payment(
             already_paid = await conn.fetchrow(
                 f"""
                 SELECT 1
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE customer_id = $1
                 AND entity_id = $2
                 AND entity_type = $3
@@ -86,7 +86,7 @@ async def create_gst_filing_payment(
             await conn.fetch(
                 f"""
                 SELECT id
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE customer_id = $1
                 AND entity_id = $2
                 AND entity_type = $3
@@ -106,7 +106,7 @@ async def create_gst_filing_payment(
                 SELECT
                     (
                         SELECT amount
-                        FROM {DB_SCHEMA}.registration_payments
+                        FROM {DB_SCHEMA}.payments
                         WHERE
                             customer_id = $1
                         AND entity_id = $2
@@ -119,7 +119,7 @@ async def create_gst_filing_payment(
 
                     COALESCE(SUM(discount), 0) AS total_discount
 
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE
                     customer_id = $1
                 AND entity_id = $2
@@ -147,7 +147,7 @@ async def create_gst_filing_payment(
             paid_row = await conn.fetchrow(
                 f"""
                 SELECT COALESCE(SUM(paid_amount),0) AS total_paid
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE customer_id = $1
                 AND entity_id = $2
                 AND entity_type = $3
@@ -227,7 +227,7 @@ async def create_gst_filing_payment(
 
                 payment_row = await conn.fetchrow(
                     f"""
-                    INSERT INTO {DB_SCHEMA}.registration_payments
+                    INSERT INTO {DB_SCHEMA}.payments
                     (
                         transaction_id,
                         customer_id,
@@ -351,7 +351,7 @@ async def soft_delete_filing_payment(
                 row = await conn.fetchrow(
                     f"""
                     SELECT *
-                    FROM {DB_SCHEMA}.registration_payments
+                    FROM {DB_SCHEMA}.payments
                     WHERE id = $1
                     FOR UPDATE
                     """,
@@ -384,7 +384,7 @@ async def soft_delete_filing_payment(
 
                 deleted_row = await conn.fetchrow(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_payments
+                    UPDATE {DB_SCHEMA}.payments
                        SET is_active = FALSE,
                            updated_at = NOW()
                      WHERE id = $1
@@ -474,7 +474,7 @@ async def activate_filing_payment(
                 payment_row = await conn.fetchrow(
                     f"""
                     SELECT *
-                    FROM {DB_SCHEMA}.registration_payments
+                    FROM {DB_SCHEMA}.payments
                     WHERE id = $1
                     FOR UPDATE
                     """,
@@ -491,7 +491,7 @@ async def activate_filing_payment(
                     existing_paid = await conn.fetchrow(
                         f"""
                         SELECT id
-                        FROM {DB_SCHEMA}.registration_payments
+                        FROM {DB_SCHEMA}.payments
                         WHERE customer_id = $1
                         AND entity_id = $2
                         AND entity_type = $3
@@ -507,7 +507,7 @@ async def activate_filing_payment(
 
                 activated_row = await conn.fetchrow(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_payments
+                    UPDATE {DB_SCHEMA}.payments
                        SET is_active = TRUE,
                            updated_at = NOW()
                      WHERE id = $1

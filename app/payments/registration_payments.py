@@ -65,7 +65,7 @@ async def create_registration_payment(
             already_paid = await conn.fetchrow(
                 f"""
                 SELECT 1
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE customer_id = $1
                 AND entity_id = $2
                 AND entity_type = $3
@@ -88,7 +88,7 @@ async def create_registration_payment(
             await conn.fetch(
                 f"""
                 SELECT id
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE customer_id = $1
                 AND entity_id = $2
                 AND entity_type = $3
@@ -108,7 +108,7 @@ async def create_registration_payment(
                 SELECT
                     (
                         SELECT amount
-                        FROM {DB_SCHEMA}.registration_payments
+                        FROM {DB_SCHEMA}.payments
                         WHERE
                             customer_id = $1
                         AND entity_id = $2
@@ -121,7 +121,7 @@ async def create_registration_payment(
 
                     COALESCE(SUM(discount), 0) AS total_discount
 
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE
                     customer_id = $1
                 AND entity_id = $2
@@ -149,7 +149,7 @@ async def create_registration_payment(
             paid_row = await conn.fetchrow(
                 f"""
                 SELECT COALESCE(SUM(paid_amount),0) AS total_paid
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE customer_id = $1
                 AND entity_id = $2
                 AND entity_type = $3
@@ -229,7 +229,7 @@ async def create_registration_payment(
 
                 payment_row = await conn.fetchrow(
                     f"""
-                    INSERT INTO {DB_SCHEMA}.registration_payments
+                    INSERT INTO {DB_SCHEMA}.payments
                     (
                         transaction_id,
                         customer_id,
@@ -280,7 +280,7 @@ async def create_registration_payment(
                     VALUES ($1,$2,$3,$4,$5,$6,$7)
                     """,
                     emp_id,
-                    "REGISTRATION_PAYMENT",
+                    "GST_REGISTRATION_PAYMENT",
                     payment_row["id"],
                     customer_id,
                     "CREATE",
@@ -601,7 +601,7 @@ async def list_registration_payments(
 
         count_sql = f"""
             SELECT COUNT(*)
-            FROM {DB_SCHEMA}.registration_payments rp
+            FROM {DB_SCHEMA}.payments rp
             LEFT JOIN {DB_SCHEMA}.customers c
                    ON rp.customer_id = c.customer_id
             {where_clause}
@@ -620,7 +620,7 @@ async def list_registration_payments(
                 c.op_id,
                 e_rm.first_name AS rm_name,
                 e_op.first_name AS op_name
-            FROM {DB_SCHEMA}.registration_payments rp
+            FROM {DB_SCHEMA}.payments rp
             LEFT JOIN {DB_SCHEMA}.customers c
                    ON rp.customer_id = c.customer_id
             LEFT JOIN {DB_SCHEMA}.employees e_rm
@@ -722,7 +722,7 @@ async def soft_delete_registration_payment(
                 row = await conn.fetchrow(
                     f"""
                     SELECT *
-                    FROM {DB_SCHEMA}.registration_payments
+                    FROM {DB_SCHEMA}.payments
                     WHERE id = $1
                     FOR UPDATE
                     """,
@@ -750,7 +750,7 @@ async def soft_delete_registration_payment(
 
                 deleted_row = await conn.fetchrow(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_payments
+                    UPDATE {DB_SCHEMA}.payments
                        SET is_active = FALSE,
                            updated_at = NOW()
                      WHERE id = $1
@@ -777,7 +777,7 @@ async def soft_delete_registration_payment(
                     VALUES ($1,$2,$3,$4,$5,$6,$7)
                     """,
                     emp_id,
-                    "REGISTRATION_PAYMENT",
+                    "GST_REGISTRATION_PAYMENT",
                     payment_id,
                     deleted_row["customer_id"],
                     "DELETE",
@@ -857,7 +857,7 @@ async def activate_registration_payment(
                 payment_row = await conn.fetchrow(
                     f"""
                     SELECT *
-                    FROM {DB_SCHEMA}.registration_payments
+                    FROM {DB_SCHEMA}.payments
                     WHERE id = $1
                     FOR UPDATE
                     """,
@@ -884,7 +884,7 @@ async def activate_registration_payment(
                     existing_paid = await conn.fetchrow(
                         f"""
                         SELECT id
-                        FROM {DB_SCHEMA}.registration_payments
+                        FROM {DB_SCHEMA}.payments
                         WHERE customer_id = $1
                         AND entity_id = $2
                         AND entity_type = $3
@@ -904,7 +904,7 @@ async def activate_registration_payment(
 
                 activated_row = await conn.fetchrow(
                     f"""
-                    UPDATE {DB_SCHEMA}.registration_payments
+                    UPDATE {DB_SCHEMA}.payments
                        SET is_active = TRUE,
                            updated_at = NOW()
                      WHERE id = $1
@@ -931,7 +931,7 @@ async def activate_registration_payment(
                     VALUES ($1,$2,$3,$4,$5,$6,$7)
                     """,
                     emp_id,
-                    "REGISTRATION_PAYMENT",
+                    "GST_REGISTRATION_PAYMENT",
                     payment_id,
                     activated_row["customer_id"],
                     "ACTIVATE",

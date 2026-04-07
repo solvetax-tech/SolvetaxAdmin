@@ -8,6 +8,7 @@ from app.gst_registration_filing.schemas import (
     GSTFilingYearlyIn,
     GSTFilingEditIn,
     GSTReturnStatusUpdateIn,
+    GSTReturnDetailsBulkDeleteIn,
     GSTRegistrationFilingPrefillOut,
 )
 from app.utils import (
@@ -136,6 +137,7 @@ class GstFilingApiMessages:
     RETURN_STATUS_PAYLOAD_INVALID = (
         "Return status values could not be read. Use only allowed status values and try again."
     )
+    RETURN_DETAILS_BULK_DELETE_SUCCESS = "Eligible MISSED return-detail rows were deleted."
 
     @staticmethod
     def return_status_not_applicable(field_names):
@@ -518,8 +520,14 @@ async def get_gst_registration_prefill_for_filing(
     where_clause = " AND ".join(conditions)
 
     query = f"""
-        SELECT g.*
+        SELECT
+            g.*,
+            c.business_name AS customer_business_name,
+            c.business_type AS customer_business_type,
+            c.business_description AS customer_business_description
         FROM {DB_SCHEMA}.gst_registration g
+        LEFT JOIN {DB_SCHEMA}.customers c
+          ON c.customer_id = g.customer_id
         WHERE {where_clause}
     """
 
@@ -543,6 +551,9 @@ async def get_gst_registration_prefill_for_filing(
     filing_frequency = _upper_or_none(
         r.get("filing_frequency") or r.get("filing_preference")
     )
+    business_type = _upper_or_none(
+        r.get("customer_business_type") or r.get("business_type")
+    )
 
     return GSTRegistrationFilingPrefillOut(
         request_id=request_id,
@@ -555,6 +566,9 @@ async def get_gst_registration_prefill_for_filing(
         filing_frequency=filing_frequency,
         turnover_details=_upper_or_none(r.get("turnover_details")),
         state=_upper_or_none(r.get("state")),
+        business_name=(r.get("customer_business_name") or "").strip() or None,
+        business_type=business_type,
+        business_description=(r.get("customer_business_description") or "").strip() or None,
     )
 
 
@@ -1061,7 +1075,6 @@ async def create_gst_filing_yearly(
         turnover_details=payload.turnover_details,
         state=payload.state,
         filing_period=payload.filing_period,
-        mode="MANUAL",
         rm_id=payload.rm_id,
         op_id=payload.op_id,
         priority=payload.priority,
@@ -1179,6 +1192,10 @@ async def update_gst_filing(
 
                 if "password" in update_data and update_data["password"]:
                     update_data["password"] = update_data["password"].strip()
+                if "business_name" in update_data and update_data["business_name"]:
+                    update_data["business_name"] = update_data["business_name"].strip()
+                if "business_description" in update_data and update_data["business_description"]:
+                    update_data["business_description"] = update_data["business_description"].strip()
 
                 if "filing_frequency" in update_data:
                     update_data["service_id"] = _FILING_FREQUENCY_TO_SERVICE_ID[
@@ -2090,3 +2107,89 @@ async def update_return_statuses(
         except Exception:
             log.exception("Unexpected error during return status update")
             raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
+
+
+@router.post(
+    "/gst-filings/returns/delete-missed",
+    summary="Bulk delete MISSED GST return-detail rows by IDs",
+)
+async def bulk_delete_missed_return_details(
+    payload: GSTReturnDetailsBulkDeleteIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    request_id = generate_uuid()
+
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "bulk_delete_missed_return_details"},
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("DB connection failed")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
+
+    requested_ids = payload.return_detail_ids
+    visibility_sql, visibility_values, _ = build_gst_filing_visibility(role, emp_id, 2, DB_SCHEMA)
+    visibility_clause = f"AND ({visibility_sql})" if visibility_sql else ""
+
+    missed_predicate = """
+        (
+            d.gstr1_status = 'MISSED'
+            OR d.gstr3b_status = 'MISSED'
+            OR d.gstr9_status = 'MISSED'
+            OR d.gstr9c_status = 'MISSED'
+            OR d.cmp08_status = 'MISSED'
+            OR d.gstr4_status = 'MISSED'
+        )
+    """
+
+    select_sql = f"""
+        SELECT d.id
+        FROM {DB_SCHEMA}.gst_filing_return_details d
+        JOIN {DB_SCHEMA}.gst_filings f
+          ON f.id = d.gst_filing_id
+        WHERE d.id = ANY($1::bigint[])
+          AND {missed_predicate}
+          {visibility_clause}
+    """
+
+    delete_sql = f"""
+        DELETE FROM {DB_SCHEMA}.gst_filing_return_details d
+        USING {DB_SCHEMA}.gst_filings f
+        WHERE d.gst_filing_id = f.id
+          AND d.id = ANY($1::bigint[])
+          AND {missed_predicate}
+          {visibility_clause}
+        RETURNING d.id
+    """
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                selected_rows = await conn.fetch(select_sql, requested_ids, *visibility_values)
+                selected_ids = [int(r["id"]) for r in selected_rows]
+                deleted_rows = await conn.fetch(delete_sql, requested_ids, *visibility_values)
+                deleted_ids = [int(r["id"]) for r in deleted_rows]
+    except asyncpg.PostgresError:
+        log.exception("Database error during bulk delete missed return details")
+        raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
+    except Exception:
+        log.exception("Unexpected error during bulk delete missed return details")
+        raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
+
+    skipped_ids = [rid for rid in requested_ids if rid not in selected_ids]
+
+    return {
+        "message": GstFilingApiMessages.RETURN_DETAILS_BULK_DELETE_SUCCESS,
+        "deleted_ids": deleted_ids,
+        "deleted_count": len(deleted_ids),
+        "skipped_ids": skipped_ids,
+        "skipped_count": len(skipped_ids),
+        "request_id": request_id,
+    }

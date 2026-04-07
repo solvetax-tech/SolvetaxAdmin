@@ -81,6 +81,9 @@ class GSTFilingIn(BaseSchema):
 
     username: Optional[str] = Field(None, max_length=100)
     password: Optional[str] = Field(None, max_length=100)
+    business_name: Optional[str] = Field(None, max_length=150)
+    business_type: Optional[str] = Field(None, max_length=50)
+    business_description: Optional[str] = None
 
     rent: Optional[float] = Field(None, ge=0)
     email_id: Optional[EmailStr] = None
@@ -101,6 +104,7 @@ class GSTFilingIn(BaseSchema):
         "turnover_details",
         "filing_period",
         "state",
+        "business_type",
         mode="before"
     )
     @classmethod
@@ -213,6 +217,9 @@ class GSTRegistrationFilingPrefillOut(BaseSchema):
     )
     turnover_details: Optional[str] = None
     state: Optional[str] = None
+    business_name: Optional[str] = None
+    business_type: Optional[str] = None
+    business_description: Optional[str] = None
 
 
 # =====================================================
@@ -442,6 +449,9 @@ class GSTFilingEditIn(BaseSchema):
     # =====================================================
     username: Optional[str] = Field(None, max_length=100)
     password: Optional[str] = Field(None, max_length=100)
+    business_name: Optional[str] = Field(None, max_length=150)
+    business_type: Optional[str] = Field(None, max_length=50)
+    business_description: Optional[str] = None
 
     rent: Optional[float] = Field(None, ge=0)
     email_id: Optional[EmailStr] = None
@@ -457,6 +467,7 @@ class GSTFilingEditIn(BaseSchema):
         "turnover_details",
         "state",
         "filing_period",
+        "business_type",
         mode="before"
     )
     @classmethod
@@ -553,6 +564,33 @@ class GSTReturnStatusUpdateIn(BaseSchema):
             raise ValueError("At least one status or is_active must be provided")
 
         return self
+
+
+class GSTReturnDetailsBulkDeleteIn(BaseSchema):
+    """
+    Bulk delete return-detail rows by IDs.
+    Intended for deleting only MISSED rows (enforced in API query).
+    """
+
+    return_detail_ids: list[int] = Field(
+        ...,
+        min_length=1,
+        description="One or more gst_filing_return_details.id values to delete.",
+    )
+
+    @field_validator("return_detail_ids", mode="before")
+    @classmethod
+    def normalize_ids(cls, v):
+        if not isinstance(v, list):
+            raise ValueError("return_detail_ids must be a list")
+        cleaned = []
+        for item in v:
+            iv = int(item)
+            if iv <= 0:
+                raise ValueError("All return_detail_ids must be positive integers")
+            cleaned.append(iv)
+        # dedupe while preserving order
+        return list(dict.fromkeys(cleaned))
 
 class GSTFilingDocumentIn(BaseSchema):
     """

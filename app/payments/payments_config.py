@@ -159,7 +159,7 @@ async def get_payment_amount(
                     -- ORIGINAL AMOUNT (first valid transaction)
                     (
                         SELECT amount
-                        FROM {DB_SCHEMA}.registration_payments
+                        FROM {DB_SCHEMA}.payments
                         WHERE
                             customer_id = $1
                         AND entity_id = $2
@@ -179,7 +179,7 @@ async def get_payment_amount(
                     -- LAST STATUS (FIXED)
                     (
                         SELECT payment_status
-                        FROM {DB_SCHEMA}.registration_payments
+                        FROM {DB_SCHEMA}.payments
                         WHERE
                             customer_id = $1
                         AND entity_id = $2
@@ -190,7 +190,7 @@ async def get_payment_amount(
                         LIMIT 1
                     ) AS last_status
 
-                FROM {DB_SCHEMA}.registration_payments
+                FROM {DB_SCHEMA}.payments
                 WHERE
                     customer_id = $1
                 AND entity_id = $2
