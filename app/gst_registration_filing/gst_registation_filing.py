@@ -566,6 +566,7 @@ async def get_gst_registration_prefill_for_filing(
         filing_frequency=filing_frequency,
         turnover_details=_upper_or_none(r.get("turnover_details")),
         state=_upper_or_none(r.get("state")),
+        gst_reg_status=_upper_or_none(r.get("registration_status")),
         business_name=(r.get("customer_business_name") or "").strip() or None,
         business_type=business_type,
         business_description=(r.get("customer_business_description") or "").strip() or None,
@@ -648,6 +649,7 @@ async def create_gst_filing(
     filing_frequency = payload.filing_frequency.upper()
     filing_category = payload.filing_category.upper()
     state = payload.state.strip().upper() if payload.state else None
+    gst_reg_status = payload.gst_reg_status.strip().upper() if payload.gst_reg_status else None
 
     username = payload.username.strip() if payload.username else None
     password = payload.password.strip() if payload.password else None
@@ -690,7 +692,7 @@ async def create_gst_filing(
                 if payload.gst_registration_id:
                     gst = await conn.fetchrow(
                         f"""SELECT id, gstin, is_active
-                              , username, password
+                              , username, password, registration_status
                             FROM {DB_SCHEMA}.gst_registration
                             WHERE id = $1""",
                         payload.gst_registration_id,
@@ -705,6 +707,8 @@ async def create_gst_filing(
                         username = gst.get("username")
                     if password is None:
                         password = gst.get("password")
+                    if gst_reg_status is None:
+                        gst_reg_status = _upper_or_none(gst.get("registration_status"))
                 else:
                     gstin = payload.gstin
 
@@ -741,14 +745,14 @@ async def create_gst_filing(
                         rm_id, op_id,
                         is_auto_enabled,
                         taxpayer_type, filing_frequency,
-                        turnover_details, state,
+                        turnover_details, state, gst_reg_status,
                         username, password, email_id, rent, rule14a,
                         created_at, updated_at
                     )
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
                         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                        $21,$22,$23
+                        $21,$22,$23,$24
                     )
                     RETURNING *""",
                     payload.customer_id,
@@ -767,6 +771,7 @@ async def create_gst_filing(
                     filing_frequency,
                     payload.turnover_details,
                     state,
+                    gst_reg_status,
                     username,
                     password,
                     email_id,
@@ -1210,6 +1215,21 @@ async def update_gst_filing(
 
                 if not new_reg and not new_gstin:
                     raise HTTPException(400, GstFilingApiMessages.UPDATE_GST_REFERENCE_REQUIRED)
+
+                # Keep filing's gst_reg_status in sync with selected registration unless caller explicitly sets it.
+                if "gst_registration_id" in update_data and update_data.get("gst_registration_id") is not None:
+                    linked_reg_status = await conn.fetchval(
+                        f"""
+                        SELECT registration_status
+                        FROM {DB_SCHEMA}.gst_registration
+                        WHERE id = $1
+                        """,
+                        update_data["gst_registration_id"],
+                    )
+                    if linked_reg_status is None:
+                        raise HTTPException(400, GstFilingApiMessages.CREATE_GST_REGISTRATION_INVALID)
+                    if "gst_reg_status" not in update_data:
+                        update_data["gst_reg_status"] = str(linked_reg_status).strip().upper()
 
                 # =====================================================
                 # MERGED VALUES (FINAL STATE)

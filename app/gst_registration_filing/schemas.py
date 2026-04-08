@@ -52,6 +52,9 @@ class GSTFilingIn(BaseSchema):
     ] = None
 
     state: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
+    gst_reg_status: Optional[
+        Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
+    ] = None
 
     # =====================================================
     # 🔥 FILING PERIOD
@@ -104,6 +107,7 @@ class GSTFilingIn(BaseSchema):
         "turnover_details",
         "filing_period",
         "state",
+        "gst_reg_status",
         "business_type",
         mode="before"
     )
@@ -217,6 +221,7 @@ class GSTRegistrationFilingPrefillOut(BaseSchema):
     )
     turnover_details: Optional[str] = None
     state: Optional[str] = None
+    gst_reg_status: Optional[str] = None
     business_name: Optional[str] = None
     business_type: Optional[str] = None
     business_description: Optional[str] = None
@@ -328,6 +333,9 @@ class GSTFilingEditIn(BaseSchema):
     ] = None
 
     state: Optional[str] = Field(None, max_length=50)
+    gst_reg_status: Optional[
+        Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
+    ] = None
 
     # 🔥 Controlled but editable (with caution)
     filing_period: Optional[str] = None
@@ -393,6 +401,7 @@ class GSTFilingEditIn(BaseSchema):
         "turnover_details",
         "state",
         "filing_period",
+        "gst_reg_status",
         "business_type",
         mode="before"
     )
