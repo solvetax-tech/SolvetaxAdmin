@@ -49,16 +49,6 @@ class UpdateFilingFollowupResponse(BaseModel):
     message: str
 
 
-# List / filter manual GST filing followups:
-# GET /api/v1/Followups/customer-service-followups/filter
-#   with entity_type=GST_FILING and mode=MANUAL (same query shape as filter_followups).
-
-
-# --------------------------------------------------
-# CREATE FOLLOWUP (MANUAL — GST FILING)
-# --------------------------------------------------
-
-
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
