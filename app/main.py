@@ -101,7 +101,7 @@ from app.follow_ups.gst_reg_manual_followups import router as gst_reg_manual_fol
 from app.follow_ups.gst_filing_manual_followups import router as gst_filing_manual_followups
 from app.customer_registration.service_config import router as service_config
 from app.gst_registration_filing.gst_filing_config import router as gst_filing_config
-from app.gst_registration_filing.gst_registation_filing import router as gst_registation_filing
+from app.gst_registration_filing.gst_registration_filing import router as gst_registration_filing
 from app.gst_registration_filing.gst_filing_document import router as gst_filing_document_router
 
 
@@ -128,8 +128,8 @@ if gst_documents_router:
     app.include_router(gst_documents_router)
 if gst_registration_config_router:
     app.include_router(gst_registration_config_router)
-if gst_registation_filing:
-    app.include_router(gst_registation_filing)
+if gst_registration_filing:
+    app.include_router(gst_registration_filing)
 if gst_filing_document_router:
     app.include_router(gst_filing_document_router)
 if dashboard_router:
