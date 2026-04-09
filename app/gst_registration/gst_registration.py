@@ -17,6 +17,91 @@ router = APIRouter(
     prefix="/api/v1/gst-registrations",
     tags=["GST Registration"]
 )
+
+
+async def _sync_crm_lead_with_gst(
+    conn: asyncpg.Connection,
+    gst_row: asyncpg.Record,
+):
+    """
+    Syncs crm_leads with gst_registration lifecycle.
+    Safe no-op when CRM tables are unavailable.
+    """
+    try:
+        mobile = gst_row.get("mobile")
+        if not mobile:
+            return
+
+        existing = await conn.fetchrow(
+            f"""
+            SELECT *
+            FROM {DB_SCHEMA}.crm_leads
+            WHERE gst_registration_id = $1
+              AND is_active = TRUE
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            gst_row["id"],
+        )
+
+        # Fallback: reuse latest active lead by mobile if GST link is missing.
+        if not existing:
+            existing = await conn.fetchrow(
+                f"""
+                SELECT *
+                FROM {DB_SCHEMA}.crm_leads
+                WHERE mobile = $1
+                  AND is_active = TRUE
+                ORDER BY id DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                mobile,
+            )
+
+        remarks = "Auto synced from GST registration create/edit."
+
+        if existing:
+            await conn.execute(
+                f"""
+                UPDATE {DB_SCHEMA}.crm_leads
+                SET mobile = $1,
+                    gst_registration_id = $2,
+                    rm_id = $3,
+                    op_id = $4,
+                    is_active = $5,
+                    updated_at = NOW()
+                WHERE id = $6
+                """,
+                mobile,
+                gst_row["id"],
+                gst_row.get("rm_id"),
+                gst_row.get("created_by"),
+                gst_row.get("is_active"),
+                existing["id"],
+            )
+        else:
+            await conn.fetchval(
+                f"""
+                INSERT INTO {DB_SCHEMA}.crm_leads (
+                    mobile, gst_registration_id, stage, rm_id, op_id, is_active, remarks, created_at, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+                RETURNING id
+                """,
+                mobile,
+                gst_row["id"],
+                "FRESH_LEAD",
+                gst_row.get("rm_id"),
+                gst_row.get("created_by"),
+                gst_row.get("is_active"),
+                remarks,
+            )
+    except asyncpg.UndefinedTableError:
+        logger.warning("CRM tables not found; skipping CRM sync.")
+    except asyncpg.PostgresError:
+        logger.exception("CRM sync failed; continuing GST flow.")
 # -------------------------------------------------------------------
 # CREATE GST REGISTRATION
 # -------------------------------------------------------------------
@@ -279,6 +364,11 @@ async def create_gst_registration(
                     gst_row["id"],
                     now,
                 )
+
+                # --------------------------------------------------
+                # CRM LEAD SYNC (best-effort, non-blocking)
+                # --------------------------------------------------
+                await _sync_crm_lead_with_gst(conn, gst_row)
 
                 # --------------------------------------------------
                 # VERSION LOG
@@ -983,6 +1073,11 @@ async def edit_gst_registration(
                     json.dumps(dict(new_row), default=str),
                 )
 
+                await _sync_crm_lead_with_gst(
+                    conn,
+                    new_row,
+                )
+
                 log.info(
                     "GST updated successfully | gst_id=%s | fields=%s",
                     gst_id,
@@ -1212,6 +1307,8 @@ async def soft_delete_gst_registration(
                     gst_id,
                 )
 
+                await _sync_crm_lead_with_gst(conn, deleted_gst)
+
                 # --------------------------------------------------
                 # 6️⃣ Version Audit (GST ONLY)
                 # --------------------------------------------------
@@ -1414,6 +1511,8 @@ async def activate_gst_registration(
                     """,
                     gst_id,
                 )
+
+                await _sync_crm_lead_with_gst(conn, activated_gst)
 
                 # --------------------------------------------------
                 # 6️⃣ Version Audit

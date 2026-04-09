@@ -477,7 +477,7 @@ def _upper_or_none(v) -> Optional[str]:
 )
 async def get_gst_registration_prefill_for_filing(
     gst_registration_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
 ):
     """
     Returns identity + filing-related fields from `gst_registration` so the UI can
@@ -580,7 +580,7 @@ async def get_gst_registration_prefill_for_filing(
 )
 async def create_gst_filing(
     payload: GSTFilingIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
 ):
 
     request_id = generate_uuid()
@@ -1064,7 +1064,7 @@ async def create_gst_filing(
 )
 async def create_gst_filing_yearly(
     payload: GSTFilingYearlyIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
 ):
     """
     Convenience alias for `POST /gst-filings` with `filing_category=ANNUAL`,
@@ -1100,7 +1100,7 @@ async def create_gst_filing_yearly(
 async def update_gst_filing(
     filing_id: int,
     payload: GSTFilingEditIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
 ):
 
     request_id = generate_uuid()
@@ -1512,7 +1512,7 @@ async def update_gst_filing(
 )
 async def deactivate_gst_filing(
     filing_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
 ):
 
     request_id = generate_uuid()
@@ -1719,7 +1719,7 @@ async def deactivate_gst_filing(
 )
 async def activate_gst_filing(
     filing_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
 ):
 
     # --------------------------------------------------
@@ -1946,7 +1946,7 @@ async def activate_gst_filing(
 async def update_return_statuses(
     filing_id: int,
     payload: GSTReturnStatusUpdateIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
 ):
 
     request_id = generate_uuid()
@@ -2135,7 +2135,7 @@ async def update_return_statuses(
 )
 async def bulk_delete_missed_return_details(
     payload: GSTReturnDetailsBulkDeleteIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
 ):
     request_id = generate_uuid()
 

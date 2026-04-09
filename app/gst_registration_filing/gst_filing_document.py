@@ -33,7 +33,7 @@ router = APIRouter(
 )
 async def create_gst_filing_document(
     payload: GSTFilingDocumentIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
 ):
 
     request_id = generate_uuid()
@@ -224,7 +224,7 @@ async def create_gst_filing_document(
 async def update_gst_filing_document(
     document_id: int,
     payload: GSTFilingDocumentEditIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
 ):
 
     request_id = generate_uuid()
@@ -645,7 +645,7 @@ async def filter_gst_filing_documents(
 )
 async def deactivate_gst_filing_document(
     document_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
 ):
     request_id = generate_uuid()
 
@@ -779,7 +779,7 @@ async def deactivate_gst_filing_document(
 )
 async def activate_gst_filing_document(
     document_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
 ):
     request_id = generate_uuid()
 

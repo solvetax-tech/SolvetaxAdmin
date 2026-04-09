@@ -103,6 +103,7 @@ from app.customer_registration.service_config import router as service_config
 from app.gst_registration_filing.gst_filing_config import router as gst_filing_config
 from app.gst_registration_filing.gst_registration_filing import router as gst_registration_filing
 from app.gst_registration_filing.gst_filing_document import router as gst_filing_document_router
+from app.crm.crm_leads import router as crm_leads_router
 
 
 
@@ -158,6 +159,8 @@ if services:
     app.include_router(services)
 if service_config:
     app.include_router(service_config)
+if crm_leads_router:
+    app.include_router(crm_leads_router)
 
 
 @app.get("/health")
