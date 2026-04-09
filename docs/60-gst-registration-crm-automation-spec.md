@@ -198,8 +198,6 @@ CREATE TABLE solvetax.crm_leads (
       'NOT_INTERESTED'
     )
   ),
-  CONSTRAINT fk_crm_leads_mobile FOREIGN KEY (mobile)
-    REFERENCES solvetax.gst_registration(mobile),
   CONSTRAINT fk_crm_leads_gst_registration FOREIGN KEY (gst_registration_id)
     REFERENCES solvetax.gst_registration(id) ON DELETE SET NULL,
   CONSTRAINT fk_crm_leads_rm FOREIGN KEY (rm_id)
