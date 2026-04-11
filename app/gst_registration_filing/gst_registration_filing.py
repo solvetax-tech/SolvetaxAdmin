@@ -11,6 +11,7 @@ from app.gst_registration_filing.schemas import (
     GSTReturnDetailsBulkDeleteIn,
     GSTRegistrationFilingPrefillOut,
 )
+from app.gst_registration_filing.gst_filing_auto_policy import auto_enable_blocked_by_missed
 from app.utils import (
     get_db_pool,
     DB_SCHEMA,
@@ -138,6 +139,10 @@ class GstFilingApiMessages:
         "Return status values could not be read. Use only allowed status values and try again."
     )
     RETURN_DETAILS_BULK_DELETE_SUCCESS = "Eligible MISSED return-detail rows were deleted."
+    AUTO_ENABLE_BLOCKED_MISSED = (
+        "Automatic return generation cannot be turned on while this filing has too many "
+        "missed return periods. Resolve or deactivate those rows, then try again."
+    )
 
     @staticmethod
     def return_status_not_applicable(field_names):
@@ -1255,6 +1260,22 @@ async def update_gst_filing(
                         "filing_period",
                     ]
                 )
+
+                if (
+                    "is_auto_enabled" in update_data
+                    and update_data["is_auto_enabled"] is True
+                    and not old["is_auto_enabled"]
+                ):
+                    if await auto_enable_blocked_by_missed(
+                        conn,
+                        filing_id,
+                        filing_category,
+                        filing_frequency,
+                        taxpayer_type,
+                    ):
+                        raise HTTPException(
+                            400, GstFilingApiMessages.AUTO_ENABLE_BLOCKED_MISSED
+                        )
 
                 # =====================================================
                 # UPDATE MAIN TABLE

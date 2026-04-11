@@ -24,6 +24,32 @@ router = APIRouter(prefix="/api/v1/crm/leads", tags=["CRM Leads"])
 
 IST = ZoneInfo("Asia/Kolkata")
 
+DEFAULT_CRM_ENTITY_TYPE = "GST_REGISTRATION"
+
+
+def _entity_type_query(value: Optional[str]) -> str:
+    """Normalize entity_type for CRM reference data and lead filters (default GST registration CRM)."""
+    v = (value or DEFAULT_CRM_ENTITY_TYPE).strip().upper()
+    return v if v else DEFAULT_CRM_ENTITY_TYPE
+
+
+def _mapping_row_entity_type(row: asyncpg.Record) -> Optional[str]:
+    if "entity_type" not in row.keys():
+        return None
+    v = row["entity_type"]
+    if v is None:
+        return None
+    if isinstance(v, str):
+        s = v.strip()
+        return s.upper() if s else None
+    return str(v)
+
+
+def _crm_mapping_type_precedence_sql(param_idx: int) -> str:
+    """Prefer row.entity_type = requested type over global NULL (applies to all). Lower sorts first."""
+    return f"(CASE WHEN entity_type = ${param_idx} THEN 0 WHEN entity_type IS NULL THEN 1 ELSE 2 END)"
+
+
 FIRST_PITCH_ALLOWED_STAGES = {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}
 FINAL_PITCH_ALLOWED_STAGES = {"GST_REGISTRATION_DONE", "SCHEDULED_PAYMENTS"}
 CLOSED_STAGES = {"SUBSCRIBED", "NOT_INTERESTED"}
@@ -145,9 +171,26 @@ async def _fetch_crm_lead_visible(
     )
 
 
-async def _fetch_valid_stage_codes(conn: asyncpg.Connection) -> set[str]:
-    """Active stage codes from crm_lead_stages, or in-code ALL_STAGES if table missing/empty."""
+async def _fetch_valid_stage_codes(
+    conn: asyncpg.Connection, entity_type: Optional[str] = None
+) -> set[str]:
+    """Active stage codes from crm_lead_stages for this entity_type (includes NULL legacy rows)."""
+    et = _entity_type_query(entity_type)
     try:
+        rows = await conn.fetch(
+            f"""
+            SELECT code FROM {DB_SCHEMA}.crm_lead_stages
+            WHERE is_active
+              AND (entity_type = $1 OR entity_type IS NULL)
+            ORDER BY sort_order
+            """,
+            et,
+        )
+        if rows:
+            return {r["code"] for r in rows}
+    except asyncpg.UndefinedTableError:
+        pass
+    except asyncpg.UndefinedColumnError:
         rows = await conn.fetch(
             f"""
             SELECT code FROM {DB_SCHEMA}.crm_lead_stages
@@ -157,8 +200,6 @@ async def _fetch_valid_stage_codes(conn: asyncpg.Connection) -> set[str]:
         )
         if rows:
             return {r["code"] for r in rows}
-    except asyncpg.UndefinedTableError:
-        pass
     return set(ALL_STAGES)
 
 
@@ -197,18 +238,48 @@ def _transition_stage(call_type_code: str, call_status_code: str) -> Optional[st
     raise _validation_error("Unsupported call type.", {"call_type_code": call_type_code})
 
 
-async def _validate_call_config(conn: asyncpg.Connection, call_type_code: str, call_status_code: str) -> None:
-    type_exists = await conn.fetchval(
-        f"SELECT 1 FROM {DB_SCHEMA}.crm_call_types WHERE code = $1 AND is_active = TRUE LIMIT 1",
-        call_type_code,
-    )
+async def _validate_call_config(
+    conn: asyncpg.Connection,
+    call_type_code: str,
+    call_status_code: str,
+    entity_type: Optional[str] = None,
+) -> None:
+    et = _entity_type_query(entity_type)
+    try:
+        type_exists = await conn.fetchval(
+            f"""
+            SELECT 1 FROM {DB_SCHEMA}.crm_call_types
+            WHERE code = $1 AND is_active = TRUE
+              AND (entity_type = $2 OR entity_type IS NULL)
+            LIMIT 1
+            """,
+            call_type_code,
+            et,
+        )
+    except asyncpg.UndefinedColumnError:
+        type_exists = await conn.fetchval(
+            f"SELECT 1 FROM {DB_SCHEMA}.crm_call_types WHERE code = $1 AND is_active = TRUE LIMIT 1",
+            call_type_code,
+        )
     if not type_exists:
         raise _validation_error("Invalid call type.", {"call_type_code": f"{call_type_code} is invalid/inactive."})
 
-    status_exists = await conn.fetchval(
-        f"SELECT 1 FROM {DB_SCHEMA}.crm_call_statuses WHERE code = $1 AND is_active = TRUE LIMIT 1",
-        call_status_code,
-    )
+    try:
+        status_exists = await conn.fetchval(
+            f"""
+            SELECT 1 FROM {DB_SCHEMA}.crm_call_statuses
+            WHERE code = $1 AND is_active = TRUE
+              AND (entity_type = $2 OR entity_type IS NULL)
+            LIMIT 1
+            """,
+            call_status_code,
+            et,
+        )
+    except asyncpg.UndefinedColumnError:
+        status_exists = await conn.fetchval(
+            f"SELECT 1 FROM {DB_SCHEMA}.crm_call_statuses WHERE code = $1 AND is_active = TRUE LIMIT 1",
+            call_status_code,
+        )
     if not status_exists:
         raise _validation_error("Invalid call status.", {"call_status_code": f"{call_status_code} is invalid/inactive."})
 
@@ -218,12 +289,38 @@ async def _validate_crm_call_against_mappings(
     current_stage: str,
     call_type_code: str,
     call_status_code: str,
+    entity_type: Optional[str] = None,
 ) -> None:
+    et = _entity_type_query(entity_type)
     try:
         has_stage_map = await conn.fetchval(
             f"""
             SELECT EXISTS (
-                SELECT 1 FROM {DB_SCHEMA}.crm_ui_mappings
+                SELECT 1 FROM {DB_SCHEMA}.crm_stage_status_mappings
+                WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active
+                  AND (entity_type = $1 OR entity_type IS NULL)
+            )
+            """,
+            et,
+        )
+        has_status_map = await conn.fetchval(
+            f"""
+            SELECT EXISTS (
+                SELECT 1 FROM {DB_SCHEMA}.crm_stage_status_mappings
+                WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active
+                  AND (entity_type = $1 OR entity_type IS NULL)
+            )
+            """,
+            et,
+        )
+    except asyncpg.UndefinedTableError:
+        has_stage_map = False
+        has_status_map = False
+    except asyncpg.UndefinedColumnError:
+        has_stage_map = await conn.fetchval(
+            f"""
+            SELECT EXISTS (
+                SELECT 1 FROM {DB_SCHEMA}.crm_stage_status_mappings
                 WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active
             )
             """
@@ -231,25 +328,35 @@ async def _validate_crm_call_against_mappings(
         has_status_map = await conn.fetchval(
             f"""
             SELECT EXISTS (
-                SELECT 1 FROM {DB_SCHEMA}.crm_ui_mappings
+                SELECT 1 FROM {DB_SCHEMA}.crm_stage_status_mappings
                 WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active
             )
             """
         )
-    except asyncpg.UndefinedTableError:
-        has_stage_map = False
-        has_status_map = False
 
     if has_stage_map:
-        expected_pitch = await conn.fetchval(
-            f"""
-            SELECT pitch_type_code FROM {DB_SCHEMA}.crm_ui_mappings
-            WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active AND stage = $1
-            ORDER BY sort_order
-            LIMIT 1
-            """,
-            current_stage,
-        )
+        try:
+            expected_pitch = await conn.fetchval(
+                f"""
+                SELECT pitch_type_code FROM {DB_SCHEMA}.crm_stage_status_mappings
+                WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active AND stage = $2
+                  AND (entity_type = $1 OR entity_type IS NULL)
+                ORDER BY {_crm_mapping_type_precedence_sql(1)}, sort_order
+                LIMIT 1
+                """,
+                et,
+                current_stage,
+            )
+        except asyncpg.UndefinedColumnError:
+            expected_pitch = await conn.fetchval(
+                f"""
+                SELECT pitch_type_code FROM {DB_SCHEMA}.crm_stage_status_mappings
+                WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active AND stage = $1
+                ORDER BY sort_order
+                LIMIT 1
+                """,
+                current_stage,
+            )
         if expected_pitch is None:
             raise _validation_error(
                 "Stage is not configured for call updates.",
@@ -282,14 +389,32 @@ async def _validate_crm_call_against_mappings(
             )
 
     if has_status_map:
-        allowed_rows = await conn.fetch(
-            f"""
-            SELECT call_status_code FROM {DB_SCHEMA}.crm_ui_mappings
-            WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active AND pitch_type_code = $1
-            ORDER BY sort_order
-            """,
-            call_type_code,
-        )
+        try:
+            allowed_rows = await conn.fetch(
+                f"""
+                SELECT call_status_code
+                FROM (
+                    SELECT DISTINCT ON (pitch_type_code, call_status_code)
+                        pitch_type_code, call_status_code, sort_order
+                    FROM {DB_SCHEMA}.crm_stage_status_mappings
+                    WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active AND pitch_type_code = $2
+                      AND (entity_type = $1 OR entity_type IS NULL)
+                    ORDER BY pitch_type_code, call_status_code, {_crm_mapping_type_precedence_sql(1)}, sort_order, call_status_code
+                ) picked
+                ORDER BY sort_order, call_status_code
+                """,
+                et,
+                call_type_code,
+            )
+        except asyncpg.UndefinedColumnError:
+            allowed_rows = await conn.fetch(
+                f"""
+                SELECT call_status_code FROM {DB_SCHEMA}.crm_stage_status_mappings
+                WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active AND pitch_type_code = $1
+                ORDER BY sort_order
+                """,
+                call_type_code,
+            )
         codes = {r["call_status_code"] for r in allowed_rows}
         if not codes:
             raise _validation_error(
@@ -321,30 +446,262 @@ async def _validate_crm_call_against_mappings(
             )
 
 
+async def _crm_apply_call_update(
+    conn: asyncpg.Connection,
+    role: str,
+    emp_id: int,
+    lead_id: int,
+    lead: asyncpg.Record,
+    payload: CRMCallUpdateIn,
+    log: logging.LoggerAdapter,
+) -> dict:
+    call_type_code = _normalize_code(payload.call_type_code)
+    call_status_code = _normalize_code(payload.call_status_code)
+
+    et_ref = _entity_type_query(lead.get("entity_type"))
+
+    await _validate_call_config(conn, call_type_code, call_status_code, et_ref)
+
+    if not lead["is_active"]:
+        raise _validation_error("Inactive lead cannot be updated via call flow.")
+
+    current_stage = lead["stage"]
+    if current_stage in CLOSED_STAGES:
+        raise _validation_error(
+            "Lead is closed; stage updates are not allowed.",
+            {"stage": f"Current stage is {current_stage}."},
+        )
+    await _validate_crm_call_against_mappings(
+        conn, current_stage, call_type_code, call_status_code, et_ref
+    )
+
+    if payload.followup_at is not None and payload.followup_at <= datetime.now(IST):
+        raise _validation_error("Invalid followup datetime.", {"followup_at": "Must be a future datetime."})
+    if call_status_code in {"CALL_BACK", "SCHEDULED_PAYMENT"} and payload.followup_at is None:
+        raise _validation_error("followup_at is required.", {"followup_at": f"Required for {call_status_code}."})
+
+    target_stage = _transition_stage(call_type_code, call_status_code)
+    connected_inc = int(
+        (call_type_code == "FIRST_PITCH_CALL" and call_status_code in FIRST_PITCH_CONNECTED)
+        or (call_type_code == "FINAL_PITCH_CALL" and call_status_code in FINAL_PITCH_CONNECTED)
+    )
+    new_stage = target_stage or current_stage
+
+    updated = await conn.fetchrow(
+        f"""
+        UPDATE {DB_SCHEMA}.crm_leads
+        SET stage = $1,
+            call_attempted_count = call_attempted_count + 1,
+            call_connected_count = call_connected_count + $2,
+            last_dailed_at = NOW(),
+            last_connected_at = CASE WHEN $2 = 1 THEN NOW() ELSE last_connected_at END,
+            followup_at = COALESCE($3, followup_at),
+            follow_up_status = CASE WHEN $3 IS NOT NULL THEN 'PENDING' ELSE follow_up_status END,
+            missed_at = CASE WHEN $3 IS NOT NULL THEN NULL ELSE missed_at END,
+            completed_at = CASE WHEN $3 IS NOT NULL THEN NULL ELSE completed_at END,
+            remarks = COALESCE($4, remarks),
+            rm_id = CASE WHEN $6 = 'RM' THEN $7 ELSE rm_id END,
+            op_id = CASE WHEN $6 = 'OP' THEN $7 ELSE op_id END,
+            updated_at = NOW()
+        WHERE id = $5
+        RETURNING *
+        """,
+        new_stage,
+        connected_inc,
+        payload.followup_at,
+        payload.remarks,
+        lead_id,
+        role,
+        emp_id,
+    )
+
+    activity_id = await conn.fetchval(
+        f"""
+        INSERT INTO {DB_SCHEMA}.crm_activities (
+            lead_id, activity_type, call_type_code, call_status_code,
+            old_stage, new_stage, followup_at, remarks, performed_by, performed_at, created_at
+        )
+        VALUES ($1, 'CALL', $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+        RETURNING id
+        """,
+        lead_id,
+        call_type_code,
+        call_status_code,
+        current_stage,
+        new_stage,
+        payload.followup_at,
+        payload.remarks,
+        _performed_by_emp_id(emp_id),
+    )
+
+    log.info(
+        "CRM call updated | lead_id=%s old_stage=%s new_stage=%s type=%s status=%s",
+        lead_id,
+        current_stage,
+        new_stage,
+        call_type_code,
+        call_status_code,
+    )
+
+    return {
+        "message": "Call update applied",
+        "lead_id": lead_id,
+        "old_stage": current_stage,
+        "new_stage": new_stage,
+        "call_attempted_count": updated["call_attempted_count"],
+        "call_connected_count": updated["call_connected_count"],
+        "last_dailed_at": updated["last_dailed_at"],
+        "last_connected_at": updated["last_connected_at"],
+        "followup_at": updated["followup_at"],
+        "follow_up_status": updated["follow_up_status"],
+        "missed_at": updated["missed_at"],
+        "completed_at": updated["completed_at"],
+        "activity_id": activity_id,
+    }
+
+
+async def _crm_apply_followup_status(
+    conn: asyncpg.Connection,
+    emp_id: int,
+    lead_id: int,
+    lead: asyncpg.Record,
+    payload: CRMFollowupStatusUpdateIn,
+    follow_up_status: str,
+    log: logging.LoggerAdapter,
+) -> dict:
+    if not lead["is_active"]:
+        raise _validation_error("Inactive lead cannot be updated.")
+
+    old_status = lead.get("follow_up_status")
+
+    if follow_up_status == "PENDING" and payload.followup_at is None and lead.get("followup_at") is None:
+        raise _validation_error(
+            "followup_at is required for pending status.",
+            {"followup_at": "Provide followup_at when setting PENDING."},
+        )
+
+    updated = await conn.fetchrow(
+        f"""
+        UPDATE {DB_SCHEMA}.crm_leads
+        SET follow_up_status = $1,
+            followup_at = COALESCE($2, followup_at),
+            remarks = COALESCE($3, remarks),
+            missed_at = CASE WHEN $1 = 'MISSED' THEN missed_at ELSE NULL END,
+            completed_at = CASE
+                WHEN $1 = 'COMPLETED' THEN NOW()
+                ELSE NULL
+            END,
+            updated_at = NOW()
+        WHERE id = $4
+        RETURNING *
+        """,
+        follow_up_status,
+        payload.followup_at,
+        payload.remarks,
+        lead_id,
+    )
+
+    activity_id = await conn.fetchval(
+        f"""
+        INSERT INTO {DB_SCHEMA}.crm_activities (
+            lead_id, activity_type, remarks, performed_by, performed_at, created_at
+        )
+        VALUES ($1, 'FOLLOWUP_STATUS_UPDATE', $2, $3, NOW(), NOW())
+        RETURNING id
+        """,
+        lead_id,
+        (
+            f"follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
+            if payload.remarks is None
+            else f"{payload.remarks} | follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
+        ),
+        _performed_by_emp_id(emp_id),
+    )
+
+    log.info(
+        "CRM follow-up status updated | lead_id=%s old_status=%s new_status=%s",
+        lead_id,
+        old_status,
+        follow_up_status,
+    )
+
+    return {
+        "message": "Follow-up status updated successfully.",
+        "lead_id": lead_id,
+        "old_follow_up_status": old_status,
+        "follow_up_status": updated["follow_up_status"],
+        "followup_at": updated["followup_at"],
+        "missed_at": updated["missed_at"],
+        "completed_at": updated["completed_at"],
+        "activity_id": activity_id,
+    }
+
+
 @router.get("/ui-mappings", summary="CRM stage/pitch and pitch/status mappings for UI")
-async def get_crm_ui_mappings(current_user=Depends(require_permission("EMPLOYEE", "READ"))) -> CRMUIMappingsOut:
+async def get_crm_ui_mappings(
+    entity_type: Optional[str] = Query(
+        None,
+        description="Requested CRM scope; defaults to GST_REGISTRATION. Rows with NULL entity_type apply to all types; a type-specific row overrides the global row for the same stage/pitch or pitch/status.",
+    ),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+) -> CRMUIMappingsOut:
     _get_user_context(current_user)
+    et = _entity_type_query(entity_type)
     pool = await get_db_pool()
     try:
         async with pool.acquire() as conn:
-            stage_rows = await conn.fetch(
-                f"""
-                SELECT stage, pitch_type_code, sort_order
-                FROM {DB_SCHEMA}.crm_ui_mappings
-                WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active
-                ORDER BY sort_order, stage
-                """
-            )
-            status_rows = await conn.fetch(
-                f"""
-                SELECT pitch_type_code, call_status_code, sort_order
-                FROM {DB_SCHEMA}.crm_ui_mappings
-                WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active
-                ORDER BY pitch_type_code, sort_order, call_status_code
-                """
-            )
+            try:
+                stage_rows = await conn.fetch(
+                    f"""
+                    SELECT stage, pitch_type_code, sort_order, entity_type
+                    FROM (
+                        SELECT DISTINCT ON (stage, pitch_type_code)
+                            stage, pitch_type_code, sort_order, entity_type
+                        FROM {DB_SCHEMA}.crm_stage_status_mappings
+                        WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active
+                          AND (entity_type = $1 OR entity_type IS NULL)
+                        ORDER BY stage, pitch_type_code, {_crm_mapping_type_precedence_sql(1)}, sort_order, stage
+                    ) picked
+                    ORDER BY sort_order, stage
+                    """,
+                    et,
+                )
+                status_rows = await conn.fetch(
+                    f"""
+                    SELECT pitch_type_code, call_status_code, sort_order, entity_type
+                    FROM (
+                        SELECT DISTINCT ON (pitch_type_code, call_status_code)
+                            pitch_type_code, call_status_code, sort_order, entity_type
+                        FROM {DB_SCHEMA}.crm_stage_status_mappings
+                        WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active
+                          AND (entity_type = $1 OR entity_type IS NULL)
+                        ORDER BY pitch_type_code, call_status_code, {_crm_mapping_type_precedence_sql(1)}, sort_order, call_status_code
+                    ) picked
+                    ORDER BY pitch_type_code, sort_order, call_status_code
+                    """,
+                    et,
+                )
+            except asyncpg.UndefinedColumnError:
+                stage_rows = await conn.fetch(
+                    f"""
+                    SELECT stage, pitch_type_code, sort_order
+                    FROM {DB_SCHEMA}.crm_stage_status_mappings
+                    WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active
+                    ORDER BY sort_order, stage
+                    """
+                )
+                status_rows = await conn.fetch(
+                    f"""
+                    SELECT pitch_type_code, call_status_code, sort_order
+                    FROM {DB_SCHEMA}.crm_stage_status_mappings
+                    WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active
+                    ORDER BY pitch_type_code, sort_order, call_status_code
+                    """
+                )
     except asyncpg.UndefinedTableError:
-        logger.exception("crm_ui_mappings table missing; run docs/64-crm-ui-mappings.sql")
+        logger.exception(
+            "crm_stage_status_mappings table missing; see db/migrations/crm_stage_status_mappings_entity_type.sql"
+        )
         raise HTTPException(status_code=500, detail="CRM UI mappings are not available.")
     except asyncpg.PostgresError:
         logger.exception("Database error while loading CRM UI mappings")
@@ -357,15 +714,18 @@ async def get_crm_ui_mappings(current_user=Depends(require_permission("EMPLOYEE"
             CRMUIPitchStatusItem(
                 call_status_code=r["call_status_code"],
                 sort_order=r["sort_order"],
+                entity_type=_mapping_row_entity_type(r),
             )
         )
 
     return CRMUIMappingsOut(
+        entity_type=et,
         stage_to_pitch=[
             CRMUIStagePitchItem(
                 stage=row["stage"],
                 pitch_type_code=row["pitch_type_code"],
                 sort_order=row["sort_order"],
+                entity_type=_mapping_row_entity_type(row),
             )
             for row in stage_rows
         ],
@@ -381,6 +741,8 @@ async def filter_crm_leads(
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
     is_active: Optional[bool] = None,
+    entity_type: Optional[str] = Query(None, description="Filter by crm_leads.entity_type (e.g. GST_REGISTRATION)."),
+    entity_id: Optional[int] = Query(None, ge=1, description="Filter by crm_leads.entity_id."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -401,12 +763,13 @@ async def filter_crm_leads(
         if not m.isdigit() or len(m) != 10:
             raise _validation_error("Invalid mobile filter.", {"mobile": "Must be a 10-digit number."})
         mobile = m
+    et_filter = _entity_type_query(entity_type) if (entity_type is not None or entity_id is not None) else None
 
     pool = await get_db_pool()
     try:
         async with pool.acquire() as conn:
             if stage:
-                valid_stages = await _fetch_valid_stage_codes(conn)
+                valid_stages = await _fetch_valid_stage_codes(conn, et_filter or DEFAULT_CRM_ENTITY_TYPE)
                 if stage not in valid_stages:
                     raise _validation_error(
                         "Invalid stage filter.",
@@ -432,6 +795,14 @@ async def filter_crm_leads(
             if is_active is not None:
                 params.append(is_active)
                 where.append(f"l.is_active = ${len(params)}")
+            if entity_id is not None:
+                params.append(entity_id)
+                where.append(f"l.entity_id = ${len(params)}")
+                params.append(_entity_type_query(entity_type))
+                where.append(f"l.entity_type = ${len(params)}")
+            elif entity_type is not None:
+                params.append(_entity_type_query(entity_type))
+                where.append(f"l.entity_type = ${len(params)}")
 
             vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
             if vis_sql:
@@ -470,6 +841,8 @@ async def filter_crm_activities(
     mobile: Optional[str] = None,
     lead_stage: Optional[str] = None,
     lead_is_active: Optional[bool] = None,
+    entity_type: Optional[str] = Query(None),
+    entity_id: Optional[int] = Query(None, ge=1),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -526,10 +899,12 @@ async def filter_crm_activities(
             {"performed_at_from": "performed_at_from must be <= performed_at_to."},
         )
 
+    et_scope = _entity_type_query(entity_type) if (entity_type is not None or entity_id is not None) else None
+
     pool = await get_db_pool()
     try:
         async with pool.acquire() as conn:
-            valid_stages = await _fetch_valid_stage_codes(conn)
+            valid_stages = await _fetch_valid_stage_codes(conn, et_scope or DEFAULT_CRM_ENTITY_TYPE)
             if lead_stage is not None and lead_stage not in valid_stages:
                 raise _validation_error(
                     "Invalid lead_stage filter.",
@@ -585,6 +960,14 @@ async def filter_crm_activities(
             if lead_is_active is not None:
                 params.append(lead_is_active)
                 where.append(f"l.is_active = ${len(params)}")
+            if entity_id is not None:
+                params.append(entity_id)
+                where.append(f"l.entity_id = ${len(params)}")
+                params.append(_entity_type_query(entity_type))
+                where.append(f"l.entity_type = ${len(params)}")
+            elif entity_type is not None:
+                params.append(_entity_type_query(entity_type))
+                where.append(f"l.entity_type = ${len(params)}")
 
             vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
             if vis_sql:
@@ -617,20 +1000,34 @@ async def filter_crm_activities(
 
 @router.get("/stages", summary="CRM lead pipeline stages for UI")
 async def get_crm_lead_stages(
+    entity_type: Optional[str] = Query(None, description="Defaults to GST_REGISTRATION."),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ) -> CRMLeadStagesOut:
     _get_user_context(current_user)
+    et = _entity_type_query(entity_type)
     pool = await get_db_pool()
     try:
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT id, code, name, sort_order
-                FROM {DB_SCHEMA}.crm_lead_stages
-                WHERE is_active
-                ORDER BY sort_order, code
-                """
-            )
+            try:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, code, name, sort_order
+                    FROM {DB_SCHEMA}.crm_lead_stages
+                    WHERE is_active
+                      AND (entity_type = $1 OR entity_type IS NULL)
+                    ORDER BY sort_order, code
+                    """,
+                    et,
+                )
+            except asyncpg.UndefinedColumnError:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, code, name, sort_order
+                    FROM {DB_SCHEMA}.crm_lead_stages
+                    WHERE is_active
+                    ORDER BY sort_order, code
+                    """
+                )
     except asyncpg.UndefinedTableError:
         logger.exception("crm_lead_stages missing; run docs/65-crm-lead-stages.sql")
         raise HTTPException(status_code=500, detail="CRM lead stages are not available.")
@@ -639,6 +1036,7 @@ async def get_crm_lead_stages(
         raise HTTPException(status_code=500, detail="Database error.")
 
     return CRMLeadStagesOut(
+        entity_type=et,
         stages=[
             CRMLeadStageItem(
                 id=r["id"],
@@ -649,6 +1047,42 @@ async def get_crm_lead_stages(
             for r in rows
         ],
     )
+
+
+@router.get("/by-entity", summary="Get CRM lead by entity_type + entity_id (visible to caller)")
+async def get_crm_lead_by_entity(
+    entity_id: int = Query(..., ge=1),
+    entity_type: Optional[str] = Query(None, description="Defaults to GST_REGISTRATION."),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+    et = _entity_type_query(entity_type)
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT l.* FROM {DB_SCHEMA}.crm_leads l
+                WHERE l.entity_type = $1 AND l.entity_id = $2 AND l.is_active = TRUE
+                ORDER BY l.updated_at DESC NULLS LAST, l.id DESC
+                LIMIT 1
+                """,
+                et,
+                entity_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="CRM lead not found for this entity.")
+            lead_id = row["id"]
+            vis = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+            if not vis:
+                raise HTTPException(status_code=404, detail="CRM lead not found.")
+            return dict(vis)
+    except HTTPException:
+        raise
+    except asyncpg.PostgresError:
+        logger.exception("Database error while fetching CRM lead by entity")
+        raise HTTPException(status_code=500, detail="Database error.")
 
 
 @router.get("/{lead_id:int}", summary="Get CRM lead by id")
@@ -762,6 +1196,10 @@ async def update_crm_followup_status(
     request_id = generate_uuid()
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "crm_followup_status_update"},
+    )
 
     follow_up_status = _normalize_code(payload.follow_up_status)
     if follow_up_status not in FOLLOWUP_STATUSES:
@@ -779,76 +1217,10 @@ async def update_crm_followup_status(
                 )
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
-                if not lead["is_active"]:
-                    raise _validation_error("Inactive lead cannot be updated.")
 
-                old_status = lead.get("follow_up_status")
-
-                if follow_up_status == "PENDING" and payload.followup_at is None and lead.get("followup_at") is None:
-                    raise _validation_error(
-                        "followup_at is required for pending status.",
-                        {"followup_at": "Provide followup_at when setting PENDING."},
-                    )
-
-                updated = await conn.fetchrow(
-                    f"""
-                    UPDATE {DB_SCHEMA}.crm_leads
-                    SET follow_up_status = $1,
-                        followup_at = COALESCE($2, followup_at),
-                        remarks = COALESCE($3, remarks),
-                        missed_at = CASE WHEN $1 = 'MISSED' THEN missed_at ELSE NULL END,
-                        completed_at = CASE
-                            WHEN $1 = 'COMPLETED' THEN NOW()
-                            ELSE NULL
-                        END,
-                        updated_at = NOW()
-                    WHERE id = $4
-                    RETURNING *
-                    """,
-                    follow_up_status,
-                    payload.followup_at,
-                    payload.remarks,
-                    lead_id,
+                return await _crm_apply_followup_status(
+                    conn, emp_id, lead_id, lead, payload, follow_up_status, log
                 )
-
-                activity_id = await conn.fetchval(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.crm_activities (
-                        lead_id, activity_type, remarks, performed_by, performed_at, created_at
-                    )
-                    VALUES ($1, 'FOLLOWUP_STATUS_UPDATE', $2, $3, NOW(), NOW())
-                    RETURNING id
-                    """,
-                    lead_id,
-                    (
-                        f"follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
-                        if payload.remarks is None
-                        else f"{payload.remarks} | follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
-                    ),
-                    _performed_by_emp_id(emp_id),
-                )
-
-                log = logging.LoggerAdapter(
-                    logger,
-                    {"request_id": request_id, "emp_id": emp_id, "api": "crm_followup_status_update"},
-                )
-                log.info(
-                    "CRM follow-up status updated | lead_id=%s old_status=%s new_status=%s",
-                    lead_id,
-                    old_status,
-                    follow_up_status,
-                )
-
-                return {
-                    "message": "Follow-up status updated successfully.",
-                    "lead_id": lead_id,
-                    "old_follow_up_status": old_status,
-                    "follow_up_status": updated["follow_up_status"],
-                    "followup_at": updated["followup_at"],
-                    "missed_at": updated["missed_at"],
-                    "completed_at": updated["completed_at"],
-                    "activity_id": activity_id,
-                }
     except asyncpg.exceptions.CheckViolationError as e:
         raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
     except asyncpg.PostgresError:
@@ -867,116 +1239,17 @@ async def update_crm_call(
     _require_crm_row_context(role, emp_id)
     log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id, "api": "crm_call_update"})
 
-    call_type_code = _normalize_code(payload.call_type_code)
-    call_status_code = _normalize_code(payload.call_status_code)
-
     pool = await get_db_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                await _validate_call_config(conn, call_type_code, call_status_code)
-
                 lead = await _fetch_crm_lead_visible(
                     conn, role, emp_id, lead_id, for_update=True
                 )
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
-                if not lead["is_active"]:
-                    raise _validation_error("Inactive lead cannot be updated via call flow.")
 
-                current_stage = lead["stage"]
-                if current_stage in CLOSED_STAGES:
-                    raise _validation_error(
-                        "Lead is closed; stage updates are not allowed.",
-                        {"stage": f"Current stage is {current_stage}."},
-                    )
-                await _validate_crm_call_against_mappings(
-                    conn, current_stage, call_type_code, call_status_code
-                )
-
-                if payload.followup_at is not None and payload.followup_at <= datetime.now(IST):
-                    raise _validation_error("Invalid followup datetime.", {"followup_at": "Must be a future datetime."})
-                if call_status_code in {"CALL_BACK", "SCHEDULED_PAYMENT"} and payload.followup_at is None:
-                    raise _validation_error("followup_at is required.", {"followup_at": f"Required for {call_status_code}."})
-
-                target_stage = _transition_stage(call_type_code, call_status_code)
-                connected_inc = int(
-                    (call_type_code == "FIRST_PITCH_CALL" and call_status_code in FIRST_PITCH_CONNECTED)
-                    or (call_type_code == "FINAL_PITCH_CALL" and call_status_code in FINAL_PITCH_CONNECTED)
-                )
-                new_stage = target_stage or current_stage
-
-                updated = await conn.fetchrow(
-                    f"""
-                    UPDATE {DB_SCHEMA}.crm_leads
-                    SET stage = $1,
-                        call_attempted_count = call_attempted_count + 1,
-                        call_connected_count = call_connected_count + $2,
-                        last_dailed_at = NOW(),
-                        last_connected_at = CASE WHEN $2 = 1 THEN NOW() ELSE last_connected_at END,
-                        followup_at = COALESCE($3, followup_at),
-                        follow_up_status = CASE WHEN $3 IS NOT NULL THEN 'PENDING' ELSE follow_up_status END,
-                        missed_at = CASE WHEN $3 IS NOT NULL THEN NULL ELSE missed_at END,
-                        completed_at = CASE WHEN $3 IS NOT NULL THEN NULL ELSE completed_at END,
-                        remarks = COALESCE($4, remarks),
-                        rm_id = CASE WHEN $6 = 'RM' THEN $7 ELSE rm_id END,
-                        op_id = CASE WHEN $6 = 'OP' THEN $7 ELSE op_id END,
-                        updated_at = NOW()
-                    WHERE id = $5
-                    RETURNING *
-                    """,
-                    new_stage,
-                    connected_inc,
-                    payload.followup_at,
-                    payload.remarks,
-                    lead_id,
-                    role,
-                    emp_id,
-                )
-
-                activity_id = await conn.fetchval(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.crm_activities (
-                        lead_id, activity_type, call_type_code, call_status_code,
-                        old_stage, new_stage, followup_at, remarks, performed_by, performed_at, created_at
-                    )
-                    VALUES ($1, 'CALL', $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-                    RETURNING id
-                    """,
-                    lead_id,
-                    call_type_code,
-                    call_status_code,
-                    current_stage,
-                    new_stage,
-                    payload.followup_at,
-                    payload.remarks,
-                    _performed_by_emp_id(emp_id),
-                )
-
-                log.info(
-                    "CRM call updated | lead_id=%s old_stage=%s new_stage=%s type=%s status=%s",
-                    lead_id,
-                    current_stage,
-                    new_stage,
-                    call_type_code,
-                    call_status_code,
-                )
-
-                return {
-                    "message": "Call update applied",
-                    "lead_id": lead_id,
-                    "old_stage": current_stage,
-                    "new_stage": new_stage,
-                    "call_attempted_count": updated["call_attempted_count"],
-                    "call_connected_count": updated["call_connected_count"],
-                    "last_dailed_at": updated["last_dailed_at"],
-                    "last_connected_at": updated["last_connected_at"],
-                    "followup_at": updated["followup_at"],
-                    "follow_up_status": updated["follow_up_status"],
-                    "missed_at": updated["missed_at"],
-                    "completed_at": updated["completed_at"],
-                    "activity_id": activity_id,
-                }
+                return await _crm_apply_call_update(conn, role, emp_id, lead_id, lead, payload, log)
     except asyncpg.exceptions.ForeignKeyViolationError:
         raise _validation_error("Invalid foreign key reference.", {"performed_by": "Employee reference invalid."})
     except asyncpg.exceptions.CheckViolationError as e:

@@ -5,18 +5,31 @@ from datetime import timedelta
 from typing import Optional
 
 from app.utils import get_db_pool, DB_SCHEMA
+from app.gst_registration_filing.gst_filing_auto_policy import (
+    disable_gst_filings_auto_over_missed_threshold,
+)
+
+# Cap rows touched per scheduler tick so one run cannot scan/update the whole table.
+SCHEDULER_SQL_BATCH_LIMIT = 500
 
 _scheduler_task: Optional[asyncio.Task] = None
+
+# Month lengths for `_add_months` (February adjusted per year in-line).
+_DAYS_NON_LEAP = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
+def _days_in_month(year: int, month: int) -> int:
+    if month == 2:
+        leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+        return 29 if leap else 28
+    return _DAYS_NON_LEAP[month - 1]
 
 
 def _add_months(ts, months: int):
     year = ts.year + (ts.month - 1 + months) // 12
     month = (ts.month - 1 + months) % 12 + 1
     # keep day safe for short months
-    day = min(
-        ts.day,
-        [31, 29 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1],
-    )
+    day = min(ts.day, _days_in_month(year, month))
     return ts.replace(year=year, month=month, day=day)
 
 
@@ -25,7 +38,7 @@ def _shift_due(ts, months: int):
 
 
 def _lead_days_for_cadence_months(cadence_months: int) -> int:
-    """Match gst_registation_filing: monthly 10d, quarterly 12d, annual 7d buffer before due."""
+    """Match gst_registration_filing: monthly 10d, quarterly 12d, annual 7d buffer before due."""
     if cadence_months == 1:
         return 10
     if cadence_months == 3:
@@ -109,32 +122,7 @@ async def _run_gst_filing_auto_generation(conn):
     then clears `next_auto_generate_at` on the source row. Manual backlog filings use the create API;
     this job only continues an existing auto-enabled chain from the latest row.
     """
-    # Lock due rows so parallel scheduler ticks/workers don't duplicate inserts.
-    rows = await conn.fetch(
-        f"""
-        SELECT d.*, f.filing_frequency
-        FROM {DB_SCHEMA}.gst_filing_return_details d
-        JOIN {DB_SCHEMA}.gst_filings f
-          ON f.id = d.gst_filing_id
-        WHERE d.is_active = TRUE
-          AND f.is_active = TRUE
-          AND f.is_auto_enabled = TRUE
-          AND f.gst_reg_status = 'APPROVED'
-          AND d.next_auto_generate_at IS NOT NULL
-          AND d.next_auto_generate_at <= NOW()
-        ORDER BY d.next_auto_generate_at ASC
-        FOR UPDATE OF d SKIP LOCKED
-        LIMIT 100
-        """
-    )
-
-    generated = 0
-    for row in rows:
-        src = dict(row)
-        next_row = _build_next_row_from_source(src, src.get("filing_frequency") or "MONTHLY")
-
-        await conn.execute(
-            f"""
+    insert_sql = f"""
             INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                 gst_filing_id,
                 gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
@@ -146,36 +134,69 @@ async def _run_gst_filing_auto_generation(conn):
                 $8,$9,$10,$11,$12,$13,
                 TRUE,$14
             )
-            """,
-            src["gst_filing_id"],
-            next_row["gstr1_status"],
-            next_row["gstr3b_status"],
-            next_row["gstr9_status"],
-            next_row["gstr9c_status"],
-            next_row["cmp08_status"],
-            next_row["gstr4_status"],
-            next_row["gstr1_due_date"],
-            next_row["gstr3b_due_date"],
-            next_row["gstr9_due_date"],
-            next_row["gstr9c_due_date"],
-            next_row["cmp08_due_date"],
-            next_row["gstr4_due_date"],
-            next_row["next_auto_generate_at"],
-        )
-
-        # Mark current source row as processed for auto-generation.
-        await conn.execute(
-            f"""
+            """
+    update_sql = f"""
             UPDATE {DB_SCHEMA}.gst_filing_return_details
             SET next_auto_generate_at = NULL,
                 updated_at = NOW()
             WHERE id = $1
-            """,
-            src["id"],
-        )
-        generated += 1
+            """
 
-    return generated
+    # One transaction: keep FOR UPDATE locks until inserts + updates complete (avoids races);
+    # executemany cuts client↔server round-trips vs per-row execute.
+    async with conn.transaction():
+        rows = await conn.fetch(
+            f"""
+            SELECT d.*, f.filing_frequency
+            FROM {DB_SCHEMA}.gst_filing_return_details d
+            JOIN {DB_SCHEMA}.gst_filings f
+              ON f.id = d.gst_filing_id
+            WHERE d.is_active = TRUE
+              AND f.is_active = TRUE
+              AND f.is_auto_enabled = TRUE
+              AND f.gst_reg_status = 'APPROVED'
+              AND d.next_auto_generate_at IS NOT NULL
+              AND d.next_auto_generate_at <= NOW()
+            ORDER BY d.next_auto_generate_at ASC
+            FOR UPDATE OF d SKIP LOCKED
+            LIMIT {SCHEDULER_SQL_BATCH_LIMIT}
+            """
+        )
+
+        if not rows:
+            return 0
+
+        insert_args = []
+        update_args = []
+        for row in rows:
+            src = dict(row)
+            next_row = _build_next_row_from_source(
+                src, src.get("filing_frequency") or "MONTHLY"
+            )
+            insert_args.append(
+                (
+                    src["gst_filing_id"],
+                    next_row["gstr1_status"],
+                    next_row["gstr3b_status"],
+                    next_row["gstr9_status"],
+                    next_row["gstr9c_status"],
+                    next_row["cmp08_status"],
+                    next_row["gstr4_status"],
+                    next_row["gstr1_due_date"],
+                    next_row["gstr3b_due_date"],
+                    next_row["gstr9_due_date"],
+                    next_row["gstr9c_due_date"],
+                    next_row["cmp08_due_date"],
+                    next_row["gstr4_due_date"],
+                    next_row["next_auto_generate_at"],
+                )
+            )
+            update_args.append((src["id"],))
+
+        await conn.executemany(insert_sql, insert_args)
+        await conn.executemany(update_sql, update_args)
+
+    return len(rows)
 
 
 async def _mark_overdue_gst_return_statuses(conn) -> str:
@@ -183,6 +204,7 @@ async def _mark_overdue_gst_return_statuses(conn) -> str:
     For each return column, if due_date < NOW() and status is NOT_FILED, set status to MISSED.
     Only touches rows under active parent filings and active return-detail rows.
     """
+    lim = SCHEDULER_SQL_BATCH_LIMIT
     return await conn.execute(
         f"""
         UPDATE {DB_SCHEMA}.gst_filing_return_details AS d
@@ -222,13 +244,21 @@ async def _mark_overdue_gst_return_statuses(conn) -> str:
         WHERE f.id = d.gst_filing_id
           AND f.is_active = TRUE
           AND d.is_active = TRUE
-          AND (
-              (d.gstr1_due_date IS NOT NULL AND d.gstr1_due_date < NOW() AND d.gstr1_status = 'NOT_FILED')
-              OR (d.gstr3b_due_date IS NOT NULL AND d.gstr3b_due_date < NOW() AND d.gstr3b_status = 'NOT_FILED')
-              OR (d.gstr9_due_date IS NOT NULL AND d.gstr9_due_date < NOW() AND d.gstr9_status = 'NOT_FILED')
-              OR (d.gstr9c_due_date IS NOT NULL AND d.gstr9c_due_date < NOW() AND d.gstr9c_status = 'NOT_FILED')
-              OR (d.cmp08_due_date IS NOT NULL AND d.cmp08_due_date < NOW() AND d.cmp08_status = 'NOT_FILED')
-              OR (d.gstr4_due_date IS NOT NULL AND d.gstr4_due_date < NOW() AND d.gstr4_status = 'NOT_FILED')
+          AND d.id IN (
+            SELECT d2.id
+            FROM {DB_SCHEMA}.gst_filing_return_details d2
+            INNER JOIN {DB_SCHEMA}.gst_filings f2 ON f2.id = d2.gst_filing_id
+            WHERE f2.is_active = TRUE
+              AND d2.is_active = TRUE
+              AND (
+                  (d2.gstr1_due_date IS NOT NULL AND d2.gstr1_due_date < NOW() AND d2.gstr1_status = 'NOT_FILED')
+                  OR (d2.gstr3b_due_date IS NOT NULL AND d2.gstr3b_due_date < NOW() AND d2.gstr3b_status = 'NOT_FILED')
+                  OR (d2.gstr9_due_date IS NOT NULL AND d2.gstr9_due_date < NOW() AND d2.gstr9_status = 'NOT_FILED')
+                  OR (d2.gstr9c_due_date IS NOT NULL AND d2.gstr9c_due_date < NOW() AND d2.gstr9c_status = 'NOT_FILED')
+                  OR (d2.cmp08_due_date IS NOT NULL AND d2.cmp08_due_date < NOW() AND d2.cmp08_status = 'NOT_FILED')
+                  OR (d2.gstr4_due_date IS NOT NULL AND d2.gstr4_due_date < NOW() AND d2.gstr4_status = 'NOT_FILED')
+              )
+            LIMIT {lim}
           )
         """
     )
@@ -242,15 +272,21 @@ async def background_jobs():
             async with pool.acquire() as conn:
                 logging.info("Running background scheduler...")
 
+                lim = SCHEDULER_SQL_BATCH_LIMIT
                 # 1) Mark overdue pending followups as MISSED
                 result = await conn.execute(
                     f"""
                     UPDATE {DB_SCHEMA}.customer_service_followups
                     SET status = 'MISSED',
                         updated_at = NOW()
-                    WHERE status = 'PENDING'
-                      AND followup_at < NOW()
-                      AND followup_at IS NOT NULL
+                    WHERE id IN (
+                        SELECT id
+                        FROM {DB_SCHEMA}.customer_service_followups
+                        WHERE status = 'PENDING'
+                          AND followup_at < NOW()
+                          AND followup_at IS NOT NULL
+                        LIMIT {lim}
+                    )
                     """
                 )
                 logging.info("MISSED followups updated: %s", result)
@@ -261,10 +297,15 @@ async def background_jobs():
                     UPDATE {DB_SCHEMA}.customer_service_followups
                     SET missed_at = NOW(),
                         updated_at = NOW()
-                    WHERE status = 'MISSED'
-                      AND missed_at IS NULL
-                      AND followup_at <= (NOW() - INTERVAL '10 minutes')
-                      AND followup_at IS NOT NULL
+                    WHERE id IN (
+                        SELECT id
+                        FROM {DB_SCHEMA}.customer_service_followups
+                        WHERE status = 'MISSED'
+                          AND missed_at IS NULL
+                          AND followup_at <= (NOW() - INTERVAL '10 minutes')
+                          AND followup_at IS NOT NULL
+                        LIMIT {lim}
+                    )
                     """
                 )
                 logging.info("MISSED followups stamped with missed_at: %s", result)
@@ -275,10 +316,15 @@ async def background_jobs():
                     UPDATE {DB_SCHEMA}.crm_leads
                     SET follow_up_status = 'MISSED',
                         updated_at = NOW()
-                    WHERE is_active = TRUE
-                      AND follow_up_status = 'PENDING'
-                      AND followup_at IS NOT NULL
-                      AND followup_at < NOW()
+                    WHERE id IN (
+                        SELECT id
+                        FROM {DB_SCHEMA}.crm_leads
+                        WHERE is_active = TRUE
+                          AND follow_up_status = 'PENDING'
+                          AND followup_at IS NOT NULL
+                          AND followup_at < NOW()
+                        LIMIT {lim}
+                    )
                     """
                 )
                 logging.info("CRM leads marked MISSED by followup time: %s", result)
@@ -289,11 +335,16 @@ async def background_jobs():
                     UPDATE {DB_SCHEMA}.crm_leads
                     SET missed_at = NOW(),
                         updated_at = NOW()
-                    WHERE is_active = TRUE
-                      AND follow_up_status = 'MISSED'
-                      AND missed_at IS NULL
-                      AND followup_at IS NOT NULL
-                      AND followup_at <= (NOW() - INTERVAL '10 minutes')
+                    WHERE id IN (
+                        SELECT id
+                        FROM {DB_SCHEMA}.crm_leads
+                        WHERE is_active = TRUE
+                          AND follow_up_status = 'MISSED'
+                          AND missed_at IS NULL
+                          AND followup_at IS NOT NULL
+                          AND followup_at <= (NOW() - INTERVAL '10 minutes')
+                        LIMIT {lim}
+                    )
                     """
                 )
                 logging.info("CRM leads stamped missed_at: %s", result)
@@ -303,9 +354,14 @@ async def background_jobs():
                     f"""
                     UPDATE {DB_SCHEMA}.session_token
                     SET is_active = FALSE
-                    WHERE is_active = TRUE
-                      AND expires_at IS NOT NULL
-                      AND expires_at < NOW()
+                    WHERE id IN (
+                        SELECT id
+                        FROM {DB_SCHEMA}.session_token
+                        WHERE is_active = TRUE
+                          AND expires_at IS NOT NULL
+                          AND expires_at < NOW()
+                        LIMIT {lim}
+                    )
                     """
                 )
 
@@ -316,6 +372,15 @@ async def background_jobs():
                     logging.info(
                         "GST return-detail rows updated (NOT_FILED -> MISSED where due < now): %s",
                         overdue_status,
+                    )
+
+                # 6b) Turn off auto-generation when MISSED-period thresholds are exceeded
+                disabled_ids = await disable_gst_filings_auto_over_missed_threshold(conn, lim)
+                if disabled_ids:
+                    logging.info(
+                        "GST filings auto-disabled (MISSED threshold): count=%s ids=%s",
+                        len(disabled_ids),
+                        disabled_ids,
                     )
 
                 # 7) Auto-generate next GST filing return detail rows

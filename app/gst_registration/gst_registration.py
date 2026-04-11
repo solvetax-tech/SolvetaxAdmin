@@ -18,6 +18,9 @@ router = APIRouter(
     tags=["GST Registration"]
 )
 
+# CRM `crm_leads.entity_type` when the lead is tied to a GST registration row.
+CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION = "GST_REGISTRATION"
+
 
 async def _sync_crm_lead_with_gst(
     conn: asyncpg.Connection,
@@ -36,12 +39,14 @@ async def _sync_crm_lead_with_gst(
             f"""
             SELECT *
             FROM {DB_SCHEMA}.crm_leads
-            WHERE gst_registration_id = $1
+            WHERE entity_type = $1
+              AND entity_id = $2
               AND is_active = TRUE
             ORDER BY id DESC
             LIMIT 1
             FOR UPDATE
             """,
+            CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
             gst_row["id"],
         )
 
@@ -67,15 +72,17 @@ async def _sync_crm_lead_with_gst(
                 f"""
                 UPDATE {DB_SCHEMA}.crm_leads
                 SET mobile = $1,
-                    gst_registration_id = $2,
-                    rm_id = $3,
-                    op_id = $4,
-                    is_active = $5,
+                    entity_id = $2,
+                    entity_type = $3,
+                    rm_id = $4,
+                    op_id = $5,
+                    is_active = $6,
                     updated_at = NOW()
-                WHERE id = $6
+                WHERE id = $7
                 """,
                 mobile,
                 gst_row["id"],
+                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
                 gst_row.get("rm_id"),
                 gst_row.get("created_by"),
                 gst_row.get("is_active"),
@@ -85,13 +92,14 @@ async def _sync_crm_lead_with_gst(
             await conn.fetchval(
                 f"""
                 INSERT INTO {DB_SCHEMA}.crm_leads (
-                    mobile, gst_registration_id, stage, rm_id, op_id, is_active, remarks, created_at, updated_at
+                    mobile, entity_id, entity_type, stage, rm_id, op_id, is_active, remarks, created_at, updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
                 RETURNING id
                 """,
                 mobile,
                 gst_row["id"],
+                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
                 "FRESH_LEAD",
                 gst_row.get("rm_id"),
                 gst_row.get("created_by"),

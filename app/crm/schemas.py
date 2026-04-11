@@ -68,14 +68,23 @@ class CRMUIStagePitchItem(CRMBaseSchema):
     stage: str
     pitch_type_code: str
     sort_order: int
+    entity_type: Optional[str] = Field(
+        default=None,
+        description="NULL in DB = mapping applies to all entity types.",
+    )
 
 
 class CRMUIPitchStatusItem(CRMBaseSchema):
     call_status_code: str
     sort_order: int
+    entity_type: Optional[str] = Field(
+        default=None,
+        description="NULL in DB = mapping applies to all entity types.",
+    )
 
 
 class CRMUIMappingsOut(CRMBaseSchema):
+    entity_type: str
     stage_to_pitch: list[CRMUIStagePitchItem]
     pitch_to_statuses: dict[str, list[CRMUIPitchStatusItem]]
 
@@ -88,4 +97,5 @@ class CRMLeadStageItem(CRMBaseSchema):
 
 
 class CRMLeadStagesOut(CRMBaseSchema):
+    entity_type: str
     stages: list[CRMLeadStageItem]
