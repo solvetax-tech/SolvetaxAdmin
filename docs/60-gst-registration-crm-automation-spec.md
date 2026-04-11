@@ -1,7 +1,9 @@
 # GST Registration CRM Automation Spec (End-to-End)
 
 Owner: Engineering Team  
-Last Verified On: 2026-04-08
+Last Verified On: 2026-04-11
+
+> **HTTP API & UI integration:** The live REST contract, RBAC, row-level visibility, config endpoints (`/stages`, `/ui-mappings`), list filters (`/filter`, `/activities/filter`), and request/response shapes are documented in **[`docs/70-crm-ui-integration-guide.md`](70-crm-ui-integration-guide.md)**. Implementation lives in **[`app/crm/crm_leads.py`](../app/crm/crm_leads.py)**. Where this spec disagrees with **70** or the code, treat **70 + code** as authoritative.
 
 This document is the implementation blueprint for GST CRM automation:
 - static deal stages,
@@ -25,8 +27,8 @@ Build a deterministic CRM workflow where callers update call outcomes and the sy
 ### In scope
 - GST registration lead lifecycle only.
 - Two pitch types: first and final.
-- Dynamic call statuses (config table).
-- Static stage list (fixed).
+- Dynamic call statuses (config table) plus **`crm_ui_mappings`** for UI-driven allowed combinations ([`docs/64-crm-ui-mappings.sql`](64-crm-ui-mappings.sql)).
+- Stage list: canonical rows in **`crm_lead_stages`** ([`docs/65-crm-lead-stages.sql`](65-crm-lead-stages.sql)) with surrogate **`id`** + unique **`code`**.
 
 ### Out of scope
 - Dynamic stage creation/edit UI.
@@ -36,20 +38,20 @@ Build a deterministic CRM workflow where callers update call outcomes and the sy
 
 ## 2) Canonical stage model (static)
 
-Use these exact stage codes:
+Use these exact stage codes (order for UI is defined in **`crm_lead_stages.sort_order`**):
 
 1. `FRESH_LEAD`
-2. `PENDING_REGISTRATION_DATA`
-3. `FOLLOW_UP`
-4. `INTERESTED`
+2. `FOLLOW_UP`
+3. `INTERESTED`
+4. `PENDING_REGISTRATION_DATA`
 5. `GST_REGISTRATION_DONE`
 6. `SCHEDULED_PAYMENTS`
-7. `SUBSCRIBED` (closed won)
-8. `NOT_INTERESTED` (closed lost, first pitch only)
+7. `SUBSCRIBED` (closed won — typically via **payment PAID** trigger, not call status)
+8. `NOT_INTERESTED` (closed lost)
 
 Rules:
 - `SUBSCRIBED` and `NOT_INTERESTED` are final closed stages.
-- `NOT_INTERESTED` is allowed only in first pitch flow.
+- First-pitch **call-update** is only for stages mapped to **`FIRST_PITCH_CALL`** in **`crm_ui_mappings`** (today: `FRESH_LEAD`, `FOLLOW_UP`, `INTERESTED`). Leads reach **`PENDING_REGISTRATION_DATA`** via first-pitch status **`SEND_DOCS`** (and GST/sync), not via a first-pitch mapping on that stage.
 
 ---
 
@@ -65,23 +67,18 @@ These remain configurable rows but logic references these code values.
 
 ## 4) Call statuses (dynamic config)
 
-Recommended status codes:
+Recommended status codes (see `crm_call_statuses`; seed/migrate adds **`SEND_DOCS`** for first pitch):
 - `CALL_NOT_ANSWERED`
 - `CALL_NOT_CONNECTED`
 - `CALL_BUSY`
 - `CALL_BACK`
 - `CONNECTED_AND_SCHEDULED`
 - `SCHEDULED_PAYMENT`
-- `SUBSCRIBED_COMPLETED`
+- `SEND_DOCS` (first pitch → move lead to **`PENDING_REGISTRATION_DATA`**)
 - `NOT_INTERESTED`
+- `SUBSCRIBED_COMPLETED` (may exist in DB for legacy; **final pitch call-update** in current app does not use it — closed won uses **payment** automation)
 
-For `FIRST_PITCH_CALL`, allowed call statuses are:
-- `CALL_NOT_ANSWERED`
-- `CALL_NOT_CONNECTED`
-- `CALL_BUSY`
-- `CALL_BACK`
-- `CONNECTED_AND_SCHEDULED`
-- `NOT_INTERESTED`
+For `FIRST_PITCH_CALL`, allowed call statuses are driven by **`crm_ui_mappings`** (see **70**); they include **`SEND_DOCS`** and the standard outreach outcomes.
 
 Keep dynamic in DB (`is_active`) but never break code-level meaning of these canonical codes.
 
@@ -99,9 +96,11 @@ On every call-status update event:
 - `CONNECTED_AND_SCHEDULED`
 - `CALL_BACK`
 
-### Final pitch connected statuses
+### Final pitch connected statuses (current `app/crm`)
 - `SCHEDULED_PAYMENT`
-- `SUBSCRIBED_COMPLETED`
+- `CALL_BACK`
+
+(Both increment **`call_connected_count`** and refresh **`last_connected_at`** when used on **`FINAL_PITCH_CALL`**.)
 
 ---
 
@@ -109,27 +108,22 @@ On every call-status update event:
 
 ## 6.1 First pitch flow
 
-Allowed current stages:
+**Allowed current stages for `FIRST_PITCH_CALL` call-update** (must match `crm_ui_mappings` `STAGE_TO_PITCH`):
 - `FRESH_LEAD`
-- `PENDING_REGISTRATION_DATA`
 - `FOLLOW_UP`
 - `INTERESTED`
 
-Not allowed current stages:
-- `GST_REGISTRATION_DONE`
-- `SCHEDULED_PAYMENTS`
-- `SUBSCRIBED`
-- `NOT_INTERESTED`
+**Not** allowed for first-pitch call-update (no mapping / server rejects):
+- `PENDING_REGISTRATION_DATA` — RM works registration elsewhere; stage advances on GST approval / sync.
+- `GST_REGISTRATION_DONE`, `SCHEDULED_PAYMENTS`, `SUBSCRIBED`, `NOT_INTERESTED`
 
-Status to stage mapping:
-- `CALL_NOT_ANSWERED` -> no stage change
-- `CALL_NOT_CONNECTED` -> no stage change
-- `CALL_BUSY` -> `FOLLOW_UP` (remain if already `FOLLOW_UP`)
-- `CALL_BACK` -> `FOLLOW_UP` (follow-up datetime required)
+Status to stage mapping (server `_transition_stage`):
+- `SEND_DOCS` -> `PENDING_REGISTRATION_DATA`
+- `CALL_NOT_ANSWERED` / `CALL_NOT_CONNECTED` -> no stage change
+- `CALL_BUSY` / `CALL_BACK` -> `FOLLOW_UP`
 - `CONNECTED_AND_SCHEDULED` -> `INTERESTED`
 - `NOT_INTERESTED` -> `NOT_INTERESTED` (close)
-- `SUBSCRIBED_COMPLETED` -> reject (invalid in first pitch)
-- `SCHEDULED_PAYMENT` -> reject (invalid in first pitch)
+- `SCHEDULED_PAYMENT` / final-only statuses -> rejected for first pitch (mapping + validation)
 
 Extra validation:
 - For `CALL_BACK`, `followup_at` is mandatory and must be in the future.
@@ -145,20 +139,14 @@ Not call-driven. System/ops-driven:
 
 Allowed current stages:
 - `GST_REGISTRATION_DONE`
-- `SCHEDULED_PAYMENTS` (for follow-up progression)
+- `SCHEDULED_PAYMENTS`
 
-Status to stage mapping:
-- `SCHEDULED_PAYMENT`:
-  - `GST_REGISTRATION_DONE` -> `SCHEDULED_PAYMENTS`
-  - `SCHEDULED_PAYMENTS` -> remain `SCHEDULED_PAYMENTS` 
-  - `followup_at` required and must be in the future
-- `SUBSCRIBED_COMPLETED`:
-  - `GST_REGISTRATION_DONE` -> `SUBSCRIBED`
-  - `SCHEDULED_PAYMENTS` -> `SUBSCRIBED`
-- `NOT_INTERESTED` -> reject (not allowed in final pitch)
-- `CALL_NOT_ANSWERED`/`CALL_NOT_CONNECTED`/`CALL_BUSY`/`CALL_BACK`/`CONNECTED_AND_SCHEDULED`:
-  - optional: allow as no-stage-change events
-  - recommended: keep allowed but no transition unless business explicitly blocks
+Allowed call statuses (from **`crm_ui_mappings`** for `FINAL_PITCH_CALL`): typically outreach outcomes plus **`SCHEDULED_PAYMENT`**. **`NOT_INTERESTED`** is rejected on final pitch in code.
+
+Status to stage mapping (current server):
+- `SCHEDULED_PAYMENT` -> `SCHEDULED_PAYMENTS` (with **`followup_at`** required, future)
+- `CALL_NOT_ANSWERED` / `CALL_NOT_CONNECTED` / `CALL_BUSY` / `CALL_BACK` -> no stage change
+- **`SUBSCRIBED`**: not set via **`SUBSCRIBED_COMPLETED`** in call-update; use **`fn_sync_payment_paid_to_crm`** when **`payment_status = PAID`** for the GST registration entity (from **`GST_REGISTRATION_DONE`** or **`SCHEDULED_PAYMENTS`**).
 
 ## 6.4 Final stage protection
 
@@ -334,7 +322,13 @@ Validation failures:
 
 `GET /api/v1/crm/leads/{lead_id}/activities?limit=50&offset=0`
 
-Returns complete history ordered by time.
+Returns history for **one** lead, ordered by time (newest first in implementation). **Row-level visibility** applies — **404** if the lead is not visible to the caller.
+
+### 8.2b Cross-lead activity search (visible leads only)
+
+`GET /api/v1/crm/leads/activities/filter`
+
+Same **RM/OP/manager/ADMIN** visibility as **`GET /api/v1/crm/leads/filter`**, with optional filters (`lead_id`, `activity_type`, `call_type_code`, `call_status_code`, `old_stage`, `new_stage`, `performed_by`, `performed_at_from` / `performed_at_to`, `mobile`, `lead_stage`, `lead_is_active`) and pagination. See **[`docs/70-crm-ui-integration-guide.md`](70-crm-ui-integration-guide.md) §6.1b**.
 
 ---
 
@@ -377,10 +371,11 @@ Implementation options:
 
 ## 11) Security and permissions
 
-- Caller update endpoint: `EMPLOYEE:WRITE` (or your CRM feature flag).
-- Timeline view: `EMPLOYEE:READ`.
-- Visibility filter must follow RM/OP/team logic already used in your project.
-- Keep actor identity (`performed_by`) from JWT subject.
+- **Call-update / followup-status:** `EMPLOYEE` + **`WRITE`**.
+- **Lead list, stages, ui-mappings, single lead, activities (per-lead and `/activities/filter`):** `EMPLOYEE` + **`READ`**.
+- **Admin direct edit:** `EMPLOYEE` + **`DELETE`** on route; handler allows **ADMIN** only.
+- **Visibility:** enforced in [`app/crm/crm_leads.py`](../app/crm/crm_leads.py) (`_build_crm_visibility`, `_fetch_crm_lead_visible`); unknown roles see **no** leads.
+- **Actor:** `performed_by` from JWT **`emp_id`** / **`sub`** when positive; otherwise **NULL** for ADMIN-style tokens without a numeric employee.
 
 ---
 
@@ -400,20 +395,21 @@ Implementation options:
 ## 13) UAT checklist
 
 1. First pitch + `CALL_BACK` moves to `FOLLOW_UP`, attempted increments, connected increments, followup required.
-2. First pitch + `SUBSCRIBED_COMPLETED` rejected.
+2. First pitch + `SEND_DOCS` moves to `PENDING_REGISTRATION_DATA` (no first-pitch call-update while already in that stage).
 3. Final pitch + `NOT_INTERESTED` rejected.
-4. `GST_REGISTRATION_DONE -> SCHEDULED_PAYMENTS -> SUBSCRIBED` works.
-5. Closed stage blocks further transitions.
+4. `GST_REGISTRATION_DONE -> SCHEDULED_PAYMENTS` via final pitch `SCHEDULED_PAYMENT`; `SUBSCRIBED` via **payment PAID** trigger (not `SUBSCRIBED_COMPLETED` on call-update).
+5. Closed stage blocks further call transitions.
 6. Approval event auto-moves stage to `GST_REGISTRATION_DONE`.
 7. Every call update writes one activity row with correct actor and timestamp.
+8. `GET /activities/filter` returns only activities for **visible** leads; `GET /filter` and activities filter stay consistent for RM/OP/manager.
 
 ---
 
-## 14) Recommended next files in your backend
+## 14) Backend module layout (as implemented)
 
-- New module: `app/crm/deals.py`
-- New schemas: `app/crm/schemas.py`
-- Reuse permissions helpers from `app/security/rbac.py`
-- Reuse visibility builders from `app/utils.py`
-- Include router in `app/main.py`
+- Router + handlers: [`app/crm/crm_leads.py`](../app/crm/crm_leads.py)
+- Pydantic models: [`app/crm/schemas.py`](../app/crm/schemas.py)
+- Permissions: [`app/security/rbac.py`](../app/security/rbac.py)
+- DB schema constant: [`app/utils.py`](../app/utils.py) (`DB_SCHEMA`)
+- App wiring: [`app/main.py`](../app/main.py) — `crm_leads_router`
 

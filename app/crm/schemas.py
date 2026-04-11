@@ -56,3 +56,36 @@ class CRMCallUpdateIn(CRMBaseSchema):
         if isinstance(v, str):
             return v.strip().upper()
         return v
+
+
+class CRMFollowupStatusUpdateIn(CRMBaseSchema):
+    follow_up_status: Literal["PENDING", "COMPLETED", "MISSED"]
+    followup_at: Optional[datetime] = None
+    remarks: Optional[str] = Field(default=None, max_length=2000)
+
+
+class CRMUIStagePitchItem(CRMBaseSchema):
+    stage: str
+    pitch_type_code: str
+    sort_order: int
+
+
+class CRMUIPitchStatusItem(CRMBaseSchema):
+    call_status_code: str
+    sort_order: int
+
+
+class CRMUIMappingsOut(CRMBaseSchema):
+    stage_to_pitch: list[CRMUIStagePitchItem]
+    pitch_to_statuses: dict[str, list[CRMUIPitchStatusItem]]
+
+
+class CRMLeadStageItem(CRMBaseSchema):
+    id: int
+    code: str
+    name: str
+    sort_order: int
+
+
+class CRMLeadStagesOut(CRMBaseSchema):
+    stages: list[CRMLeadStageItem]

@@ -1,9 +1,15 @@
 import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Depends, status
-from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+
+from app.follow_ups.schemas import (
+    CreateFilingFollowupRequest,
+    CreateFilingFollowupResponse,
+    UpdateFilingFollowupRequest,
+    UpdateFilingFollowupResponse,
+)
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_customer_service_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
@@ -12,41 +18,6 @@ router = APIRouter(
     prefix="/api/v1/filing-followups",
     tags=["GST Filing Followups"],
 )
-
-
-# --------------------------------------------------
-# SCHEMA
-# --------------------------------------------------
-
-
-class CreateFilingFollowupRequest(BaseModel):
-    customer_service_id: int
-    followup_at: datetime
-    remarks: Optional[str] = None
-    assigned_to: Optional[int] = Field(
-        None,
-        description="Ignored when JWT role is RM or OP; assigned_to is set to current emp_id.",
-    )
-
-
-class CreateFilingFollowupResponse(BaseModel):
-    id: int
-    message: str
-
-
-class UpdateFilingFollowupRequest(BaseModel):
-    followup_at: Optional[datetime] = None
-    remarks: Optional[str] = None
-    assigned_to: Optional[int] = Field(
-        None,
-        description="If JWT role is RM or OP, API sets assigned_to to current emp_id.",
-    )
-    status: Optional[str] = None  # PENDING / COMPLETED / CANCELLED
-
-
-class UpdateFilingFollowupResponse(BaseModel):
-    id: int
-    message: str
 
 
 @router.post(

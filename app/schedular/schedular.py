@@ -242,7 +242,7 @@ async def background_jobs():
             async with pool.acquire() as conn:
                 logging.info("Running background scheduler...")
 
-                # 1) Mark missed followups
+                # 1) Mark overdue pending followups as MISSED
                 result = await conn.execute(
                     f"""
                     UPDATE {DB_SCHEMA}.customer_service_followups
@@ -255,7 +255,50 @@ async def background_jobs():
                 )
                 logging.info("MISSED followups updated: %s", result)
 
-                # 2) Expire session tokens
+                # 2) Stamp missed_at for MISSED followups after 10 minutes
+                result = await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.customer_service_followups
+                    SET missed_at = NOW(),
+                        updated_at = NOW()
+                    WHERE status = 'MISSED'
+                      AND missed_at IS NULL
+                      AND followup_at <= (NOW() - INTERVAL '10 minutes')
+                      AND followup_at IS NOT NULL
+                    """
+                )
+                logging.info("MISSED followups stamped with missed_at: %s", result)
+
+                # 3) Mark overdue CRM lead followups as MISSED
+                result = await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.crm_leads
+                    SET follow_up_status = 'MISSED',
+                        updated_at = NOW()
+                    WHERE is_active = TRUE
+                      AND follow_up_status = 'PENDING'
+                      AND followup_at IS NOT NULL
+                      AND followup_at < NOW()
+                    """
+                )
+                logging.info("CRM leads marked MISSED by followup time: %s", result)
+
+                # 4) Stamp missed_at for MISSED CRM lead followups after 10 minutes
+                result = await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.crm_leads
+                    SET missed_at = NOW(),
+                        updated_at = NOW()
+                    WHERE is_active = TRUE
+                      AND follow_up_status = 'MISSED'
+                      AND missed_at IS NULL
+                      AND followup_at IS NOT NULL
+                      AND followup_at <= (NOW() - INTERVAL '10 minutes')
+                    """
+                )
+                logging.info("CRM leads stamped missed_at: %s", result)
+
+                # 5) Expire session tokens
                 await conn.execute(
                     f"""
                     UPDATE {DB_SCHEMA}.session_token
@@ -266,7 +309,7 @@ async def background_jobs():
                     """
                 )
 
-                # 3) GST return-detail: NOT_FILED -> MISSED when due date has passed
+                # 6) GST return-detail: NOT_FILED -> MISSED when due date has passed
                 overdue_status = await _mark_overdue_gst_return_statuses(conn)
                 _n = overdue_status.split()[-1] if overdue_status else "0"
                 if _n.isdigit() and int(_n) > 0:
@@ -275,7 +318,7 @@ async def background_jobs():
                         overdue_status,
                     )
 
-                # 4) Auto-generate next GST filing return detail rows
+                # 7) Auto-generate next GST filing return detail rows
                 generated = await _run_gst_filing_auto_generation(conn)
                 if generated:
                     logging.info("Auto generated gst filing return-detail rows: %s", generated)

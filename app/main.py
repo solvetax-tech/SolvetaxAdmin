@@ -97,7 +97,6 @@ from app.gst_registration.gst_blob import router as gst_blob
 from app.gst_registration.document_config import router as document_config
 from app.gst_registration.city_config import router as city_config_router
 from app.customer_registration.services import router as services
-from app.follow_ups.gst_reg_manual_followups import router as gst_reg_manual_followups
 from app.follow_ups.gst_filing_manual_followups import router as gst_filing_manual_followups
 from app.customer_registration.service_config import router as service_config
 from app.gst_registration_filing.gst_filing_config import router as gst_filing_config
@@ -151,8 +150,6 @@ if document_config:
     app.include_router(document_config)
 if city_config_router:
     app.include_router(city_config_router)
-if gst_reg_manual_followups:
-    app.include_router(gst_reg_manual_followups)
 if gst_filing_manual_followups:
     app.include_router(gst_filing_manual_followups)
 if services:
