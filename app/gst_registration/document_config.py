@@ -275,3 +275,157 @@ async def list_document_configs(
             status_code=500,
             detail="Internal server error.",
         )
+
+
+@router.get(
+    "/document-config-all",
+    summary="Filter Document Configurations",
+    responses={
+        200: {"description": "Document configs fetched successfully."},
+        400: {"description": "Validation failed."},
+        500: {"description": "Database or internal error."},
+    },
+)
+async def list_document_configs_without_offset(
+    id: Optional[int] = None,
+    registration: Optional[str] = None,
+    ownership_category: Optional[str] = None,
+    config_type: Optional[str] = None,
+    value: Optional[str] = None,
+    is_mandatory: Optional[bool] = None,
+    is_active: Optional[bool] = None,
+    include_inactive: bool = Query(False),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+
+    # --------------------------------------------------
+    # Request Context
+    # --------------------------------------------------
+
+    request_id = generate_uuid()
+    emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id},
+    )
+
+    log.info("Incoming document config filter | fetch_all=True")
+
+    # --------------------------------------------------
+    # DB Pool
+    # --------------------------------------------------
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
+    try:
+
+        conditions = []
+        values = []
+        param_index = 1
+
+        # --------------------------------------------------
+        # Exact Filters
+        # --------------------------------------------------
+
+        if id is not None:
+            conditions.append(f"id = ${param_index}")
+            values.append(id)
+            param_index += 1
+
+        if registration and registration.strip():
+            conditions.append(f"upper(registration) = ${param_index}")
+            values.append(registration.strip().upper())
+            param_index += 1
+
+        if ownership_category and ownership_category.strip():
+            conditions.append(f"upper(ownership_category) = ${param_index}")
+            values.append(ownership_category.strip().upper())
+            param_index += 1
+
+        if config_type and config_type.strip():
+            conditions.append(f"upper(config_type) = ${param_index}")
+            values.append(config_type.strip().upper())
+            param_index += 1
+
+        if value and value.strip():
+            conditions.append(f"upper(value) = ${param_index}")
+            values.append(value.strip().upper())
+            param_index += 1
+
+        if is_mandatory is not None:
+            conditions.append(f"is_mandatory = ${param_index}")
+            values.append(is_mandatory)
+            param_index += 1
+
+        # --------------------------------------------------
+        # Active Filtering Pattern
+        # --------------------------------------------------
+
+        if is_active is not None:
+            conditions.append(f"is_active = ${param_index}")
+            values.append(is_active)
+            param_index += 1
+        elif not include_inactive:
+            conditions.append("is_active = TRUE")
+
+        # --------------------------------------------------
+        # WHERE CLAUSE
+        # --------------------------------------------------
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        count_sql = f"""
+            SELECT COUNT(*)
+            FROM {DB_SCHEMA}.document_config
+            {where_clause}
+        """
+
+        data_sql = f"""
+            SELECT *
+            FROM {DB_SCHEMA}.document_config
+            {where_clause}
+            ORDER BY registration, ownership_category, sort_order, id
+        """
+
+        async with pool.acquire() as conn:
+
+            total = await conn.fetchval(count_sql, *values)
+
+            rows = await conn.fetch(data_sql, *values)
+
+        log.info(
+            "Document configs fetched successfully | returned=%s total=%s",
+            len(rows),
+            total,
+        )
+
+        return {
+            "data": [dict(r) for r in rows],
+            "total": total,
+            "request_id": request_id,
+        }
+
+    except asyncpg.PostgresError:
+        log.exception("Database error during document config filtering")
+        raise HTTPException(
+            status_code=500,
+            detail="Database error occurred.",
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        log.exception("Unexpected error during document config filtering")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+        )
