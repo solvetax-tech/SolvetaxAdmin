@@ -3,8 +3,12 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from datetime import datetime
-from app.gst_registration.schemas import GSTRegistrationIn, GSTRegistrationEditIn
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
+from app.gst_registration.schemas import (
+    GSTRegistrationIn,
+    GSTRegistrationEditIn,
+    CustomerSnapshotForGstOut,
+)
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility, build_customer_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
 from zoneinfo import ZoneInfo
@@ -803,6 +807,97 @@ async def list_gst_registrations(
             status_code=500,
             detail="Internal server error.",
         )
+
+
+# -------------------------------------------------------------------
+# CUSTOMER SNAPSHOT FOR GST (from customers.customer_id)
+# -------------------------------------------------------------------
+@router.get(
+    "/customer/{customer_id}/fields",
+    response_model=CustomerSnapshotForGstOut,
+    summary="Get customer fields for GST registration",
+    responses={
+        200: {"description": "Customer fields returned."},
+        400: {"description": "Customer inactive."},
+        404: {"description": "Customer not found or not visible for current user."},
+        500: {"description": "Database or internal error."},
+    },
+)
+async def get_customer_fields_for_gst(
+    customer_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    Returns `business_name`, `business_type`, `state`, `op_id`, `rm_id`, `mobile`
+    from `customers` where `customers.customer_id` = `customer_id`.
+    Visibility matches customer list (RM/OP/manager scoping).
+    """
+    request_id = str(uuid.uuid4())
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else ""
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "get_customer_fields_for_gst"},
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    vis_sql, vis_vals, _next_idx = build_customer_visibility(role_norm, emp_id, 2, DB_SCHEMA)
+    values = [customer_id]
+    where_extra = ""
+    if vis_sql:
+        where_extra = f" AND ({vis_sql})"
+        values.extend(vis_vals)
+
+    sql = f"""
+        SELECT c.customer_id,
+               c.business_name,
+               c.business_type,
+               c.state,
+               c.op_id,
+               c.rm_id,
+               c.mobile,
+               c.is_active
+        FROM {DB_SCHEMA}.customers c
+        WHERE c.customer_id = $1
+        {where_extra}
+        LIMIT 1
+    """
+
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(sql, *values)
+    except asyncpg.PostgresError:
+        log.exception("Database error fetching customer snapshot for GST")
+        raise HTTPException(status_code=500, detail="Database error.")
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found or not accessible.",
+        )
+
+    if not row["is_active"]:
+        raise HTTPException(status_code=400, detail="Customer is inactive.")
+
+    return CustomerSnapshotForGstOut(
+        customer_id=row["customer_id"],
+        business_name=row["business_name"],
+        business_type=row["business_type"],
+        state=row["state"],
+        op_id=row["op_id"],
+        rm_id=row["rm_id"],
+        mobile=row["mobile"],
+    )
+
+
 # -------------------------------------------------------------------
 # EDIT GST REGISTRATION (Enterprise Production + Version Audit)
 # -------------------------------------------------------------------

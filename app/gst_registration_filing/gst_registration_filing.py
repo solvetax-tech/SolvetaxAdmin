@@ -824,12 +824,14 @@ async def create_gst_filing(
                         await conn.execute(
                             f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                                 gst_filing_id,
+                                filing_frequency,
                                 gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                                 gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
                                 is_auto_generated, next_auto_generate_at
                             )
-                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
                             filing_id,
+                            "YEARLY",
                             None,
                             None,
                             "NOT_FILED",
@@ -854,12 +856,14 @@ async def create_gst_filing(
                         await conn.execute(
                             f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                                 gst_filing_id,
+                                filing_frequency,
                                 gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                                 gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
                                 is_auto_generated, next_auto_generate_at
                             )
-                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
                             filing_id,
+                            "YEARLY",
                             None,
                             None,
                             None,
@@ -896,12 +900,14 @@ async def create_gst_filing(
                     await conn.execute(
                         f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                             gst_filing_id,
+                            filing_frequency,
                             gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                             gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
                             is_auto_generated, next_auto_generate_at
                         )
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
                         filing_id,
+                        filing_frequency,
                         "NOT_FILED",
                         "NOT_FILED",
                         None,
@@ -931,12 +937,14 @@ async def create_gst_filing(
                     await conn.execute(
                         f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                             gst_filing_id,
+                            filing_frequency,
                             gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                             gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
                             is_auto_generated, next_auto_generate_at
                         )
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
                         filing_id,
+                        "YEARLY",
                         None,
                         None,
                         "NOT_FILED",
@@ -963,12 +971,14 @@ async def create_gst_filing(
                     await conn.execute(
                         f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                             gst_filing_id,
+                            filing_frequency,
                             gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                             gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
                             is_auto_generated, next_auto_generate_at
                         )
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
                         filing_id,
+                        "QUARTERLY",
                         None,
                         None,
                         None,
@@ -994,12 +1004,14 @@ async def create_gst_filing(
                     await conn.execute(
                         f"""INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                             gst_filing_id,
+                            filing_frequency,
                             gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                             gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
                             is_auto_generated, next_auto_generate_at
                         )
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
                         filing_id,
+                        "YEARLY",
                         None,
                         None,
                         None,
@@ -1354,15 +1366,17 @@ async def update_gst_filing(
                                 f"""
                                 INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                                     gst_filing_id,
+                                    filing_frequency,
                                     gstr1_status, gstr3b_status, gstr9_status, gstr9c_status,
                                     cmp08_status, gstr4_status,
                                     gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date,
                                     cmp08_due_date, gstr4_due_date,
                                     is_auto_generated, next_auto_generate_at
                                 )
-                                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                                 """,
                                 filing_id,
+                                filing_frequency,
                                 "NOT_FILED",
                                 "NOT_FILED",
                                 None,
@@ -1395,15 +1409,17 @@ async def update_gst_filing(
                             f"""
                             INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                                 gst_filing_id,
+                                filing_frequency,
                                 gstr1_status, gstr3b_status, gstr9_status, gstr9c_status,
                                 cmp08_status, gstr4_status,
                                 gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date,
                                 cmp08_due_date, gstr4_due_date,
                                 is_auto_generated, next_auto_generate_at
                             )
-                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                             """,
                             filing_id,
+                            "YEARLY",
                             None,
                             None,
                             "NOT_FILED",
@@ -1431,15 +1447,17 @@ async def update_gst_filing(
                             f"""
                             INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                                 gst_filing_id,
+                                filing_frequency,
                                 gstr1_status, gstr3b_status, gstr9_status, gstr9c_status,
                                 cmp08_status, gstr4_status,
                                 gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date,
                                 cmp08_due_date, gstr4_due_date,
                                 is_auto_generated, next_auto_generate_at
                             )
-                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                             """,
                             filing_id,
+                            "QUARTERLY",
                             None,
                             None,
                             None,
@@ -1466,15 +1484,17 @@ async def update_gst_filing(
                             f"""
                             INSERT INTO {DB_SCHEMA}.gst_filing_return_details (
                                 gst_filing_id,
+                                filing_frequency,
                                 gstr1_status, gstr3b_status, gstr9_status, gstr9c_status,
                                 cmp08_status, gstr4_status,
                                 gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date,
                                 cmp08_due_date, gstr4_due_date,
                                 is_auto_generated, next_auto_generate_at
                             )
-                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                             """,
                             filing_id,
+                            "YEARLY",
                             None,
                             None,
                             None,
@@ -2042,6 +2062,18 @@ async def update_return_statuses(
                         payload.is_active,
                     )
 
+                if payload.filing_frequency is not None:
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.gst_filing_return_details
+                        SET filing_frequency = $2,
+                            updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        filing_id,
+                        payload.filing_frequency,
+                    )
+
                 # 3️⃣ Build status updates only for provided fields
                 status_fields = {
                     "gstr1_status": payload.gstr1_status,
@@ -2119,6 +2151,8 @@ async def update_return_statuses(
                     k for k, v in status_fields.items()
                     if v is not None
                 ]
+                if payload.filing_frequency is not None:
+                    updated_fields.append("filing_frequency")
                 active_rows = sum(1 for r in rows if r["is_active"])
 
                 return {

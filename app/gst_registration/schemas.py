@@ -29,6 +29,21 @@ class GSTConfigOut(BaseModel):
     display_name: str
     sort_order: int
 
+
+class CustomerSnapshotForGstOut(BaseModel):
+    """Customer fields from `customers` for GST registration flows (`customers.customer_id`)."""
+
+    customer_id: int
+    business_name: Optional[str] = None
+    business_type: Optional[str] = None
+    state: Optional[str] = None
+    op_id: Optional[int] = None
+    rm_id: Optional[int] = None
+    mobile: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
 class GSTRegistrationIn(BaseModel):
 
     # ----------------------------

@@ -485,6 +485,20 @@ class GSTReturnStatusUpdateIn(BaseSchema):
     cmp08_status: Optional[Literal["FILED", "NOT_FILED"]] = None
     gstr4_status: Optional[Literal["FILED", "NOT_FILED"]] = None
     is_active: Optional[bool] = None
+    filing_frequency: Optional[Literal["MONTHLY", "QUARTERLY", "YEARLY"]] = Field(
+        None,
+        description="Cadence for this return-detail row (`gst_filing_return_details.filing_frequency`).",
+    )
+
+    @field_validator("filing_frequency", mode="before")
+    @classmethod
+    def normalize_filing_frequency(cls, v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            u = v.strip().upper()
+            return u if u else None
+        return v
 
     @model_validator(mode="after")
     def validate_at_least_one(self):
@@ -496,8 +510,11 @@ class GSTReturnStatusUpdateIn(BaseSchema):
             self.cmp08_status,
             self.gstr4_status,
             self.is_active is not None,
+            self.filing_frequency is not None,
         ]):
-            raise ValueError("At least one status or is_active must be provided")
+            raise ValueError(
+                "At least one status, is_active, or filing_frequency must be provided"
+            )
 
         return self
 
