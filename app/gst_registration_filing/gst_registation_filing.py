@@ -224,6 +224,7 @@ async def filter_gst_filings(
     is_upcoming: Optional[bool] = None,
     is_auto_enabled: Optional[bool] = None,
     is_auto_generated: Optional[bool] = None,
+    include_details: bool = Query(True),
 
     # PAGINATION
     limit: int = Query(20, ge=1, le=100),
@@ -427,15 +428,24 @@ async def filter_gst_filings(
         # ----------------------------
         # FINAL QUERY
         # ----------------------------
-        query = f"""
-            SELECT f.*, d.*
-            FROM {DB_SCHEMA}.gst_filings f
-            LEFT JOIN {DB_SCHEMA}.gst_filing_return_details d
-                ON d.gst_filing_id = f.id
-            {where_clause}
-            ORDER BY f.created_at DESC
-            LIMIT ${idx} OFFSET ${idx+1}
-        """
+        if include_details:
+            query = f"""
+                SELECT f.*, d.*
+                FROM {DB_SCHEMA}.gst_filings f
+                LEFT JOIN {DB_SCHEMA}.gst_filing_return_details d
+                    ON d.gst_filing_id = f.id
+                {where_clause}
+                ORDER BY f.created_at DESC
+                LIMIT ${idx} OFFSET ${idx+1}
+            """
+        else:
+            query = f"""
+                SELECT f.*
+                FROM {DB_SCHEMA}.gst_filings f
+                {where_clause}
+                ORDER BY f.created_at DESC
+                LIMIT ${idx} OFFSET ${idx+1}
+            """
 
         values += [limit, offset]
 
