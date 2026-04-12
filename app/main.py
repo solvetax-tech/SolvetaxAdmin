@@ -103,7 +103,7 @@ from app.gst_registration_filing.gst_filing_config import router as gst_filing_c
 from app.gst_registration_filing.gst_registration_filing import router as gst_registration_filing
 from app.gst_registration_filing.gst_filing_document import router as gst_filing_document_router
 from app.crm.crm_leads import router as crm_leads_router
-from app.gst_registration_filing.gst_filing_rule_engine import router as gst_filing_rule_engine
+from app.gst_registration_filing.gst_filing_rule_engine import router as gst_filing_rule_engine_router
 
 
 if email_verification:
@@ -160,7 +160,6 @@ if crm_leads_router:
     app.include_router(crm_leads_router)
 if gst_filing_rule_engine_router:
     app.include_router(gst_filing_rule_engine_router)
-
 
 @app.get("/health")
 async def health_check():
