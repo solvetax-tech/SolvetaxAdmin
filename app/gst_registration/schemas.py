@@ -6,7 +6,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from typing import Any, Optional, Annotated, Literal, List
+from typing import Optional, Annotated, Literal, List
 from datetime import datetime
 import html
 
@@ -47,10 +47,13 @@ class GSTRegistrationIn(BaseModel):
     ] = None
 
     # ----------------------------
-    # Business (business_name comes from customers on create; editable on update)
+    # Business
     # ----------------------------
+    business_name: Annotated[str, Field(..., max_length=200)]
     registration_type: Annotated[str, Field(..., max_length=50)]
     ownership_category: Annotated[str, Field(..., max_length=100)]
+    business_type: Optional[str] = Field(None, max_length=100)
+    state: Annotated[str, Field(..., max_length=100)]
     turnover_details: Annotated[str, Field(..., max_length=50)]
 
     # ----------------------------
@@ -67,14 +70,29 @@ class GSTRegistrationIn(BaseModel):
     cancellation_reason: Optional[str] = Field(None, max_length=255)
 
     # ----------------------------
+    # Assignment
+    # ----------------------------
+    rm_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Relationship manager emp_id. Omitted + JWT role RM → API sets to current emp_id. Otherwise required if not RM.",
+    )
+    created_by: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Ignored on create; API sets gst_registration.created_by to current emp_id only when JWT role is OP.",
+    )
+
+    # ----------------------------
     # Flags
     # ----------------------------
     is_filing_needed: bool = True
     is_rcm_applicable: bool = False
 
     # ----------------------------
-    # Contact (mobile comes from customers on create; editable on update via GSTRegistrationEditIn)
+    # Contact
     # ----------------------------
+    mobile: Annotated[str, Field(pattern=r"^\d{10}$")]
     email: Annotated[EmailStr, Field(..., max_length=150)]
     secondary_email: Optional[Annotated[EmailStr, Field(None, max_length=150)]]
 
@@ -106,9 +124,21 @@ class GSTRegistrationIn(BaseModel):
             return html.escape(v.strip().lower())
         return v
 
+    @field_validator("business_name", mode="before")
+    @classmethod
+    def normalize_business_name(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v
+        return v
+
     @field_validator(
         "registration_type",
         "ownership_category",
+        "business_type",
+        "state",
         "turnover_details",
         mode="before",
     )
@@ -126,6 +156,13 @@ class GSTRegistrationIn(BaseModel):
     def normalize_email(cls, v):
         if v:
             return v.strip().lower()
+        return v
+
+    @field_validator("mobile", mode="before")
+    @classmethod
+    def normalize_mobile(cls, v):
+        if v:
+            return v.strip()
         return v
 
     @field_validator("filing_preference", mode="before")
@@ -156,8 +193,6 @@ class GSTRegistrationIn(BaseModel):
             )
 
         return self
-
-
 class GSTRegistrationEditIn(BaseModel):
 
     business_name: Optional[str] = Field(None, max_length=200)
@@ -200,11 +235,6 @@ class GSTRegistrationEditIn(BaseModel):
     secondary_email: Optional[EmailStr] = None
 
     rm_id: Optional[int] = Field(None, gt=0)
-    op_id: Optional[int] = Field(
-        None,
-        gt=0,
-        description="Same as created_by on gst_registration (DB has no op_id column).",
-    )
     created_by: Optional[int] = Field(None, gt=0)
 
     # =====================================================
@@ -329,14 +359,6 @@ class GSTRegistrationOut(BaseSchema):
     secondary_email: Optional[EmailStr]
     created_by: Optional[int]
     rm_id: Optional[int]
-    op_id: Optional[int] = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def mirror_op_id_from_created_by(cls, data: Any):
-        if isinstance(data, dict) and data.get("op_id") is None and data.get("created_by") is not None:
-            return {**data, "op_id": data["created_by"]}
-        return data
     rm_name: Optional[str] = None
     approved_at: Optional[datetime]
     created_at: datetime
