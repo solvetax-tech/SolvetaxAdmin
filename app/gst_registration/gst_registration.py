@@ -132,15 +132,7 @@ async def create_gst_registration(
     request_id = str(uuid.uuid4())
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
-    role_norm = str(role).strip().upper() if role is not None else ""
-
-    # Assignment: mirror customer create — RM defaults rm_id; created_by = current emp_id only when role is OP.
-    rm_id = payload.rm_id
-    if role_norm == "RM" and rm_id is None:
-        rm_id = emp_id
-    created_by_val = emp_id if role_norm == "OP" else None
-    op_id_for_service = emp_id if role_norm == "OP" else None
+    role_norm = str(current_user.get("role") or "").strip().upper()
 
     log = logging.LoggerAdapter(
         logger,
@@ -162,7 +154,16 @@ async def create_gst_registration(
 
                 customer_row = await conn.fetchrow(
                     f"""
-                    SELECT customer_id, is_active
+                    SELECT
+                        customer_id,
+                        is_active,
+                        mobile,
+                        business_name,
+                        full_name,
+                        business_type,
+                        state,
+                        rm_id,
+                        op_id
                     FROM {DB_SCHEMA}.customers
                     WHERE customer_id = $1
                     LIMIT 1
@@ -176,6 +177,66 @@ async def create_gst_registration(
                 if not customer_row["is_active"]:
                     raise HTTPException(400, "Customer is inactive.")
 
+                mobile_raw = (customer_row["mobile"] or "").strip()
+                if not mobile_raw or not re.fullmatch(r"[0-9]{10}", mobile_raw):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Customer mobile is missing or not a 10-digit number; "
+                            "update the customer record before creating GST registration."
+                        ),
+                    )
+                mobile_value = mobile_raw
+
+                business_name_val = (customer_row["business_name"] or "").strip()
+                if not business_name_val:
+                    business_name_val = (customer_row["full_name"] or "").strip()
+                if not business_name_val:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Customer has no business_name or full_name; "
+                            "update the customer record before creating GST registration."
+                        ),
+                    )
+                if len(business_name_val) > 200:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Customer business name exceeds 200 characters after trim.",
+                    )
+
+                bt = customer_row["business_type"]
+                if isinstance(bt, str):
+                    bt = bt.strip() or None
+                    business_type_val = bt.upper() if bt else None
+                else:
+                    business_type_val = None
+
+                st = customer_row["state"]
+                if isinstance(st, str):
+                    st = st.strip() or None
+                    state_val = st.upper() if st else None
+                else:
+                    state_val = None
+
+                # Prefer customer.rm_id; RM creating may default to self when customer has none.
+                rm_id = customer_row["rm_id"]
+                if rm_id is None and role_norm == "RM" and emp_id:
+                    rm_id = emp_id
+                if rm_id is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Customer has no assigned RM; set rm_id on the customer "
+                            "or create the registration while signed in as that RM."
+                        ),
+                    )
+
+                # gst_registration has created_by only (no op_id column): assigned OP from customer.
+                created_by_val = customer_row["op_id"]
+                if created_by_val is None and role_norm == "OP" and emp_id:
+                    created_by_val = emp_id
+
                 # --------------------------------------------------
                 # Pre-validation (format + duplicates)
                 # --------------------------------------------------
@@ -183,7 +244,6 @@ async def create_gst_registration(
 
                 gstin_value = payload.gstin.strip().upper() if payload.gstin else None
                 pan_value = payload.pan.strip().upper() if payload.pan else None
-                mobile_value = payload.mobile.strip() if payload.mobile else None
                 username_value = payload.username.strip() if payload.username else None
                 secondary_email_value = payload.secondary_email.strip().lower() if payload.secondary_email else None
 
@@ -268,12 +328,6 @@ async def create_gst_registration(
                         },
                     )
 
-                if rm_id is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="rm_id is required (or sign in as RM to default rm_id to yourself).",
-                    )
-
                 # --------------------------------------------------
                 # INSERT GST
                 # --------------------------------------------------
@@ -320,11 +374,11 @@ async def create_gst_registration(
                     payload.password,
                     pan_value,
                     gstin_value,
-                    payload.business_name,
+                    business_name_val,
                     payload.registration_type,
                     payload.ownership_category,
-                    payload.business_type,
-                    payload.state,
+                    business_type_val,
+                    state_val,
                     payload.turnover_details,
                     payload.registration_status,
                     payload.suspension_reason,
@@ -367,7 +421,7 @@ async def create_gst_registration(
                     1,  # 🔥 FIXED SERVICE_ID
                     "PENDING",
                     rm_id,
-                    op_id_for_service,
+                    created_by_val,
                     "GST_REGISTRATION",
                     gst_row["id"],
                     now,
@@ -875,6 +929,10 @@ async def edit_gst_registration(
         return v
 
     update_data = {k: normalize(k, v) for k, v in update_data.items()}
+
+    # DB column is created_by; API may send op_id as the same field.
+    if "op_id" in update_data:
+        update_data["created_by"] = update_data.pop("op_id")
 
     # --------------------------------------------------
     # DB Pool

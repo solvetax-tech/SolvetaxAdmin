@@ -1,3 +1,5 @@
+# MISSING THE TWO TRIIGERS INTO CRM ACTIVITIES for lead in any stage that into gst_registration_done or subscribed, but stages are updating perfectly.
+
 import logging
 from datetime import datetime
 from typing import Optional
@@ -23,6 +25,14 @@ from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
 router = APIRouter(prefix="/api/v1/crm/leads", tags=["CRM Leads"])
 
 IST = ZoneInfo("Asia/Kolkata")
+
+# last_dailed_at / last_connected_at on crm_leads and crm_activities are updated only in
+# _crm_apply_call_update (logged calls). System-driven stage changes (e.g. payment trigger →
+# SUBSCRIBED, or other non-call paths) must not touch those columns.
+# If Postgres has a BEFORE trigger that sets them when stage becomes GST_REGISTRATION_DONE or
+# SUBSCRIBED, remove it, e.g.:
+#   DROP TRIGGER IF EXISTS trg_crm_leads_milestone_dial_timestamps ON solvetax.crm_leads;
+#   DROP FUNCTION IF EXISTS solvetax.fn_crm_leads_touch_dial_on_milestone_stage();
 
 DEFAULT_CRM_ENTITY_TYPE = "GST_REGISTRATION"
 
@@ -65,6 +75,7 @@ FIRST_PITCH_STATUSES_FALLBACK = frozenset(
         "CALL_NOT_ANSWERED",
         "CALL_NOT_CONNECTED",
         "CALL_BUSY",
+        "CALL_DONE",
         "CALL_BACK",
         "CONNECTED_AND_SCHEDULED",
         "SEND_DOCS",
@@ -76,13 +87,33 @@ FINAL_PITCH_STATUSES_FALLBACK = frozenset(
         "CALL_NOT_ANSWERED",
         "CALL_NOT_CONNECTED",
         "CALL_BUSY",
+        "CALL_DONE",
         "CALL_BACK",
         "SCHEDULED_PAYMENT",
+        "NOT_INTERESTED",
     }
 )
 
-FIRST_PITCH_CONNECTED = {"CONNECTED_AND_SCHEDULED", "CALL_BACK"}
-FINAL_PITCH_CONNECTED = {"SCHEDULED_PAYMENT", "CALL_BACK"}
+# FIRST_PITCH_CALL / FINAL_PITCH_CALL: no CRM stage change (CALL_DONE still counts as connected below).
+_STATUSES_NO_STAGE_CHANGE = frozenset(
+    {"CALL_NOT_ANSWERED", "CALL_NOT_CONNECTED", "CALL_BUSY", "CALL_DONE"}
+)
+
+# CONNECTED_AND_SCHEDULED only applies within this funnel (not e.g. PENDING_REGISTRATION_DATA).
+_FIRST_PITCH_CONNECTED_STAGES = frozenset(
+    {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}
+)
+
+# FIRST_PITCH_CALL: connected only when outcome implies contact (not no-answer/busy).
+FIRST_PITCH_CONNECTED = {
+    "CALL_BACK",
+    "CONNECTED_AND_SCHEDULED",
+    "SEND_DOCS",
+    "NOT_INTERESTED",
+    "CALL_DONE",
+}
+# FINAL_PITCH_CALL: NOT_INTERESTED does not increment connected (first pitch only).
+FINAL_PITCH_CONNECTED = {"SCHEDULED_PAYMENT", "CALL_BACK", "CALL_DONE"}
 FOLLOWUP_STATUSES = {"PENDING", "COMPLETED", "MISSED"}
 
 def _normalize_code(value: str) -> str:
@@ -203,39 +234,82 @@ async def _fetch_valid_stage_codes(
     return set(ALL_STAGES)
 
 
-def _transition_stage(call_type_code: str, call_status_code: str) -> Optional[str]:
-    if call_type_code == "FIRST_PITCH_CALL":
-        if call_status_code == "SEND_DOCS":
-            return "PENDING_REGISTRATION_DATA"
-        if call_status_code in {"CALL_BUSY", "CALL_BACK"}:
-            return "FOLLOW_UP"
-        if call_status_code == "CONNECTED_AND_SCHEDULED":
-            return "INTERESTED"
-        if call_status_code == "NOT_INTERESTED":
-            return "NOT_INTERESTED"
-        if call_status_code in {"CALL_NOT_ANSWERED", "CALL_NOT_CONNECTED"}:
-            return None
-        raise _validation_error(
-            "Invalid status for first pitch.",
-            {"call_status_code": f"{call_status_code} is not allowed in FIRST_PITCH_CALL."},
-        )
+def _transition_stage(current_stage: str, call_type_code: str, call_status_code: str) -> Optional[str]:
+    """
+    Map call outcome to the next CRM stage.
 
-    if call_type_code == "FINAL_PITCH_CALL":
-        if call_status_code == "SCHEDULED_PAYMENT":
-            return "SCHEDULED_PAYMENTS"
-        if call_status_code == "NOT_INTERESTED":
+    Returns a stage string to set, or None to leave the lead in ``current_stage``.
+
+    First-pitch style stages (FRESH_LEAD / FOLLOW_UP / INTERESTED):
+    - CALL_NOT_ANSWERED, CALL_NOT_CONNECTED, CALL_BUSY, CALL_DONE → no stage change
+    - CALL_BACK → FOLLOW_UP (already FOLLOW_UP → no stage change)
+    - CONNECTED_AND_SCHEDULED → INTERESTED from FRESH_LEAD or FOLLOW_UP; no change when already INTERESTED
+    - SEND_DOCS → PENDING_REGISTRATION_DATA from FRESH_LEAD, FOLLOW_UP, or INTERESTED
+    - NOT_INTERESTED → NOT_INTERESTED from FRESH_LEAD, FOLLOW_UP, or INTERESTED (and other allowed contexts)
+
+    GST_REGISTRATION_DONE (final pitch):
+    - CALL_NOT_ANSWERED, CALL_NOT_CONNECTED, CALL_BUSY, CALL_DONE → no stage change
+    - SCHEDULED_PAYMENT → SCHEDULED_PAYMENTS
+    """
+    if call_status_code in _STATUSES_NO_STAGE_CHANGE:
+        return None
+
+    if call_status_code == "CALL_BACK":
+        if current_stage == "FOLLOW_UP":
+            return None
+        return "FOLLOW_UP"
+
+    if call_status_code == "CONNECTED_AND_SCHEDULED":
+        if current_stage not in _FIRST_PITCH_CONNECTED_STAGES:
             raise _validation_error(
-                "Invalid status for final pitch.",
-                {"call_status_code": "NOT_INTERESTED is not allowed in FINAL_PITCH_CALL."},
+                "Invalid stage for CONNECTED_AND_SCHEDULED.",
+                {
+                    "stage": (
+                        f"CONNECTED_AND_SCHEDULED applies only from FRESH_LEAD, FOLLOW_UP, or INTERESTED; "
+                        f"current is {current_stage}."
+                    )
+                },
             )
-        if call_status_code in {"CALL_NOT_ANSWERED", "CALL_NOT_CONNECTED", "CALL_BUSY", "CALL_BACK"}:
+        if current_stage == "INTERESTED":
             return None
+        # FRESH_LEAD or FOLLOW_UP → advance to INTERESTED
+        return "INTERESTED"
+
+    if call_status_code == "NOT_INTERESTED":
+        return "NOT_INTERESTED"
+
+    if call_status_code == "SEND_DOCS":
+        if current_stage in {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}:
+            return "PENDING_REGISTRATION_DATA"
         raise _validation_error(
-            "Invalid status for final pitch.",
-            {"call_status_code": f"{call_status_code} is not allowed in FINAL_PITCH_CALL."},
+            "Invalid stage for SEND_DOCS.",
+            {
+                "stage": (
+                    f"SEND_DOCS applies only from FRESH_LEAD, FOLLOW_UP, or INTERESTED; "
+                    f"current is {current_stage}."
+                )
+            },
         )
 
-    raise _validation_error("Unsupported call type.", {"call_type_code": call_type_code})
+    if call_status_code == "SCHEDULED_PAYMENT":
+        if current_stage == "GST_REGISTRATION_DONE":
+            return "SCHEDULED_PAYMENTS"
+        raise _validation_error(
+            "Invalid stage for SCHEDULED_PAYMENT.",
+            {
+                "stage": (
+                    f"SCHEDULED_PAYMENT applies only from GST_REGISTRATION_DONE; "
+                    f"current is {current_stage}."
+                )
+            },
+        )
+
+    raise _validation_error(
+        "Invalid status for call type.",
+        {
+            "call_status_code": f"{call_status_code} is not allowed for {call_type_code}.",
+        },
+    )
 
 
 async def _validate_call_config(
@@ -455,6 +529,7 @@ async def _crm_apply_call_update(
     payload: CRMCallUpdateIn,
     log: logging.LoggerAdapter,
 ) -> dict:
+    """Apply call outcome: updates crm_leads + inserts crm_activities with dial/contact timestamps."""
     call_type_code = _normalize_code(payload.call_type_code)
     call_status_code = _normalize_code(payload.call_status_code)
 
@@ -480,7 +555,7 @@ async def _crm_apply_call_update(
     if call_status_code in {"CALL_BACK", "SCHEDULED_PAYMENT"} and payload.followup_at is None:
         raise _validation_error("followup_at is required.", {"followup_at": f"Required for {call_status_code}."})
 
-    target_stage = _transition_stage(call_type_code, call_status_code)
+    target_stage = _transition_stage(current_stage, call_type_code, call_status_code)
     connected_inc = int(
         (call_type_code == "FIRST_PITCH_CALL" and call_status_code in FIRST_PITCH_CONNECTED)
         or (call_type_code == "FINAL_PITCH_CALL" and call_status_code in FINAL_PITCH_CONNECTED)
@@ -519,9 +594,16 @@ async def _crm_apply_call_update(
         f"""
         INSERT INTO {DB_SCHEMA}.crm_activities (
             lead_id, activity_type, call_type_code, call_status_code,
-            old_stage, new_stage, followup_at, remarks, performed_by, performed_at, created_at
+            old_stage, new_stage, followup_at, remarks, performed_by,
+            last_dailed_at, last_connected_at,
+            performed_at, created_at
         )
-        VALUES ($1, 'CALL', $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+        VALUES (
+            $1, 'CALL', $2, $3, $4, $5, $6, $7, $8,
+            NOW(),
+            CASE WHEN $9 = 1 THEN NOW() ELSE NULL END,
+            NOW(), NOW()
+        )
         RETURNING id
         """,
         lead_id,
@@ -532,6 +614,7 @@ async def _crm_apply_call_update(
         payload.followup_at,
         payload.remarks,
         _performed_by_emp_id(emp_id),
+        connected_inc,
     )
 
     log.info(
@@ -638,7 +721,7 @@ async def _crm_apply_followup_status(
 
 
 @router.get("/ui-mappings", summary="CRM stage/pitch and pitch/status mappings for UI")
-async def get_crm_ui_mappings(
+async def get_crm_stage_pitch_mappings(
     entity_type: Optional[str] = Query(
         None,
         description="Requested CRM scope; defaults to GST_REGISTRATION. Rows with NULL entity_type apply to all types; a type-specific row overrides the global row for the same stage/pitch or pitch/status.",
@@ -1150,6 +1233,182 @@ async def edit_crm_lead(
         raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
     except asyncpg.PostgresError:
         logger.exception("Database error while editing CRM lead")
+        raise HTTPException(status_code=500, detail="Database error.")
+
+
+@router.get(
+    "/{lead_id:int}/activities/calls",
+    summary="Call log for a lead (dial/connect timestamps + outcome + stage at time of call)",
+)
+async def list_crm_lead_call_activities(
+    lead_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """CALL rows only: last_dailed_at, last_connected_at, call_status_code, call_type_code, old/new stage."""
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+            if not lead:
+                raise HTTPException(status_code=404, detail="CRM lead not found.")
+
+            sql_calls_with_ts = f"""
+                SELECT
+                    a.id,
+                    a.lead_id,
+                    a.activity_type,
+                    a.call_type_code,
+                    a.call_status_code,
+                    a.old_stage,
+                    a.new_stage,
+                    a.followup_at,
+                    a.remarks,
+                    a.performed_by,
+                    e.first_name AS performed_by_first_name,
+                    a.performed_at,
+                    a.created_at,
+                    a.last_dailed_at,
+                    a.last_connected_at
+                FROM {DB_SCHEMA}.crm_activities a
+                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = a.performed_by
+                WHERE a.lead_id = $1
+                  AND a.activity_type = 'CALL'
+                ORDER BY a.performed_at DESC, a.id DESC
+                LIMIT $2 OFFSET $3
+                """
+            sql_calls_no_ts = f"""
+                SELECT
+                    a.id,
+                    a.lead_id,
+                    a.activity_type,
+                    a.call_type_code,
+                    a.call_status_code,
+                    a.old_stage,
+                    a.new_stage,
+                    a.followup_at,
+                    a.remarks,
+                    a.performed_by,
+                    e.first_name AS performed_by_first_name,
+                    a.performed_at,
+                    a.created_at
+                FROM {DB_SCHEMA}.crm_activities a
+                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = a.performed_by
+                WHERE a.lead_id = $1
+                  AND a.activity_type = 'CALL'
+                ORDER BY a.performed_at DESC, a.id DESC
+                LIMIT $2 OFFSET $3
+                """
+            try:
+                rows = await conn.fetch(sql_calls_with_ts, lead_id, limit, offset)
+            except asyncpg.UndefinedColumnError:
+                rows = await conn.fetch(sql_calls_no_ts, lead_id, limit, offset)
+                rows = [
+                    {**dict(r), "last_dailed_at": None, "last_connected_at": None}
+                    for r in rows
+                ]
+            else:
+                rows = [dict(r) for r in rows]
+
+            return {
+                "lead_id": lead_id,
+                "items": rows,
+                "limit": limit,
+                "offset": offset,
+            }
+    except asyncpg.PostgresError:
+        logger.exception("Database error while fetching CRM call activities")
+        raise HTTPException(status_code=500, detail="Database error.")
+
+
+@router.get(
+    "/{lead_id:int}/activities/stage-history",
+    summary="Stage change timeline for a lead (from activities)",
+)
+async def list_crm_lead_stage_activity_history(
+    lead_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """Rows where old_stage and new_stage differ (calls that moved stage, SYSTEM moves, etc.)."""
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+            if not lead:
+                raise HTTPException(status_code=404, detail="CRM lead not found.")
+
+            sql_stage_with_ts = f"""
+                SELECT
+                    a.id,
+                    a.lead_id,
+                    a.activity_type,
+                    a.call_type_code,
+                    a.call_status_code,
+                    a.old_stage,
+                    a.new_stage,
+                    a.followup_at,
+                    a.remarks,
+                    a.performed_by,
+                    e.first_name AS performed_by_first_name,
+                    a.performed_at,
+                    a.created_at,
+                    a.last_dailed_at,
+                    a.last_connected_at
+                FROM {DB_SCHEMA}.crm_activities a
+                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = a.performed_by
+                WHERE a.lead_id = $1
+                  AND a.old_stage IS DISTINCT FROM a.new_stage
+                ORDER BY a.performed_at DESC, a.id DESC
+                LIMIT $2 OFFSET $3
+                """
+            sql_stage_no_ts = f"""
+                SELECT
+                    a.id,
+                    a.lead_id,
+                    a.activity_type,
+                    a.call_type_code,
+                    a.call_status_code,
+                    a.old_stage,
+                    a.new_stage,
+                    a.followup_at,
+                    a.remarks,
+                    a.performed_by,
+                    e.first_name AS performed_by_first_name,
+                    a.performed_at,
+                    a.created_at
+                FROM {DB_SCHEMA}.crm_activities a
+                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = a.performed_by
+                WHERE a.lead_id = $1
+                  AND a.old_stage IS DISTINCT FROM a.new_stage
+                ORDER BY a.performed_at DESC, a.id DESC
+                LIMIT $2 OFFSET $3
+                """
+            try:
+                rows = await conn.fetch(sql_stage_with_ts, lead_id, limit, offset)
+            except asyncpg.UndefinedColumnError:
+                rows = await conn.fetch(sql_stage_no_ts, lead_id, limit, offset)
+                rows = [
+                    {**dict(r), "last_dailed_at": None, "last_connected_at": None}
+                    for r in rows
+                ]
+            else:
+                rows = [dict(r) for r in rows]
+
+            return {
+                "lead_id": lead_id,
+                "items": rows,
+                "limit": limit,
+                "offset": offset,
+            }
+    except asyncpg.PostgresError:
+        logger.exception("Database error while fetching CRM stage activity history")
         raise HTTPException(status_code=500, detail="Database error.")
 
 

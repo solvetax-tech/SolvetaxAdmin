@@ -298,7 +298,8 @@ async def create_registration_payment(
                 "request_id": request_id,
             }
 
-        except asyncpg.PostgresError:
+        except asyncpg.PostgresError as exc:
+            logger.exception("Registration payment create failed: %s", exc)
             raise HTTPException(500, "Database error.")
 
         except HTTPException:
