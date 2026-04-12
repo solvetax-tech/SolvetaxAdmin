@@ -60,6 +60,10 @@ async def edit_employee(
             status_code=400,
             detail="At least one field must be provided for update.",
         )
+    
+    # Extract team_id for logical update, as it's not a column in the employees table
+    requested_team_id = update_data.pop("team_id", None)
+
 
     try:
         pool = await get_db_pool()
@@ -194,6 +198,36 @@ async def edit_employee(
 
                 new_role = new_row["role"]
                 new_manager = new_row["manager_emp_id"]
+
+                # --------------------------------------------------
+                # TEAM MEMBERS SYNC (Explicit team_id Change)
+                # --------------------------------------------------
+                if requested_team_id is not None:
+                    # Validate team exists
+                    team_exists = await conn.fetchval(
+                        f"SELECT EXISTS(SELECT 1 FROM {DB_SCHEMA}.teams WHERE id = $1 AND is_active = TRUE)",
+                        requested_team_id
+                    )
+                    if not team_exists:
+                        raise HTTPException(status_code=400, detail="Invalid target team_id provided.")
+
+                    # Deactivate old team memberships
+                    await conn.execute(
+                        f"UPDATE {DB_SCHEMA}.team_members SET is_active = FALSE, updated_at = NOW() WHERE emp_id = $1",
+                        emp_id
+                    )
+
+                    # Insert/Update new membership
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.team_members (team_id, emp_id, is_active, created_at, updated_at)
+                        VALUES ($1,$2,TRUE,NOW(),NOW())
+                        ON CONFLICT (team_id, emp_id)
+                        DO UPDATE SET is_active = TRUE, updated_at = NOW()
+                        """,
+                        requested_team_id,
+                        emp_id
+                    )
 
                 # --------------------------------------------------
                 # TEAM MEMBERS SYNC (Manager Change)

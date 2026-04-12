@@ -175,7 +175,7 @@ def _compute_next_auto_generate_at(*due_dates, lead_days: int = _LEAD_DAYS_YEARL
 # FILTER GST FILINGS (FINAL - WITH USERNAME + PASSWORD + RENT + EMAIL + ESTIMATED INVOICE)
 # -------------------------------------------------------------------
 @router.get(
-    "/gst-filings/filter",
+    "/filter",
     summary="Filter GST Filings",
 )
 async def filter_gst_filings(
@@ -229,6 +229,7 @@ async def filter_gst_filings(
     is_upcoming: Optional[bool] = None,
     is_auto_enabled: Optional[bool] = None,
     is_auto_generated: Optional[bool] = None,
+    include_details: bool = Query(True),
 
     # PAGINATION
     limit: int = Query(20, ge=1, le=100),
@@ -432,15 +433,24 @@ async def filter_gst_filings(
         # ----------------------------
         # FINAL QUERY
         # ----------------------------
-        query = f"""
-            SELECT f.*, d.*
-            FROM {DB_SCHEMA}.gst_filings f
-            LEFT JOIN {DB_SCHEMA}.gst_filing_return_details d
-                ON d.gst_filing_id = f.id
-            {where_clause}
-            ORDER BY f.created_at DESC
-            LIMIT ${idx} OFFSET ${idx+1}
-        """
+        if include_details:
+            query = f"""
+                SELECT f.*, d.*
+                FROM {DB_SCHEMA}.gst_filings f
+                LEFT JOIN {DB_SCHEMA}.gst_filing_return_details d
+                    ON d.gst_filing_id = f.id
+                {where_clause}
+                ORDER BY f.created_at DESC
+                LIMIT ${idx} OFFSET ${idx+1}
+            """
+        else:
+            query = f"""
+                SELECT f.*
+                FROM {DB_SCHEMA}.gst_filings f
+                {where_clause}
+                ORDER BY f.created_at DESC
+                LIMIT ${idx} OFFSET ${idx+1}
+            """
 
         values += [limit, offset]
 
@@ -579,7 +589,7 @@ async def get_gst_registration_prefill_for_filing(
 
 
 @router.post(
-    "/gst-filings",
+    "",
     status_code=status.HTTP_201_CREATED,
     summary="Create GST Filing",
 )
@@ -1063,7 +1073,7 @@ async def create_gst_filing(
 
 
 @router.post(
-    "/gst-filings/yearly",
+    "/yearly",
     status_code=status.HTTP_201_CREATED,
     summary="Create GST Filing (ANNUAL + YEARLY only)",
 )
@@ -1101,7 +1111,7 @@ async def create_gst_filing_yearly(
 # -------------------------------------------------------------------
 # UPDATE GST FILING (FINAL - WITH USERNAME + PASSWORD + RENT + EMAIL 
 # -------------------------------------------------------------------
-@router.patch("/gst-filings/{filing_id}")
+@router.patch("/{filing_id}")
 async def update_gst_filing(
     filing_id: int,
     payload: GSTFilingEditIn,
@@ -1528,7 +1538,7 @@ async def update_gst_filing(
 # SOFT DELETE GST FILING (WITH CUSTOMER CHECK + DOC CASCADE)
 # -------------------------------------------------------------------
 @router.delete(
-    "/gst-filings/{filing_id}/deactivate",
+    "/{filing_id}/deactivate",
     summary="Deactivate GST Filing (Cascade Documents + Audit)",
 )
 async def deactivate_gst_filing(
@@ -1735,7 +1745,7 @@ async def deactivate_gst_filing(
 # ACTIVATE GST FILING (ENTERPRISE FINAL - CLEAN VALIDATION + CASCADE)
 # -------------------------------------------------------------------
 @router.post(
-    "/gst-filings/{filing_id}/activate",
+    "/{filing_id}/activate",
     summary="Activate GST Filing (Cascade Documents + Audit)",
 )
 async def activate_gst_filing(
@@ -1961,7 +1971,7 @@ async def activate_gst_filing(
 # UPDATE RETURN STATUSES (FILED/NOT_FILED + ACTIVATE/DEACTIVATE ROWS)
 # -------------------------------------------------------------------
 @router.patch(
-    "/gst-filings/{filing_id}/returns/status",
+    "/{filing_id}/returns/status",
     summary="Update GST return statuses (GSTR1/3B/9/9C/CMP08/GSTR4) and optional activation",
 )
 async def update_return_statuses(
@@ -2151,7 +2161,7 @@ async def update_return_statuses(
 
 
 @router.post(
-    "/gst-filings/returns/delete-missed",
+    "/returns/delete-missed",
     summary="Bulk delete MISSED GST return-detail rows by IDs",
 )
 async def bulk_delete_missed_return_details(

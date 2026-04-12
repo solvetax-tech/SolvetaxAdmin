@@ -91,6 +91,7 @@ class GSTFilingIn(BaseSchema):
     rent: Optional[float] = Field(None, ge=0)
     email_id: Optional[EmailStr] = None
     rule14a: Optional[bool] = None
+    mode: Literal["MANUAL", "AUTO"] = "MANUAL"
 
     # =====================================================
     # NORMALIZATION
