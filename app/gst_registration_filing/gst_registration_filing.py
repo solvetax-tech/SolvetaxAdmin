@@ -566,8 +566,14 @@ async def get_gst_registration_prefill_for_filing(
     filing_frequency = _upper_or_none(
         r.get("filing_frequency") or r.get("filing_preference")
     )
-    business_type = _upper_or_none(
-        r.get("customer_business_type") or r.get("business_type")
+    
+    # 🔥 Priority Logic: Reg-specific first, fallback to customer-level
+    final_business_name = (r.get("business_name") or "").strip()
+    if not final_business_name:
+        final_business_name = (r.get("customer_business_name") or "").strip()
+        
+    final_business_type = _upper_or_none(
+        r.get("business_type") or r.get("customer_business_type")
     )
 
     return GSTRegistrationFilingPrefillOut(
@@ -582,9 +588,12 @@ async def get_gst_registration_prefill_for_filing(
         turnover_details=_upper_or_none(r.get("turnover_details")),
         state=_upper_or_none(r.get("state")),
         gst_reg_status=_upper_or_none(r.get("registration_status")),
-        business_name=(r.get("customer_business_name") or "").strip() or None,
-        business_type=business_type,
+        business_name=final_business_name or None,
+        business_type=final_business_type,
         business_description=(r.get("customer_business_description") or "").strip() or None,
+        rm_id=r.get("rm_id"),
+        op_id=r.get("created_by"),
+        email_id=(r.get("email") or "").strip() or None,
     )
 
 
