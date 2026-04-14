@@ -676,9 +676,11 @@ async def get_filing_followup_counts(
             query = f"""
                 SELECT
                     COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2) as scheduled_today,
-                    COUNT(*) FILTER (WHERE f.status IN ('PENDING', 'MISSED') AND f.followup_at >= $1 AND f.followup_at < $2 AND f.followup_at < CURRENT_TIMESTAMP) as overdue_today,
-                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.completed_at >= $1 AND f.completed_at < $2) as completed_today,
-                    COUNT(*) FILTER (WHERE f.status = 'PENDING') as pending_today
+                    COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2 AND (f.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' OR f.status = 'COMPLETED')) as evaluated_today,
+                    COUNT(*) FILTER (WHERE f.missed_at IS NOT NULL AND f.followup_at >= $1 AND f.followup_at < $2) as overdue_today,
+                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as completed_today,
+                    COUNT(*) FILTER (WHERE f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2 AND (f.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' OR f.status = 'COMPLETED')) as successful_today,
+                    COUNT(*) FILTER (WHERE f.completed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as pending_today
                 FROM {DB_SCHEMA}.customer_service_followups f
                 JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
                 {where_clause}
@@ -686,10 +688,10 @@ async def get_filing_followup_counts(
             row = await conn.fetchrow(query, today_start, today_end, *values)
             res_data = dict(row)
             
-            # Calculate Success Rate
-            scheduled = res_data.get("scheduled_today", 0)
-            completed = res_data.get("completed_today", 0)
-            res_data["success_rate"] = round((completed / scheduled) * 100) if scheduled > 0 else 100
+            # Calculate Success Rate strictly on evaluated tasks
+            evaluated = res_data.get("evaluated_today", 0)
+            successful = res_data.get("successful_today", 0)
+            res_data["success_rate"] = round((successful / evaluated) * 100) if evaluated > 0 else 100
 
             return {
                 "data": res_data,
