@@ -602,11 +602,13 @@ async def filter_filing_followups(
                     sc.service_name,
                     sc.service_code,
                     cs.rm_id as service_rm_id,
-                    cs.op_id as service_op_id
+                    cs.op_id as service_op_id,
+                    e.username as assigned_to_name
                 FROM {DB_SCHEMA}.customer_service_followups f
                 JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
                 JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
                 JOIN {DB_SCHEMA}.service_config sc ON sc.id = cs.service_id
+                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = f.assigned_to
                 {where_clause}
                 ORDER BY f.id DESC
                 LIMIT ${idx} OFFSET ${idx+1}
@@ -673,21 +675,24 @@ async def get_filing_followup_counts(
 
             query = f"""
                 SELECT
-                    COUNT(*) FILTER (WHERE f.status IN ('PENDING', 'MISSED') AND f.followup_at < $1) as missed,
-                    COUNT(*) FILTER (WHERE f.status IN ('PENDING', 'MISSED') AND f.followup_at >= $1 AND f.followup_at < $2) as today,
-                    COUNT(*) FILTER (WHERE f.status IN ('PENDING', 'MISSED') AND f.followup_at >= $2) as upcoming,
-                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.completed_at >= $1 AND f.completed_at < $2) as today_closed,
-                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.completed_at >= $1 AND f.completed_at < $2 AND f.completed_at <= f.followup_at) as on_time_closed,
-                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.completed_at >= $1 AND f.completed_at < $2 AND f.completed_at > f.followup_at) as late_closed,
-                    COUNT(*) FILTER (WHERE f.status IN ('PENDING', 'MISSED') AND f.followup_at >= $1 AND f.followup_at < NOW()) as today_overdue
+                    COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2) as scheduled_today,
+                    COUNT(*) FILTER (WHERE f.status IN ('PENDING', 'MISSED') AND f.followup_at >= $1 AND f.followup_at < $2 AND f.followup_at < CURRENT_TIMESTAMP) as overdue_today,
+                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.completed_at >= $1 AND f.completed_at < $2) as completed_today,
+                    COUNT(*) FILTER (WHERE f.status = 'PENDING') as pending_today
                 FROM {DB_SCHEMA}.customer_service_followups f
                 JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
                 {where_clause}
             """
             row = await conn.fetchrow(query, today_start, today_end, *values)
+            res_data = dict(row)
+            
+            # Calculate Success Rate
+            scheduled = res_data.get("scheduled_today", 0)
+            completed = res_data.get("completed_today", 0)
+            res_data["success_rate"] = round((completed / scheduled) * 100) if scheduled > 0 else 100
 
             return {
-                "data": dict(row),
+                "data": res_data,
                 "request_id": request_id
             }
 
