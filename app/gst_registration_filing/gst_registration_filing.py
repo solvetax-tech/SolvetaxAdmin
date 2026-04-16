@@ -771,12 +771,14 @@ async def create_gst_filing(
                         taxpayer_type, filing_frequency,
                         turnover_details, state, gst_reg_status,
                         username, password, email_id, rent, rule14a,
+                        business_name, business_type, business_description,
                         created_at, updated_at
                     )
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
                         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                        $21,$22,$23,$24
+                        $21,$22,$23,$24,$25,
+                        $26,$27
                     )
                     RETURNING *""",
                     payload.customer_id,
@@ -801,6 +803,9 @@ async def create_gst_filing(
                     email_id,
                     payload.rent,
                     payload.rule14a,
+                    payload.business_name,
+                    payload.business_type,
+                    payload.business_description,
                     now,
                     now,
                 )

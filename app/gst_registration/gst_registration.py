@@ -654,15 +654,9 @@ async def list_gst_registrations(
 
         elif business_name and business_name.strip():
             business_name_clean = business_name.strip()
-            conditions.append(
-                f"""(
-                    g.business_name ILIKE ${param_index}
-                    OR similarity(g.business_name, ${param_index + 1}) >= 0.8
-                )"""
-            )
+            conditions.append(f"g.business_name ILIKE ${param_index}")
             values.append(f"%{business_name_clean}%")
-            values.append(business_name_clean)
-            param_index += 2
+            param_index += 1
 
         if business_type and business_type.strip():
             conditions.append(f"g.business_type = ${param_index}")
