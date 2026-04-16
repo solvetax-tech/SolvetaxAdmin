@@ -5,6 +5,7 @@ from typing import Optional, List
 from app.security.rbac import require_permission
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.logger import logger
+from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
@@ -13,6 +14,10 @@ router = APIRouter(
     prefix="/api/v1/version",
     tags=["Version History"]
 )
+
+
+def _version_filter_tag() -> str:
+    return "version:filter:index"
 # -------------------------------------------------------------------
 # LIST VERSIONS (ENTERPRISE DYNAMIC FILTER + PAGINATION)
 # -------------------------------------------------------------------
@@ -52,6 +57,20 @@ async def list_versions(
     )
 
     log.info("Incoming version filter request | limit=%s offset=%s", limit, offset)
+    cache_key = build_cache_key(
+        "version:list",
+        id=id,
+        emp_id=emp_id,
+        entity_type=entity_type.strip().upper() if entity_type else None,
+        entity_id=entity_id,
+        customer_id=customer_id,
+        action=action.strip().upper() if action else None,
+        from_date=from_date.isoformat() if from_date else None,
+        to_date=to_date.isoformat() if to_date else None,
+        limit=limit,
+        offset=offset,
+        current_emp_id=current_emp_id,
+    )
 
     # --------------------------------------------------
     # Date Validation
@@ -87,7 +106,7 @@ async def list_versions(
             detail="Database connection error.",
         )
 
-    try:
+    async def _load_versions():
         conditions = []
         values = []
         param_index = 1
@@ -174,46 +193,51 @@ async def list_versions(
 
         values_with_pagination = values + [limit, offset]
 
-        async with pool.acquire() as conn:
-            total_count = await conn.fetchval(count_sql, *values)
-            rows = await conn.fetch(main_sql, *values_with_pagination)
+        try:
+            async with pool.acquire() as conn:
+                total_count = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(main_sql, *values_with_pagination)
 
-        log.info(
-            "Version filter success | total=%s returned=%s",
-            total_count,
-            len(rows),
-        )
+            log.info(
+                "Version filter success | total=%s returned=%s",
+                total_count,
+                len(rows),
+            )
 
-        return {
-            "total_count": total_count,
-            "limit": limit,
-            "offset": offset,
-            "data": [
-                {
-                    **dict(row),
-                    "request_id": request_id,
-                }
-                for row in rows
-            ],
-        }
+            return {
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset,
+                "data": [
+                    {
+                        **dict(row),
+                        "request_id": request_id,
+                    }
+                    for row in rows
+                ],
+            }
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during version filtering | error=%s",
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred during filtering.",
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            log.exception("Unexpected error during version filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-    except asyncpg.PostgresError as e:
-        log.error(
-            "Database error during version filtering | error=%s",
-            str(e),
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Database error occurred during filtering.",
-        )
-
-    except HTTPException:
-        raise
-
-    except Exception:
-        log.exception("Unexpected error during version filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_versions,
+        ttl_seconds=300,
+        tags=[_version_filter_tag()],
+    )

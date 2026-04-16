@@ -20,3 +20,4 @@ python-multipart==0.0.20
 aiohttp==3.13.1
 azure-storage-blob==12.27.0
 twilio
+redis

@@ -2,12 +2,31 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 import asyncpg
 import logging
 from typing import Optional
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/app/v1/teams", tags=["Teams"])
+
+
+def _teams_list_tag() -> str:
+    return "teams:list:index"
+
+
+def _team_members_tag(team_id: int) -> str:
+    return f"teams:members:index:{team_id}"
+
+
+async def _invalidate_teams_cache(team_id: Optional[int] = None) -> None:
+    await redis_invalidate_tag(_teams_list_tag())
+    if team_id is not None:
+        await redis_invalidate_tag(_team_members_tag(team_id))
 
 """ this is for team creation"""
 
@@ -58,6 +77,7 @@ async def create_team(
             )
 
             log.info("Team created successfully id=%s", row["id"])
+            await _invalidate_teams_cache()
 
             return dict(row)
 
@@ -114,6 +134,13 @@ async def get_teams(
     )
 
     log.info("Incoming get teams request | search=%s", search)
+    search_norm = search.strip() if isinstance(search, str) and search.strip() else None
+    cache_key = build_cache_key(
+        "teams:get_teams",
+        search=search_norm,
+        include_inactive=include_inactive,
+        emp_id=emp_id,
+    )
 
     # --------------------------------------------------
     # DB Pool
@@ -132,8 +159,7 @@ async def get_teams(
             detail="Database connection error.",
         )
 
-    try:
-
+    async def _load_teams():
         conditions = []
         values = []
         idx = 1
@@ -150,13 +176,13 @@ async def get_teams(
         # Search filter
         # --------------------------------------------------
 
-        if search:
+        if search_norm:
 
             conditions.append(
                 f"(t.team_name ILIKE ${idx} OR t.team_code ILIKE ${idx})"
             )
 
-            values.append(f"%{search.strip()}%")
+            values.append(f"%{search_norm}%")
 
             idx += 1
 
@@ -188,37 +214,36 @@ async def get_teams(
             ORDER BY t.team_name ASC
         """
 
-        async with pool.acquire() as conn:
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *values)
 
-            rows = await conn.fetch(query, *values)
+            log.info("Teams fetched successfully | count=%s", len(rows))
+            return {
+                "data": [dict(row) for row in rows],
+                "request_id": request_id,
+            }
+        except asyncpg.PostgresError:
+            log.exception("Database error during teams fetch")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred.",
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            log.exception("Unexpected error during teams fetch")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-        log.info("Teams fetched successfully | count=%s", len(rows))
-
-        return {
-            "data": [dict(row) for row in rows],
-            "request_id": request_id,
-        }
-
-    except asyncpg.PostgresError:
-
-        log.exception("Database error during teams fetch")
-
-        raise HTTPException(
-            status_code=500,
-            detail="Database error occurred.",
-        )
-
-    except HTTPException:
-        raise
-
-    except Exception:
-
-        log.exception("Unexpected error during teams fetch")
-
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_teams,
+        ttl_seconds=300,
+        tags=[_teams_list_tag()],
+    )
 
 # -------------------------------------------------------------------
 # EDIT TEAM
@@ -344,6 +369,7 @@ async def edit_team(
             )
 
             log.info("Team updated successfully id=%s", team_id)
+            await _invalidate_teams_cache(team_id)
 
             return dict(row)
 
@@ -488,6 +514,7 @@ async def add_member(
                     team_id,
                     emp_id
                 )
+                await _invalidate_teams_cache(team_id)
 
                 return {"message": "Member added successfully"}
 
@@ -578,6 +605,7 @@ async def remove_member(
                     team_id,
                     emp_id
                 )
+                await _invalidate_teams_cache(team_id)
 
                 return {"message": "Member removed successfully"}
 
@@ -612,6 +640,11 @@ async def get_team_members(
         logger,
         {"request_id": request_id, "emp_id": emp_id, "api": "get_team_members"}
     )
+    cache_key = build_cache_key(
+        "teams:get_members",
+        team_id=team_id,
+        emp_id=emp_id,
+    )
 
     try:
         pool = await get_db_pool()
@@ -625,85 +658,83 @@ async def get_team_members(
             detail="Database connection error"
         )
 
-    async with pool.acquire() as conn:
-
-        try:
-
-            team = await conn.fetchrow(
-                f"""
-                SELECT id, team_name
-                FROM {DB_SCHEMA}.teams
-                WHERE id=$1
-                AND is_active=TRUE
-                """,
-                team_id
-            )
-
-            if not team:
-
-                raise HTTPException(
-                    status_code=404,
-                    detail="Team not found"
+    async def _load_team_members():
+        async with pool.acquire() as conn:
+            try:
+                team = await conn.fetchrow(
+                    f"""
+                    SELECT id, team_name
+                    FROM {DB_SCHEMA}.teams
+                    WHERE id=$1
+                    AND is_active=TRUE
+                    """,
+                    team_id
                 )
 
-            rows = await conn.fetch(
-                f"""
-                SELECT
-                    e.emp_id,
-                    e.username,
-                    e.role,
-                    CASE
-                        WHEN tmgr.manager_emp_id IS NOT NULL THEN TRUE
-                        ELSE FALSE
-                    END AS is_manager
-                FROM {DB_SCHEMA}.team_members tm
-                JOIN {DB_SCHEMA}.employees e
-                    ON tm.emp_id = e.emp_id
-                LEFT JOIN {DB_SCHEMA}.team_managers tmgr
-                    ON tmgr.manager_emp_id = e.emp_id
-                    AND tmgr.team_id = tm.team_id
-                    AND tmgr.is_active = TRUE
-                WHERE tm.team_id = $1
-                AND tm.is_active = TRUE
-                ORDER BY is_manager DESC, e.username
-                """,
-                team_id
-            )
+                if not team:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Team not found"
+                    )
 
-            manager = None
-            members = []
+                rows = await conn.fetch(
+                    f"""
+                    SELECT
+                        e.emp_id,
+                        e.username,
+                        e.role,
+                        CASE
+                            WHEN tmgr.manager_emp_id IS NOT NULL THEN TRUE
+                            ELSE FALSE
+                        END AS is_manager
+                    FROM {DB_SCHEMA}.team_members tm
+                    JOIN {DB_SCHEMA}.employees e
+                        ON tm.emp_id = e.emp_id
+                    LEFT JOIN {DB_SCHEMA}.team_managers tmgr
+                        ON tmgr.manager_emp_id = e.emp_id
+                        AND tmgr.team_id = tm.team_id
+                        AND tmgr.is_active = TRUE
+                    WHERE tm.team_id = $1
+                    AND tm.is_active = TRUE
+                    ORDER BY is_manager DESC, e.username
+                    """,
+                    team_id
+                )
 
-            for r in rows:
+                manager = None
+                members = []
 
-                data = dict(r)
+                for r in rows:
+                    data = dict(r)
+                    if data["is_manager"]:
+                        manager = data
+                    members.append(data)
 
-                if data["is_manager"]:
-                    manager = data
+                return {
+                    "team_id": team["id"],
+                    "team_name": team["team_name"],
+                    "manager": manager,
+                    "members": members,
+                    "request_id": request_id
+                }
+            except asyncpg.PostgresError:
+                log.exception("Database error fetching team members")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Database error occurred"
+                )
+            except HTTPException:
+                raise
+            except Exception:
+                log.exception("Unexpected error fetching team members")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal server error"
+                )
 
-                members.append(data)
-
-            return {
-                "team_id": team["id"],
-                "team_name": team["team_name"],
-                "manager": manager,
-                "members": members,
-                "request_id": request_id
-            }
-
-        except asyncpg.PostgresError:
-
-            log.exception("Database error fetching team members")
-
-            raise HTTPException(
-                status_code=500,
-                detail="Database error occurred"
-            )
-
-        except Exception:
-
-            log.exception("Unexpected error fetching team members")
-
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error"
-            )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_team_members,
+        ttl_seconds=300,
+        tags=[_team_members_tag(team_id)],
+    )

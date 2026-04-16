@@ -11,6 +11,11 @@ from app.gst_registration.schemas import (
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility, build_customer_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 from zoneinfo import ZoneInfo
 import json
 import uuid
@@ -24,6 +29,20 @@ router = APIRouter(
 
 # CRM `crm_leads.entity_type` when the lead is tied to a GST registration row.
 CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION = "GST_REGISTRATION"
+
+
+def _gst_filter_tag() -> str:
+    return "gst_registration:filter:index"
+
+
+def _gst_customer_fields_tag(customer_id: int) -> str:
+    return f"gst_registration:customer_fields:index:{customer_id}"
+
+
+async def _invalidate_gst_registration_cache(customer_id: Optional[int] = None) -> None:
+    await redis_invalidate_tag(_gst_filter_tag())
+    if customer_id is not None:
+        await redis_invalidate_tag(_gst_customer_fields_tag(customer_id))
 
 
 async def _sync_crm_lead_with_gst(
@@ -406,6 +425,7 @@ async def create_gst_registration(
                     json.dumps(dict(gst_row), default=str),
                     None,
                 )
+            await _invalidate_gst_registration_cache(gst_row.get("customer_id"))
 
             return {
                 **dict(gst_row),
@@ -580,6 +600,44 @@ async def list_gst_registrations(
     valid_filing_pref = {"MONTHLY", "QUARTERLY"}
     if filing_preference and filing_preference.strip().upper() not in valid_filing_pref:
         raise HTTPException(400, "Invalid filing_preference")
+    role_norm = str(role).strip().upper() if role is not None else None
+    business_name_clean = business_name.strip() if business_name and business_name.strip() else None
+    business_type_norm = business_type.strip().upper() if business_type and business_type.strip() else None
+    registration_status_norm = registration_status.strip().upper() if registration_status and registration_status.strip() else None
+    ownership_category_norm = ownership_category.strip().upper() if ownership_category and ownership_category.strip() else None
+    state_norm = state.strip().upper() if state and state.strip() else None
+    filing_preference_norm = filing_preference.strip().upper() if filing_preference and filing_preference.strip() else None
+    cache_key = build_cache_key(
+        "gst_registration:filter",
+        gst_registration_id=gst_registration_id,
+        customer_id=customer_id,
+        gstin=gstin,
+        gstin_is_null=gstin_is_null,
+        mobile=mobile,
+        mobile_is_null=mobile_is_null,
+        email=email,
+        email_is_null=email_is_null,
+        secondary_email=secondary_email,
+        secondary_email_is_null=secondary_email_is_null,
+        rm_id=rm_id,
+        created_by=created_by,
+        business_name=business_name_clean,
+        business_name_is_null=business_name_is_null,
+        business_type=business_type_norm,
+        registration_status=registration_status_norm,
+        ownership_category=ownership_category_norm,
+        state=state_norm,
+        filing_preference=filing_preference_norm,
+        has_service=has_service,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+        role=role_norm,
+        emp_id=emp_id,
+    )
 
     try:
         pool = await get_db_pool()
@@ -590,7 +648,7 @@ async def list_gst_registrations(
             detail="Database connection error.",
         )
 
-    try:
+    async def _load_list_gst_registrations():
         conditions = []
         values = []
         param_index = 1
@@ -652,8 +710,7 @@ async def list_gst_registrations(
         if business_name_is_null:
             conditions.append("g.business_name IS NULL")
 
-        elif business_name and business_name.strip():
-            business_name_clean = business_name.strip()
+        elif business_name_clean:
             conditions.append(
                 f"""(
                     g.business_name ILIKE ${param_index}
@@ -664,29 +721,29 @@ async def list_gst_registrations(
             values.append(business_name_clean)
             param_index += 2
 
-        if business_type and business_type.strip():
+        if business_type_norm:
             conditions.append(f"g.business_type = ${param_index}")
-            values.append(business_type.strip().upper())
+            values.append(business_type_norm)
             param_index += 1
 
-        if registration_status and registration_status.strip():
+        if registration_status_norm:
             conditions.append(f"g.registration_status = ${param_index}")
-            values.append(registration_status.strip().upper())
+            values.append(registration_status_norm)
             param_index += 1
 
-        if ownership_category and ownership_category.strip():
+        if ownership_category_norm:
             conditions.append(f"g.ownership_category = ${param_index}")
-            values.append(ownership_category.strip().upper())
+            values.append(ownership_category_norm)
             param_index += 1
 
-        if state and state.strip():
+        if state_norm:
             conditions.append(f"g.state = ${param_index}")
-            values.append(state.strip().upper())
+            values.append(state_norm)
             param_index += 1
 
-        if filing_preference and filing_preference.strip():
+        if filing_preference_norm:
             conditions.append(f"g.filing_preference = ${param_index}")
-            values.append(filing_preference.strip().upper())
+            values.append(filing_preference_norm)
             param_index += 1
 
         if has_service is not None:
@@ -718,7 +775,7 @@ async def list_gst_registrations(
         # --------------------------------------------------
 
         visibility_sql, visibility_values, param_index = build_gst_visibility(
-            role,
+            role_norm,
             emp_id,
             param_index,
             DB_SCHEMA,
@@ -769,44 +826,52 @@ async def list_gst_registrations(
 
         values_with_pagination = values + [limit, offset]
 
-        async with pool.acquire() as conn:
-            total_count = await conn.fetchval(count_sql, *values)
-            rows = await conn.fetch(data_sql, *values_with_pagination)
+        try:
+            async with pool.acquire() as conn:
+                total_count = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(data_sql, *values_with_pagination)
 
-        log.info(
-            "GST filter success | returned=%s total=%s",
-            len(rows),
-            total_count,
-        )
+            log.info(
+                "GST filter success | returned=%s total=%s",
+                len(rows),
+                total_count,
+            )
 
-        return {
-            "data": [dict(row) for row in rows],
-            "total": total_count,
-            "limit": limit,
-            "offset": offset,
-            "request_id": request_id,
-        }
+            return {
+                "data": [dict(row) for row in rows],
+                "total": total_count,
+                "limit": limit,
+                "offset": offset,
+                "request_id": request_id,
+            }
 
-    except asyncpg.PostgresError as e:
-        log.error(
-            "Database error during GST filtering | error=%s",
-            str(e),
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Database error occurred during filtering.",
-        )
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during GST filtering | error=%s",
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred during filtering.",
+            )
 
-    except HTTPException:
-        raise
+        except HTTPException:
+            raise
 
-    except Exception:
-        log.exception("Unexpected error during GST filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+        except Exception:
+            log.exception("Unexpected error during GST filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_list_gst_registrations,
+        ttl_seconds=300,
+        tags=[_gst_filter_tag()],
+    )
 
 
 # -------------------------------------------------------------------
@@ -870,32 +935,47 @@ async def get_customer_fields_for_gst(
         {where_extra}
         LIMIT 1
     """
-
-    try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(sql, *values)
-    except asyncpg.PostgresError:
-        log.exception("Database error fetching customer snapshot for GST")
-        raise HTTPException(status_code=500, detail="Database error.")
-
-    if not row:
-        raise HTTPException(
-            status_code=404,
-            detail="Customer not found or not accessible.",
-        )
-
-    if not row["is_active"]:
-        raise HTTPException(status_code=400, detail="Customer is inactive.")
-
-    return CustomerSnapshotForGstOut(
-        customer_id=row["customer_id"],
-        business_name=row["business_name"],
-        business_type=row["business_type"],
-        state=row["state"],
-        op_id=row["op_id"],
-        rm_id=row["rm_id"],
-        mobile=row["mobile"],
+    cache_key = build_cache_key(
+        "gst_registration:customer_fields",
+        customer_id=customer_id,
+        role=role_norm,
+        emp_id=emp_id,
     )
+
+    async def _load_customer_fields_for_gst():
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(sql, *values)
+        except asyncpg.PostgresError:
+            log.exception("Database error fetching customer snapshot for GST")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail="Customer not found or not accessible.",
+            )
+
+        if not row["is_active"]:
+            raise HTTPException(status_code=400, detail="Customer is inactive.")
+
+        return {
+            "customer_id": row["customer_id"],
+            "business_name": row["business_name"],
+            "business_type": row["business_type"],
+            "state": row["state"],
+            "op_id": row["op_id"],
+            "rm_id": row["rm_id"],
+            "mobile": row["mobile"],
+        }
+
+    cached = await redis_get_or_set_json(
+        cache_key,
+        loader=_load_customer_fields_for_gst,
+        ttl_seconds=300,
+        tags=[_gst_customer_fields_tag(customer_id)],
+    )
+    return CustomerSnapshotForGstOut(**cached)
 
 
 # -------------------------------------------------------------------
@@ -1186,6 +1266,7 @@ async def edit_gst_registration(
                     gst_id,
                     list(update_data.keys()),
                 )
+                await _invalidate_gst_registration_cache(new_row.get("customer_id"))
 
                 return {
                     **dict(new_row),
@@ -1444,6 +1525,7 @@ async def soft_delete_gst_registration(
                 len(deleted_persons),
                 len(deleted_documents),
             )
+            await _invalidate_gst_registration_cache(deleted_gst.get("customer_id"))
 
             return {
                 **dict(deleted_gst),
@@ -1649,6 +1731,7 @@ async def activate_gst_registration(
                 len(activated_persons),
                 len(activated_documents),
             )
+            await _invalidate_gst_registration_cache(activated_gst.get("customer_id"))
 
             return {
                 **dict(activated_gst),

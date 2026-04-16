@@ -5,6 +5,7 @@ from typing import Optional, List
 from app.security.rbac import require_permission
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.logger import logger
+from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
@@ -59,6 +60,25 @@ async def list_gst_filing_configs(
         limit,
         offset,
     )
+    filing_type_norm = filing_type.strip().upper() if isinstance(filing_type, str) else None
+    filing_category_norm = filing_category.strip().upper() if isinstance(filing_category, str) else None
+    frequency_norm = frequency.strip().upper() if isinstance(frequency, str) else None
+    applicable_turnover_norm = applicable_turnover.strip().upper() if isinstance(applicable_turnover, str) else None
+    applicable_return_type_norm = applicable_return_type.strip().upper() if isinstance(applicable_return_type, str) else None
+    cache_key = build_cache_key(
+        "gst_filing_config:list",
+        id=id,
+        filing_type=filing_type_norm,
+        filing_category=filing_category_norm,
+        frequency=frequency_norm,
+        applicable_turnover=applicable_turnover_norm,
+        applicable_return_type=applicable_return_type_norm,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
+        emp_id=emp_id,
+    )
 
     # --------------------------------------------------
     # DB Pool
@@ -73,8 +93,7 @@ async def list_gst_filing_configs(
             detail="Database connection error.",
         )
 
-    try:
-
+    async def _load_gst_filing_configs():
         conditions = []
         values = []
         param_index = 1
@@ -88,29 +107,29 @@ async def list_gst_filing_configs(
             values.append(id)
             param_index += 1
 
-        if filing_type and filing_type.strip():
+        if filing_type_norm:
             conditions.append(f"upper(filing_type) = ${param_index}")
-            values.append(filing_type.strip().upper())
+            values.append(filing_type_norm)
             param_index += 1
 
-        if filing_category and filing_category.strip():
+        if filing_category_norm:
             conditions.append(f"upper(filing_category) = ${param_index}")
-            values.append(filing_category.strip().upper())
+            values.append(filing_category_norm)
             param_index += 1
 
-        if frequency and frequency.strip():
+        if frequency_norm:
             conditions.append(f"upper(frequency) = ${param_index}")
-            values.append(frequency.strip().upper())
+            values.append(frequency_norm)
             param_index += 1
 
-        if applicable_turnover and applicable_turnover.strip():
+        if applicable_turnover_norm:
             conditions.append(f"applicable_turnover = ${param_index}")
-            values.append(applicable_turnover.strip().upper())
+            values.append(applicable_turnover_norm)
             param_index += 1
 
-        if applicable_return_type and applicable_return_type.strip():
+        if applicable_return_type_norm:
             conditions.append(f"applicable_return_type = ${param_index}")
-            values.append(applicable_return_type.strip().upper())
+            values.append(applicable_return_type_norm)
             param_index += 1
 
         # --------------------------------------------------
@@ -146,39 +165,45 @@ async def list_gst_filing_configs(
 
         values_with_pagination = values + [limit, offset]
 
-        async with pool.acquire() as conn:
+        try:
+            async with pool.acquire() as conn:
+                total = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(data_sql, *values_with_pagination)
 
-            total = await conn.fetchval(count_sql, *values)
+            log.info(
+                "GST filing configs fetched successfully | returned=%s total=%s",
+                len(rows),
+                total,
+            )
 
-            rows = await conn.fetch(data_sql, *values_with_pagination)
+            return {
+                "data": [dict(r) for r in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "request_id": request_id,
+            }
 
-        log.info(
-            "GST filing configs fetched successfully | returned=%s total=%s",
-            len(rows),
-            total,
-        )
+        except asyncpg.PostgresError:
+            log.exception("Database error during GST filing config filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred.",
+            )
 
-        return {
-            "data": [dict(r) for r in rows],
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "request_id": request_id,
-        }
+        except HTTPException:
+            raise
 
-    except asyncpg.PostgresError:
-        log.exception("Database error during GST filing config filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Database error occurred.",
-        )
+        except Exception:
+            log.exception("Unexpected error during GST filing config filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-    except HTTPException:
-        raise
-
-    except Exception:
-        log.exception("Unexpected error during GST filing config filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_gst_filing_configs,
+        ttl_seconds=300,
+        tags=["gst_filing_config:list:index"],
+    )

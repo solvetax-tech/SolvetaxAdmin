@@ -24,6 +24,11 @@ from app.utils import (
 import json
 from zoneinfo import ZoneInfo
 from app.customer_registration.business_description_ai import request_business_description
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -31,6 +36,30 @@ router = APIRouter(
     prefix="/api/v1/customers",
     tags=["Customers"]
 )
+
+
+def _customer_get_by_id_cache_key(customer_id: int, role: Optional[str], emp_id: Optional[int]) -> str:
+    return build_cache_key(
+        "customer:get_by_id",
+        customer_id=customer_id,
+        role=(role or "").strip().upper() or None,
+        emp_id=emp_id,
+    )
+
+
+def _customer_get_by_id_tag(customer_id: int) -> str:
+    return f"customer:get_by_id:index:{customer_id}"
+
+
+def _customer_filter_tag() -> str:
+    return "customer:filter:index"
+
+
+async def _invalidate_customer_cache(customer_id: int) -> None:
+    # Customer detail + list caches. If GST (or other) GET endpoints add Redis later,
+    # invalidate their tags here too when customer fields affect those responses.
+    await redis_invalidate_tag(_customer_get_by_id_tag(customer_id))
+    await redis_invalidate_tag(_customer_filter_tag())
 # -------------------------------------------------------------------
 # CREATE CUSTOMER (Enterprise Production + Version Audit + Services)
 # -------------------------------------------------------------------
@@ -286,6 +315,7 @@ async def create_customer(
                 customer_id,
             )
 
+            await _invalidate_customer_cache(customer_id)
             return {
                 **dict(customer_row),
                 "message": "Customer created successfully.",
@@ -602,6 +632,8 @@ async def get_customer_by_id(
     )
 
     log.info("Incoming get customer request | customer_id=%s", customer_id)
+    role = current_user.get("role")
+    cache_key = _customer_get_by_id_cache_key(customer_id, role, emp_id)
 
     try:
         pool = await get_db_pool()
@@ -613,49 +645,57 @@ async def get_customer_by_id(
         )
 
     try:
-        # --------------------------------------------------
-        # ROLE BASED VISIBILITY (Single Customer)
-        # --------------------------------------------------
-        conditions = ["c.customer_id = $1"]
-        values = [customer_id]
-        idx = 2
+        async def _load_customer_by_id():
+            # --------------------------------------------------
+            # ROLE BASED VISIBILITY (Single Customer)
+            # --------------------------------------------------
+            conditions = ["c.customer_id = $1"]
+            values = [customer_id]
+            idx = 2
 
-        visibility_sql, visibility_values, idx = build_customer_visibility(
-            current_user.get("role"),
-            emp_id,
-            idx,
-            DB_SCHEMA,
-        )
-
-        if visibility_sql:
-            conditions.append(visibility_sql)
-            values.extend(visibility_values)
-
-        where_clause = " AND ".join(conditions)
-
-        query = f"""
-            SELECT c.*,
-                   e_rm.first_name AS rm_name,
-                   e_op.first_name AS op_name
-            FROM {DB_SCHEMA}.customers c
-            LEFT JOIN {DB_SCHEMA}.employees e_rm
-                   ON c.rm_id = e_rm.emp_id
-            LEFT JOIN {DB_SCHEMA}.employees e_op
-                   ON c.op_id = e_op.emp_id
-            WHERE {where_clause}
-        """
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(query, *values)
-
-        if not row:
-            log.warning("Customer not found | customer_id=%s", customer_id)
-            raise HTTPException(
-                status_code=404,
-                detail="Customer not found.",
+            visibility_sql, visibility_values, idx = build_customer_visibility(
+                current_user.get("role"),
+                emp_id,
+                idx,
+                DB_SCHEMA,
             )
 
+            if visibility_sql:
+                conditions.append(visibility_sql)
+                values.extend(visibility_values)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f"""
+                SELECT c.*,
+                       e_rm.first_name AS rm_name,
+                       e_op.first_name AS op_name
+                FROM {DB_SCHEMA}.customers c
+                LEFT JOIN {DB_SCHEMA}.employees e_rm
+                       ON c.rm_id = e_rm.emp_id
+                LEFT JOIN {DB_SCHEMA}.employees e_op
+                       ON c.op_id = e_op.emp_id
+                WHERE {where_clause}
+            """
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, *values)
+
+            if not row:
+                log.warning("Customer not found | customer_id=%s", customer_id)
+                raise HTTPException(
+                    status_code=404,
+                    detail="Customer not found.",
+                )
+            return dict(row)
+
+        result = await redis_get_or_set_json(
+            cache_key,
+            loader=_load_customer_by_id,
+            ttl_seconds=300,
+            tags=[_customer_get_by_id_tag(customer_id)],
+        )
         log.info("Customer fetched successfully | customer_id=%s", customer_id)
-        return dict(row)
+        return result
 
     except asyncpg.PostgresError:
         log.exception("Database error during customer fetch")
@@ -771,6 +811,34 @@ async def filter_customers(
             detail="from_date cannot be greater than to_date.",
         )
 
+    role_norm = (role or "").strip().upper() or None
+    filter_cache_key = build_cache_key(
+        "customer:filter",
+        role=role_norm,
+        emp_id=emp_id,
+        customer_id=customer_id,
+        full_name=full_name,
+        email=email,
+        mobile=mobile,
+        business_type=business_type,
+        state=state,
+        city=city,
+        rm_id=rm_id,
+        op_id=op_id,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        service_required=service_required,
+        services_required_all=services_required_all,
+        services_required_any=services_required_any,
+        service_provided=service_provided,
+        services_provided_all=services_provided_all,
+        services_provided_any=services_provided_any,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+        cursor=cursor,
+    )
     try:
         pool = await get_db_pool()
     except Exception:
@@ -781,97 +849,113 @@ async def filter_customers(
         )
 
     try:
+        async def _load_filtered_customers():
+            conditions = []
+            values = []
+            idx = 1
 
-        params = locals()
-        conditions = []
-        values = []
-        idx = 1
+            # --------------------------------------------------
+            # STANDARD FILTERS
+            # --------------------------------------------------
+            for key, (sql_op, formatter) in STANDARD_FILTERS.items():
 
-        # --------------------------------------------------
-        # STANDARD FILTERS
-        # --------------------------------------------------
-        for key, (sql_op, formatter) in STANDARD_FILTERS.items():
+                value = {
+                    "customer_id": customer_id,
+                    "full_name": full_name,
+                    "email": email,
+                    "mobile": mobile,
+                    "business_type": business_type,
+                    "state": state,
+                    "city": city,
+                    "rm_id": rm_id,
+                    "op_id": op_id,
+                }.get(key)
 
-            value = params.get(key)
-
-            if value is not None:
-                conditions.append(f"{sql_op} ${idx}")
-                values.append(formatter(value))
-                idx += 1
+                if value is not None:
+                    conditions.append(f"{sql_op} ${idx}")
+                    values.append(formatter(value))
+                    idx += 1
 
         # --------------------------------------------------
         # ARRAY FILTERS
         # --------------------------------------------------
-        for key, (column, operator) in ARRAY_FILTERS.items():
+            for key, (column, operator) in ARRAY_FILTERS.items():
 
-            value = params.get(key)
+                value = {
+                    "service_required": service_required,
+                    "services_required_all": services_required_all,
+                    "services_required_any": services_required_any,
+                    "service_provided": service_provided,
+                    "services_provided_all": services_provided_all,
+                    "services_provided_any": services_provided_any,
+                }.get(key)
 
-            if not value:
-                continue
-
-            if isinstance(value, list):
-                cleaned = [v.strip() for v in value if isinstance(v, str) and v.strip()]
-                if not cleaned:
+                if not value:
                     continue
-                value = cleaned
 
-            elif isinstance(value, str):
-                value = value.strip()
+                if isinstance(value, list):
+                    cleaned = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+                    if not cleaned:
+                        continue
+                    value = cleaned
 
-            if operator == "ANY":
-                conditions.append(f"${idx} = ANY({column})")
-            else:
-                conditions.append(f"{column} {operator} ${idx}")
+                elif isinstance(value, str):
+                    value = value.strip()
 
-            values.append(value)
-            idx += 1
+                if operator == "ANY":
+                    conditions.append(f"${idx} = ANY({column})")
+                else:
+                    conditions.append(f"{column} {operator} ${idx}")
+
+                values.append(value)
+                idx += 1
 
         # --------------------------------------------------
         # STATUS FILTER
         # --------------------------------------------------
-        if is_active is not None:
-            conditions.append(f"is_active = ${idx}")
-            values.append(is_active)
-            idx += 1
+            if is_active is not None:
+                conditions.append(f"is_active = ${idx}")
+                values.append(is_active)
+                idx += 1
 
-        elif not include_inactive:
-            conditions.append("is_active = TRUE")
+            elif not include_inactive:
+                conditions.append("is_active = TRUE")
 
         # --------------------------------------------------
         # DATE FILTER
         # --------------------------------------------------
-        if from_date:
-            conditions.append(f"created_at >= ${idx}")
-            values.append(from_date)
-            idx += 1
+            if from_date:
+                conditions.append(f"created_at >= ${idx}")
+                values.append(from_date)
+                idx += 1
 
-        if to_date:
-            conditions.append(f"created_at <= ${idx}")
-            values.append(to_date)
-            idx += 1
+            if to_date:
+                conditions.append(f"created_at <= ${idx}")
+                values.append(to_date)
+                idx += 1
 
         # --------------------------------------------------
         # CURSOR PAGINATION
         # --------------------------------------------------
-        if cursor:
-            conditions.append(f"created_at < ${idx}")
-            values.append(cursor)
-            idx += 1
+            if cursor:
+                conditions.append(f"created_at < ${idx}")
+                values.append(cursor)
+                idx += 1
 
         # --------------------------------------------------
         # ROLE BASED VISIBILITY (TEAM / MANAGER / RM / OP)
         # --------------------------------------------------
 
-        visibility_sql, visibility_values, idx = build_customer_visibility(
-            role,
-            emp_id,
-            idx,
-            DB_SCHEMA
-        )
+            visibility_sql, visibility_values, idx = build_customer_visibility(
+                role,
+                emp_id,
+                idx,
+                DB_SCHEMA
+            )
 
-        if visibility_sql:
-            conditions.append(visibility_sql)
-            values.extend(visibility_values)
+            if visibility_sql:
+                conditions.append(visibility_sql)
+                values.extend(visibility_values)
 
         # --------------------------------------------------
         # WHERE CLAUSE
@@ -879,89 +963,96 @@ async def filter_customers(
         # Build a WHERE clause and safely qualify simple column
         # references with the customer table alias `c` without
         # corrupting placeholders or complex expressions.
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        if conditions:
-            qualified_conditions = []
-            for cond in conditions:
-                stripped = cond.lstrip()
+            if conditions:
+                qualified_conditions = []
+                for cond in conditions:
+                    stripped = cond.lstrip()
 
                 # Leave complex/parenthesized or placeholder-first
                 # expressions as-is (e.g. "$1 = ANY(...)", "(...)" etc.)
-                if (
-                    not stripped
-                    or stripped[0] in "($"
-                ):
-                    qualified_conditions.append(cond)
-                    continue
+                    if (
+                        not stripped
+                        or stripped[0] in "($"
+                    ):
+                        qualified_conditions.append(cond)
+                        continue
 
-                parts = stripped.split(" ", 1)
-                first = parts[0]
-                rest = parts[1] if len(parts) > 1 else ""
+                    parts = stripped.split(" ", 1)
+                    first = parts[0]
+                    rest = parts[1] if len(parts) > 1 else ""
 
                 # If the first token looks like a bare column name,
                 # prefix it with the alias `c.`
-                if first.isidentifier() and not first.upper() in {"NOT", "EXISTS"}:
-                    first = f"c.{first}"
+                    if first.isidentifier() and not first.upper() in {"NOT", "EXISTS"}:
+                        first = f"c.{first}"
 
-                qualified = f"{first} {rest}".rstrip() if rest else first
+                    qualified = f"{first} {rest}".rstrip() if rest else first
 
-                # Preserve original leading whitespace
-                leading_ws_len = len(cond) - len(cond.lstrip(" "))
-                qualified_conditions.append(" " * leading_ws_len + qualified)
+                    # Preserve original leading whitespace
+                    leading_ws_len = len(cond) - len(cond.lstrip(" "))
+                    qualified_conditions.append(" " * leading_ws_len + qualified)
 
-            where_clause_c = f"WHERE {' AND '.join(qualified_conditions)}"
-        else:
-            where_clause_c = ""
+                where_clause_c = f"WHERE {' AND '.join(qualified_conditions)}"
+            else:
+                where_clause_c = ""
 
-        count_sql = f"""
-            SELECT COUNT(*)
-            FROM {DB_SCHEMA}.customers c
-            {where_clause_c}
-        """
+            count_sql = f"""
+                SELECT COUNT(*)
+                FROM {DB_SCHEMA}.customers c
+                {where_clause_c}
+            """
 
         # --------------------------------------------------
         # PAGINATION LOGIC
         # --------------------------------------------------
-        if cursor:
-            pagination_sql = f"LIMIT ${idx}"
-            values_with_pagination = values + [limit]
-        else:
-            pagination_sql = f"LIMIT ${idx} OFFSET ${idx + 1}"
-            values_with_pagination = values + [limit, offset]
+            if cursor:
+                pagination_sql = f"LIMIT ${idx}"
+                values_with_pagination = values + [limit]
+            else:
+                pagination_sql = f"LIMIT ${idx} OFFSET ${idx + 1}"
+                values_with_pagination = values + [limit, offset]
 
-        main_sql = f"""
-            SELECT c.*,
-                   e_rm.first_name AS rm_name,
-                   e_op.first_name AS op_name
-            FROM {DB_SCHEMA}.customers c
-            LEFT JOIN {DB_SCHEMA}.employees e_rm
-                   ON c.rm_id = e_rm.emp_id
-            LEFT JOIN {DB_SCHEMA}.employees e_op
-                   ON c.op_id = e_op.emp_id
-            {where_clause_c}
-            ORDER BY c.created_at DESC
-            {pagination_sql}
-        """
+            main_sql = f"""
+                SELECT c.*,
+                       e_rm.first_name AS rm_name,
+                       e_op.first_name AS op_name
+                FROM {DB_SCHEMA}.customers c
+                LEFT JOIN {DB_SCHEMA}.employees e_rm
+                       ON c.rm_id = e_rm.emp_id
+                LEFT JOIN {DB_SCHEMA}.employees e_op
+                       ON c.op_id = e_op.emp_id
+                {where_clause_c}
+                ORDER BY c.created_at DESC
+                {pagination_sql}
+            """
 
-        async with pool.acquire() as conn:
+            async with pool.acquire() as conn:
 
-            total_count = await conn.fetchval(count_sql, *values)
+                total_count = await conn.fetchval(count_sql, *values)
 
-            rows = await conn.fetch(main_sql, *values_with_pagination)
+                rows = await conn.fetch(main_sql, *values_with_pagination)
 
-        next_cursor = rows[-1]["created_at"] if rows else None
+            next_cursor = rows[-1]["created_at"] if rows else None
 
-        log.info(
-            "Customer filter success | total=%s returned=%s",
-            total_count,
-            len(rows),
+            log.info(
+                "Customer filter success | total=%s returned=%s",
+                total_count,
+                len(rows),
+            )
+            return {
+                "data": [dict(row) for row in rows],
+                "next_cursor": next_cursor
+            }
+
+        response_payload = await redis_get_or_set_json(
+            filter_cache_key,
+            loader=_load_filtered_customers,
+            ttl_seconds=300,
+            tags=[_customer_filter_tag()],
         )
-
-        return {
-            "data": [dict(row) for row in rows],
-            "next_cursor": next_cursor
-        }
+        return response_payload
 
     except asyncpg.PostgresError:
 
@@ -1312,6 +1403,7 @@ async def edit_customer(
                 customer_id,
             )
 
+            await _invalidate_customer_cache(customer_id)
             return {
                 **dict(new_row),
                 "message": "Customer updated successfully.",
@@ -1581,6 +1673,7 @@ async def soft_delete_customer(
                 gst_count,
             )
 
+            await _invalidate_customer_cache(customer_id)
             return {
                 "customer_id": customer_id,
                 "gst_id": gst_id,
@@ -1876,6 +1969,7 @@ async def activate_customer(
                 gst_count,
             )
 
+            await _invalidate_customer_cache(customer_id)
             return {
                 "customer_id": customer_id,
                 "gst_id": gst_id,

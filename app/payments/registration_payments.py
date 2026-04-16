@@ -6,6 +6,11 @@ from app.security.rbac import require_permission
 from app.payments.schemas import RegistrationPaymentIn
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_customer_visibility
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
@@ -14,6 +19,14 @@ router = APIRouter(
     prefix="/api/v1/payments",
     tags=["Registration Payments"]
 )
+
+
+def _registration_payments_filter_tag() -> str:
+    return "registration_payments:filter:index"
+
+
+async def _invalidate_registration_payments_cache() -> None:
+    await redis_invalidate_tag(_registration_payments_filter_tag())
 
 @router.post(
     "",
@@ -292,6 +305,7 @@ async def create_registration_payment(
             # RESPONSE
             # --------------------------------------------------
 
+            await _invalidate_registration_payments_cache()
             return {
                 **dict(payment_row),
                 "message": "Payment created successfully.",
@@ -361,6 +375,7 @@ async def list_registration_payments(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -453,6 +468,30 @@ async def list_registration_payments(
                 status_code=400,
                 detail="Invalid payment_mode value.",
             )
+    entity_type_norm = entity_type.strip().upper() if isinstance(entity_type, str) and entity_type.strip() else None
+    cache_key = build_cache_key(
+        "registration_payments:filter",
+        payment_id=payment_id,
+        customer_id=customer_id,
+        entity_id=entity_id,
+        entity_type=entity_type_norm,
+        payment_status=payment_status,
+        payment_mode=payment_mode,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        amount=amount,
+        amount_operator=amount_operator,
+        min_remaining=min_remaining,
+        max_remaining=max_remaining,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+        role=role_norm,
+        emp_id=int(current_emp_id) if str(current_emp_id).isdigit() else None,
+    )
 
     # --------------------------------------------------
     # DB Pool
@@ -469,7 +508,7 @@ async def list_registration_payments(
             detail="Database connection error.",
         )
 
-    try:
+    async def _load_registration_payments():
 
         conditions = []
         values = []
@@ -494,9 +533,9 @@ async def list_registration_payments(
             values.append(entity_id)
             param_index += 1
 
-        if entity_type and entity_type.strip():
+        if entity_type_norm:
             conditions.append(f"rp.entity_type = ${param_index}")
-            values.append(entity_type.strip().upper())
+            values.append(entity_type_norm)
             param_index += 1
 
         if payment_status:
@@ -580,7 +619,7 @@ async def list_registration_payments(
         # --------------------------------------------------
 
         visibility_sql, visibility_values, param_index = build_customer_visibility(
-            role,
+            role_norm,
             int(current_emp_id) if str(current_emp_id).isdigit() else None,
             param_index,
             DB_SCHEMA,
@@ -635,50 +674,52 @@ async def list_registration_payments(
 
         values_with_pagination = values + [limit, offset]
 
-        async with pool.acquire() as conn:
+        try:
+            async with pool.acquire() as conn:
+                total_count = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(data_sql, *values_with_pagination)
 
-            total_count = await conn.fetchval(count_sql, *values)
+            log.info(
+                "Payments dynamic_filter success | returned=%s total=%s",
+                len(rows),
+                total_count,
+            )
 
-            rows = await conn.fetch(data_sql, *values_with_pagination)
+            return {
+                "data": [dict(row) for row in rows],
+                "total": total_count,
+                "limit": limit,
+                "offset": offset,
+                "request_id": request_id,
+            }
 
-        log.info(
-            "Payments dynamic_filter success | returned=%s total=%s",
-            len(rows),
-            total_count,
-        )
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during payments filtering | error=%s",
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred during filtering.",
+            )
 
-        return {
-            "data": [dict(row) for row in rows],
-            "total": total_count,
-            "limit": limit,
-            "offset": offset,
-            "request_id": request_id,
-        }
+        except HTTPException:
+            raise
 
-    except asyncpg.PostgresError as e:
+        except Exception:
+            log.exception("Unexpected error during payments filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-        log.error(
-            "Database error during payments filtering | error=%s",
-            str(e),
-            exc_info=True,
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail="Database error occurred during filtering.",
-        )
-
-    except HTTPException:
-        raise
-
-    except Exception:
-
-        log.exception("Unexpected error during payments filtering")
-
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_registration_payments,
+        ttl_seconds=300,
+        tags=[_registration_payments_filter_tag()],
+    )
 
 # -------------------------------------------------------------------
 # SOFT DELETE REGISTRATION PAYMENT (Production Ready + Audit)
@@ -790,6 +831,7 @@ async def soft_delete_registration_payment(
                 "Registration payment soft deleted successfully | payment_id=%s",
                 payment_id,
             )
+            await _invalidate_registration_payments_cache()
 
             return {
                 **dict(deleted_row),
@@ -944,6 +986,7 @@ async def activate_registration_payment(
                 "Registration payment activated successfully | payment_id=%s",
                 payment_id,
             )
+            await _invalidate_registration_payments_cache()
 
             return {
                 **dict(activated_row),

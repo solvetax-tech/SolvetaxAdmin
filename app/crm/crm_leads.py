@@ -19,6 +19,11 @@ from app.crm.schemas import (
     CRMUIStagePitchItem,
 )
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 from app.security.rbac import require_permission
 from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
 
@@ -35,6 +40,53 @@ IST = ZoneInfo("Asia/Kolkata")
 #   DROP FUNCTION IF EXISTS solvetax.fn_crm_leads_touch_dial_on_milestone_stage();
 
 DEFAULT_CRM_ENTITY_TYPE = "GST_REGISTRATION"
+
+
+def _crm_ui_mappings_tag() -> str:
+    return "crm:ui_mappings:index"
+
+
+def _crm_leads_filter_tag() -> str:
+    return "crm:leads:filter:index"
+
+
+def _crm_activities_filter_tag() -> str:
+    return "crm:activities:filter:index"
+
+
+def _crm_stages_tag() -> str:
+    return "crm:stages:index"
+
+
+def _crm_lead_by_entity_tag() -> str:
+    return "crm:lead:by_entity:index"
+
+
+def _crm_lead_by_id_tag(lead_id: int) -> str:
+    return f"crm:lead:by_id:{lead_id}"
+
+
+def _crm_lead_calls_tag(lead_id: int) -> str:
+    return f"crm:lead:calls:{lead_id}"
+
+
+def _crm_lead_stage_history_tag(lead_id: int) -> str:
+    return f"crm:lead:stage_history:{lead_id}"
+
+
+def _crm_lead_activities_tag(lead_id: int) -> str:
+    return f"crm:lead:activities:{lead_id}"
+
+
+async def _invalidate_crm_cache(lead_id: Optional[int] = None) -> None:
+    await redis_invalidate_tag(_crm_leads_filter_tag())
+    await redis_invalidate_tag(_crm_activities_filter_tag())
+    await redis_invalidate_tag(_crm_lead_by_entity_tag())
+    if lead_id is not None:
+        await redis_invalidate_tag(_crm_lead_by_id_tag(lead_id))
+        await redis_invalidate_tag(_crm_lead_calls_tag(lead_id))
+        await redis_invalidate_tag(_crm_lead_stage_history_tag(lead_id))
+        await redis_invalidate_tag(_crm_lead_activities_tag(lead_id))
 
 
 def _entity_type_query(value: Optional[str]) -> str:
@@ -728,91 +780,103 @@ async def get_crm_stage_pitch_mappings(
     ),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ) -> CRMUIMappingsOut:
-    _get_user_context(current_user)
+    role, emp_id = _get_user_context(current_user)
     et = _entity_type_query(entity_type)
+    cache_key = build_cache_key("crm:ui_mappings:v2", entity_type=et, role=role, emp_id=emp_id)
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            try:
-                stage_rows = await conn.fetch(
-                    f"""
-                    SELECT stage, pitch_type_code, sort_order, entity_type
-                    FROM (
-                        SELECT DISTINCT ON (stage, pitch_type_code)
-                            stage, pitch_type_code, sort_order, entity_type
+
+    async def _load_ui_mappings():
+        try:
+            async with pool.acquire() as conn:
+                try:
+                    stage_rows = await conn.fetch(
+                        f"""
+                        SELECT stage, pitch_type_code, sort_order, entity_type
+                        FROM (
+                            SELECT DISTINCT ON (stage, pitch_type_code)
+                                stage, pitch_type_code, sort_order, entity_type
+                            FROM {DB_SCHEMA}.crm_stage_status_mappings
+                            WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active
+                              AND (entity_type = $1 OR entity_type IS NULL)
+                            ORDER BY stage, pitch_type_code, {_crm_mapping_type_precedence_sql(1)}, sort_order, stage
+                        ) picked
+                        ORDER BY sort_order, stage
+                        """,
+                        et,
+                    )
+                    status_rows = await conn.fetch(
+                        f"""
+                        SELECT pitch_type_code, call_status_code, sort_order, entity_type
+                        FROM (
+                            SELECT DISTINCT ON (pitch_type_code, call_status_code)
+                                pitch_type_code, call_status_code, sort_order, entity_type
+                            FROM {DB_SCHEMA}.crm_stage_status_mappings
+                            WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active
+                              AND (entity_type = $1 OR entity_type IS NULL)
+                            ORDER BY pitch_type_code, call_status_code, {_crm_mapping_type_precedence_sql(1)}, sort_order, call_status_code
+                        ) picked
+                        ORDER BY pitch_type_code, sort_order, call_status_code
+                        """,
+                        et,
+                    )
+                except asyncpg.UndefinedColumnError:
+                    stage_rows = await conn.fetch(
+                        f"""
+                        SELECT stage, pitch_type_code, sort_order
                         FROM {DB_SCHEMA}.crm_stage_status_mappings
                         WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active
-                          AND (entity_type = $1 OR entity_type IS NULL)
-                        ORDER BY stage, pitch_type_code, {_crm_mapping_type_precedence_sql(1)}, sort_order, stage
-                    ) picked
-                    ORDER BY sort_order, stage
-                    """,
-                    et,
-                )
-                status_rows = await conn.fetch(
-                    f"""
-                    SELECT pitch_type_code, call_status_code, sort_order, entity_type
-                    FROM (
-                        SELECT DISTINCT ON (pitch_type_code, call_status_code)
-                            pitch_type_code, call_status_code, sort_order, entity_type
+                        ORDER BY sort_order, stage
+                        """
+                    )
+                    status_rows = await conn.fetch(
+                        f"""
+                        SELECT pitch_type_code, call_status_code, sort_order
                         FROM {DB_SCHEMA}.crm_stage_status_mappings
                         WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active
-                          AND (entity_type = $1 OR entity_type IS NULL)
-                        ORDER BY pitch_type_code, call_status_code, {_crm_mapping_type_precedence_sql(1)}, sort_order, call_status_code
-                    ) picked
-                    ORDER BY pitch_type_code, sort_order, call_status_code
-                    """,
-                    et,
-                )
-            except asyncpg.UndefinedColumnError:
-                stage_rows = await conn.fetch(
-                    f"""
-                    SELECT stage, pitch_type_code, sort_order
-                    FROM {DB_SCHEMA}.crm_stage_status_mappings
-                    WHERE mapping_kind = 'STAGE_TO_PITCH' AND is_active
-                    ORDER BY sort_order, stage
-                    """
-                )
-                status_rows = await conn.fetch(
-                    f"""
-                    SELECT pitch_type_code, call_status_code, sort_order
-                    FROM {DB_SCHEMA}.crm_stage_status_mappings
-                    WHERE mapping_kind = 'PITCH_TO_STATUS' AND is_active
-                    ORDER BY pitch_type_code, sort_order, call_status_code
-                    """
-                )
-    except asyncpg.UndefinedTableError:
-        logger.exception(
-            "crm_stage_status_mappings table missing; see db/migrations/crm_stage_status_mappings_entity_type.sql"
-        )
-        raise HTTPException(status_code=500, detail="CRM UI mappings are not available.")
-    except asyncpg.PostgresError:
-        logger.exception("Database error while loading CRM UI mappings")
-        raise HTTPException(status_code=500, detail="Database error.")
-
-    pitch_to_statuses: dict[str, list[CRMUIPitchStatusItem]] = {}
-    for r in status_rows:
-        pitch = r["pitch_type_code"]
-        pitch_to_statuses.setdefault(pitch, []).append(
-            CRMUIPitchStatusItem(
-                call_status_code=r["call_status_code"],
-                sort_order=r["sort_order"],
-                entity_type=_mapping_row_entity_type(r),
+                        ORDER BY pitch_type_code, sort_order, call_status_code
+                        """
+                    )
+        except asyncpg.UndefinedTableError:
+            logger.exception(
+                "crm_stage_status_mappings table missing; see db/migrations/crm_stage_status_mappings_entity_type.sql"
             )
-        )
+            raise HTTPException(status_code=500, detail="CRM UI mappings are not available.")
+        except asyncpg.PostgresError:
+            logger.exception("Database error while loading CRM UI mappings")
+            raise HTTPException(status_code=500, detail="Database error.")
 
-    return CRMUIMappingsOut(
-        entity_type=et,
-        stage_to_pitch=[
-            CRMUIStagePitchItem(
-                stage=row["stage"],
-                pitch_type_code=row["pitch_type_code"],
-                sort_order=row["sort_order"],
-                entity_type=_mapping_row_entity_type(row),
+        pitch_to_statuses: dict[str, list[CRMUIPitchStatusItem]] = {}
+        for r in status_rows:
+            pitch = r["pitch_type_code"]
+            pitch_to_statuses.setdefault(pitch, []).append(
+                CRMUIPitchStatusItem(
+                    call_status_code=r["call_status_code"],
+                    sort_order=r["sort_order"],
+                    entity_type=_mapping_row_entity_type(r),
+                )
             )
-            for row in stage_rows
-        ],
-        pitch_to_statuses=pitch_to_statuses,
+
+        response_model = CRMUIMappingsOut(
+            entity_type=et,
+            stage_to_pitch=[
+                CRMUIStagePitchItem(
+                    stage=row["stage"],
+                    pitch_type_code=row["pitch_type_code"],
+                    sort_order=row["sort_order"],
+                    entity_type=_mapping_row_entity_type(row),
+                )
+                for row in stage_rows
+            ],
+            pitch_to_statuses=pitch_to_statuses,
+        )
+        # Store/cache as JSON object, not stringified model repr.
+        return response_model.model_dump()
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_ui_mappings,
+        ttl_seconds=300,
+        tags=[_crm_ui_mappings_tag()],
     )
 
 
@@ -847,67 +911,90 @@ async def filter_crm_leads(
             raise _validation_error("Invalid mobile filter.", {"mobile": "Must be a 10-digit number."})
         mobile = m
     et_filter = _entity_type_query(entity_type) if (entity_type is not None or entity_id is not None) else None
+    cache_key = build_cache_key(
+        "crm:leads:filter",
+        stage=stage,
+        follow_up_status=follow_up_status,
+        mobile=mobile,
+        rm_id=rm_id,
+        op_id=op_id,
+        is_active=is_active,
+        entity_type=et_filter or _entity_type_query(entity_type) if entity_type is not None else None,
+        entity_id=entity_id,
+        limit=limit,
+        offset=offset,
+        role=role,
+        emp_id=emp_id,
+    )
 
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            if stage:
-                valid_stages = await _fetch_valid_stage_codes(conn, et_filter or DEFAULT_CRM_ENTITY_TYPE)
-                if stage not in valid_stages:
-                    raise _validation_error(
-                        "Invalid stage filter.",
-                        {"stage": "Unsupported stage value."},
-                    )
-            where = ["TRUE"]
-            params = []
-            if stage:
-                params.append(stage)
-                where.append(f"l.stage = ${len(params)}")
-            if follow_up_status:
-                params.append(follow_up_status)
-                where.append(f"l.follow_up_status = ${len(params)}")
-            if mobile:
-                params.append(mobile)
-                where.append(f"l.mobile = ${len(params)}")
-            if rm_id is not None:
-                params.append(rm_id)
-                where.append(f"l.rm_id = ${len(params)}")
-            if op_id is not None:
-                params.append(op_id)
-                where.append(f"l.op_id = ${len(params)}")
-            if is_active is not None:
-                params.append(is_active)
-                where.append(f"l.is_active = ${len(params)}")
-            if entity_id is not None:
-                params.append(entity_id)
-                where.append(f"l.entity_id = ${len(params)}")
-                params.append(_entity_type_query(entity_type))
-                where.append(f"l.entity_type = ${len(params)}")
-            elif entity_type is not None:
-                params.append(_entity_type_query(entity_type))
-                where.append(f"l.entity_type = ${len(params)}")
+    async def _load_filtered_crm_leads():
+        try:
+            async with pool.acquire() as conn:
+                if stage:
+                    valid_stages = await _fetch_valid_stage_codes(conn, et_filter or DEFAULT_CRM_ENTITY_TYPE)
+                    if stage not in valid_stages:
+                        raise _validation_error(
+                            "Invalid stage filter.",
+                            {"stage": "Unsupported stage value."},
+                        )
+                where = ["TRUE"]
+                params = []
+                if stage:
+                    params.append(stage)
+                    where.append(f"l.stage = ${len(params)}")
+                if follow_up_status:
+                    params.append(follow_up_status)
+                    where.append(f"l.follow_up_status = ${len(params)}")
+                if mobile:
+                    params.append(mobile)
+                    where.append(f"l.mobile = ${len(params)}")
+                if rm_id is not None:
+                    params.append(rm_id)
+                    where.append(f"l.rm_id = ${len(params)}")
+                if op_id is not None:
+                    params.append(op_id)
+                    where.append(f"l.op_id = ${len(params)}")
+                if is_active is not None:
+                    params.append(is_active)
+                    where.append(f"l.is_active = ${len(params)}")
+                if entity_id is not None:
+                    params.append(entity_id)
+                    where.append(f"l.entity_id = ${len(params)}")
+                    params.append(_entity_type_query(entity_type))
+                    where.append(f"l.entity_type = ${len(params)}")
+                elif entity_type is not None:
+                    params.append(_entity_type_query(entity_type))
+                    where.append(f"l.entity_type = ${len(params)}")
 
-            vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
-            if vis_sql:
-                where.append(vis_sql)
-                params.extend(vis_vals)
+                vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
+                if vis_sql:
+                    where.append(vis_sql)
+                    params.extend(vis_vals)
 
-            count_params = list(params)
-            params.extend([limit, offset])
-            count_sql = f"SELECT COUNT(*) FROM {DB_SCHEMA}.crm_leads l WHERE {' AND '.join(where)}"
-            list_sql = f"""
-                SELECT l.*
-                FROM {DB_SCHEMA}.crm_leads l
-                WHERE {' AND '.join(where)}
-                ORDER BY l.updated_at DESC, l.id DESC
-                LIMIT ${len(params)-1} OFFSET ${len(params)}
-            """
-            total = await conn.fetchval(count_sql, *count_params)
-            rows = await conn.fetch(list_sql, *params)
-            return {"items": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
-    except asyncpg.PostgresError:
-        logger.exception("Database error while filtering CRM leads")
-        raise HTTPException(status_code=500, detail="Database error.")
+                count_params = list(params)
+                params.extend([limit, offset])
+                count_sql = f"SELECT COUNT(*) FROM {DB_SCHEMA}.crm_leads l WHERE {' AND '.join(where)}"
+                list_sql = f"""
+                    SELECT l.*
+                    FROM {DB_SCHEMA}.crm_leads l
+                    WHERE {' AND '.join(where)}
+                    ORDER BY l.updated_at DESC, l.id DESC
+                    LIMIT ${len(params)-1} OFFSET ${len(params)}
+                """
+                total = await conn.fetchval(count_sql, *count_params)
+                rows = await conn.fetch(list_sql, *params)
+                return {"items": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+        except asyncpg.PostgresError:
+            logger.exception("Database error while filtering CRM leads")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_filtered_crm_leads,
+        ttl_seconds=300,
+        tags=[_crm_leads_filter_tag()],
+    )
 
 
 @router.get("/activities/filter", summary="Filter CRM activities (visible leads only)")
@@ -983,102 +1070,131 @@ async def filter_crm_activities(
         )
 
     et_scope = _entity_type_query(entity_type) if (entity_type is not None or entity_id is not None) else None
+    cache_key = build_cache_key(
+        "crm:activities:filter",
+        lead_id=lead_id,
+        activity_type=activity_type,
+        call_type_code=call_type_code,
+        call_status_code=call_status_code,
+        old_stage=old_stage,
+        new_stage=new_stage,
+        performed_by=performed_by,
+        performed_at_from=performed_at_from.isoformat() if performed_at_from else None,
+        performed_at_to=performed_at_to.isoformat() if performed_at_to else None,
+        mobile=mobile,
+        lead_stage=lead_stage,
+        lead_is_active=lead_is_active,
+        entity_type=et_scope,
+        entity_id=entity_id,
+        limit=limit,
+        offset=offset,
+        role=role,
+        emp_id=emp_id,
+    )
 
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            valid_stages = await _fetch_valid_stage_codes(conn, et_scope or DEFAULT_CRM_ENTITY_TYPE)
-            if lead_stage is not None and lead_stage not in valid_stages:
-                raise _validation_error(
-                    "Invalid lead_stage filter.",
-                    {"lead_stage": "Unsupported stage value."},
-                )
-            if old_stage is not None and old_stage not in valid_stages:
-                raise _validation_error(
-                    "Invalid old_stage filter.",
-                    {"old_stage": "Unsupported stage value."},
-                )
-            if new_stage is not None and new_stage not in valid_stages:
-                raise _validation_error(
-                    "Invalid new_stage filter.",
-                    {"new_stage": "Unsupported stage value."},
-                )
+    async def _load_filtered_crm_activities():
+        try:
+            async with pool.acquire() as conn:
+                valid_stages = await _fetch_valid_stage_codes(conn, et_scope or DEFAULT_CRM_ENTITY_TYPE)
+                if lead_stage is not None and lead_stage not in valid_stages:
+                    raise _validation_error(
+                        "Invalid lead_stage filter.",
+                        {"lead_stage": "Unsupported stage value."},
+                    )
+                if old_stage is not None and old_stage not in valid_stages:
+                    raise _validation_error(
+                        "Invalid old_stage filter.",
+                        {"old_stage": "Unsupported stage value."},
+                    )
+                if new_stage is not None and new_stage not in valid_stages:
+                    raise _validation_error(
+                        "Invalid new_stage filter.",
+                        {"new_stage": "Unsupported stage value."},
+                    )
 
-            where = ["TRUE"]
-            params: list = []
+                where = ["TRUE"]
+                params: list = []
 
-            if lead_id is not None:
-                params.append(lead_id)
-                where.append(f"a.lead_id = ${len(params)}")
-            if activity_type is not None:
-                params.append(activity_type)
-                where.append(f"a.activity_type = ${len(params)}")
-            if call_type_code is not None:
-                params.append(call_type_code)
-                where.append(f"a.call_type_code = ${len(params)}")
-            if call_status_code is not None:
-                params.append(call_status_code)
-                where.append(f"a.call_status_code = ${len(params)}")
-            if old_stage is not None:
-                params.append(old_stage)
-                where.append(f"a.old_stage = ${len(params)}")
-            if new_stage is not None:
-                params.append(new_stage)
-                where.append(f"a.new_stage = ${len(params)}")
-            if performed_by is not None:
-                params.append(performed_by)
-                where.append(f"a.performed_by = ${len(params)}")
-            if performed_at_from is not None:
-                params.append(performed_at_from)
-                where.append(f"a.performed_at >= ${len(params)}")
-            if performed_at_to is not None:
-                params.append(performed_at_to)
-                where.append(f"a.performed_at <= ${len(params)}")
-            if mobile is not None:
-                params.append(mobile)
-                where.append(f"l.mobile = ${len(params)}")
-            if lead_stage is not None:
-                params.append(lead_stage)
-                where.append(f"l.stage = ${len(params)}")
-            if lead_is_active is not None:
-                params.append(lead_is_active)
-                where.append(f"l.is_active = ${len(params)}")
-            if entity_id is not None:
-                params.append(entity_id)
-                where.append(f"l.entity_id = ${len(params)}")
-                params.append(_entity_type_query(entity_type))
-                where.append(f"l.entity_type = ${len(params)}")
-            elif entity_type is not None:
-                params.append(_entity_type_query(entity_type))
-                where.append(f"l.entity_type = ${len(params)}")
+                if lead_id is not None:
+                    params.append(lead_id)
+                    where.append(f"a.lead_id = ${len(params)}")
+                if activity_type is not None:
+                    params.append(activity_type)
+                    where.append(f"a.activity_type = ${len(params)}")
+                if call_type_code is not None:
+                    params.append(call_type_code)
+                    where.append(f"a.call_type_code = ${len(params)}")
+                if call_status_code is not None:
+                    params.append(call_status_code)
+                    where.append(f"a.call_status_code = ${len(params)}")
+                if old_stage is not None:
+                    params.append(old_stage)
+                    where.append(f"a.old_stage = ${len(params)}")
+                if new_stage is not None:
+                    params.append(new_stage)
+                    where.append(f"a.new_stage = ${len(params)}")
+                if performed_by is not None:
+                    params.append(performed_by)
+                    where.append(f"a.performed_by = ${len(params)}")
+                if performed_at_from is not None:
+                    params.append(performed_at_from)
+                    where.append(f"a.performed_at >= ${len(params)}")
+                if performed_at_to is not None:
+                    params.append(performed_at_to)
+                    where.append(f"a.performed_at <= ${len(params)}")
+                if mobile is not None:
+                    params.append(mobile)
+                    where.append(f"l.mobile = ${len(params)}")
+                if lead_stage is not None:
+                    params.append(lead_stage)
+                    where.append(f"l.stage = ${len(params)}")
+                if lead_is_active is not None:
+                    params.append(lead_is_active)
+                    where.append(f"l.is_active = ${len(params)}")
+                if entity_id is not None:
+                    params.append(entity_id)
+                    where.append(f"l.entity_id = ${len(params)}")
+                    params.append(_entity_type_query(entity_type))
+                    where.append(f"l.entity_type = ${len(params)}")
+                elif entity_type is not None:
+                    params.append(_entity_type_query(entity_type))
+                    where.append(f"l.entity_type = ${len(params)}")
 
-            vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
-            if vis_sql:
-                where.append(vis_sql)
-                params.extend(vis_vals)
+                vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
+                if vis_sql:
+                    where.append(vis_sql)
+                    params.extend(vis_vals)
 
-            base_from = f"""
-                FROM {DB_SCHEMA}.crm_activities a
-                INNER JOIN {DB_SCHEMA}.crm_leads l ON l.id = a.lead_id
-            """
-            where_sql = " AND ".join(where)
-            count_params = list(params)
-            n = len(params)
-            list_params = list(params) + [limit, offset]
+                base_from = f"""
+                    FROM {DB_SCHEMA}.crm_activities a
+                    INNER JOIN {DB_SCHEMA}.crm_leads l ON l.id = a.lead_id
+                """
+                where_sql = " AND ".join(where)
+                count_params = list(params)
+                n = len(params)
+                list_params = list(params) + [limit, offset]
 
-            count_sql = f"SELECT COUNT(*) {base_from} WHERE {where_sql}"
-            list_sql = f"""
-                SELECT a.* {base_from}
-                WHERE {where_sql}
-                ORDER BY a.performed_at DESC, a.id DESC
-                LIMIT ${n + 1} OFFSET ${n + 2}
-            """
-            total = await conn.fetchval(count_sql, *count_params)
-            rows = await conn.fetch(list_sql, *list_params)
-            return {"items": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
-    except asyncpg.PostgresError:
-        logger.exception("Database error while filtering CRM activities")
-        raise HTTPException(status_code=500, detail="Database error.")
+                count_sql = f"SELECT COUNT(*) {base_from} WHERE {where_sql}"
+                list_sql = f"""
+                    SELECT a.* {base_from}
+                    WHERE {where_sql}
+                    ORDER BY a.performed_at DESC, a.id DESC
+                    LIMIT ${n + 1} OFFSET ${n + 2}
+                """
+                total = await conn.fetchval(count_sql, *count_params)
+                rows = await conn.fetch(list_sql, *list_params)
+                return {"items": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+        except asyncpg.PostgresError:
+            logger.exception("Database error while filtering CRM activities")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_filtered_crm_activities,
+        ttl_seconds=300,
+        tags=[_crm_activities_filter_tag()],
+    )
 
 
 @router.get("/stages", summary="CRM lead pipeline stages for UI")
@@ -1086,49 +1202,59 @@ async def get_crm_lead_stages(
     entity_type: Optional[str] = Query(None, description="Defaults to GST_REGISTRATION."),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ) -> CRMLeadStagesOut:
-    _get_user_context(current_user)
+    role, emp_id = _get_user_context(current_user)
     et = _entity_type_query(entity_type)
+    cache_key = build_cache_key("crm:stages", entity_type=et, role=role, emp_id=emp_id)
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            try:
-                rows = await conn.fetch(
-                    f"""
-                    SELECT id, code, name, sort_order
-                    FROM {DB_SCHEMA}.crm_lead_stages
-                    WHERE is_active
-                      AND (entity_type = $1 OR entity_type IS NULL)
-                    ORDER BY sort_order, code
-                    """,
-                    et,
-                )
-            except asyncpg.UndefinedColumnError:
-                rows = await conn.fetch(
-                    f"""
-                    SELECT id, code, name, sort_order
-                    FROM {DB_SCHEMA}.crm_lead_stages
-                    WHERE is_active
-                    ORDER BY sort_order, code
-                    """
-                )
-    except asyncpg.UndefinedTableError:
-        logger.exception("crm_lead_stages missing; run docs/65-crm-lead-stages.sql")
-        raise HTTPException(status_code=500, detail="CRM lead stages are not available.")
-    except asyncpg.PostgresError:
-        logger.exception("Database error while loading CRM lead stages")
-        raise HTTPException(status_code=500, detail="Database error.")
 
-    return CRMLeadStagesOut(
-        entity_type=et,
-        stages=[
-            CRMLeadStageItem(
-                id=r["id"],
-                code=r["code"],
-                name=r["name"],
-                sort_order=r["sort_order"],
-            )
-            for r in rows
-        ],
+    async def _load_crm_stages():
+        try:
+            async with pool.acquire() as conn:
+                try:
+                    rows = await conn.fetch(
+                        f"""
+                        SELECT id, code, name, sort_order
+                        FROM {DB_SCHEMA}.crm_lead_stages
+                        WHERE is_active
+                          AND (entity_type = $1 OR entity_type IS NULL)
+                        ORDER BY sort_order, code
+                        """,
+                        et,
+                    )
+                except asyncpg.UndefinedColumnError:
+                    rows = await conn.fetch(
+                        f"""
+                        SELECT id, code, name, sort_order
+                        FROM {DB_SCHEMA}.crm_lead_stages
+                        WHERE is_active
+                        ORDER BY sort_order, code
+                        """
+                    )
+        except asyncpg.UndefinedTableError:
+            logger.exception("crm_lead_stages missing; run docs/65-crm-lead-stages.sql")
+            raise HTTPException(status_code=500, detail="CRM lead stages are not available.")
+        except asyncpg.PostgresError:
+            logger.exception("Database error while loading CRM lead stages")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+        return CRMLeadStagesOut(
+            entity_type=et,
+            stages=[
+                CRMLeadStageItem(
+                    id=r["id"],
+                    code=r["code"],
+                    name=r["name"],
+                    sort_order=r["sort_order"],
+                )
+                for r in rows
+            ],
+        )
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_crm_stages,
+        ttl_seconds=300,
+        tags=[_crm_stages_tag()],
     )
 
 
@@ -1141,47 +1267,71 @@ async def get_crm_lead_by_entity(
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
     et = _entity_type_query(entity_type)
+    cache_key = build_cache_key(
+        "crm:lead:by_entity",
+        entity_type=et,
+        entity_id=entity_id,
+        role=role,
+        emp_id=emp_id,
+    )
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT l.* FROM {DB_SCHEMA}.crm_leads l
-                WHERE l.entity_type = $1 AND l.entity_id = $2 AND l.is_active = TRUE
-                ORDER BY l.updated_at DESC NULLS LAST, l.id DESC
-                LIMIT 1
-                """,
-                et,
-                entity_id,
-            )
-            if not row:
-                raise HTTPException(status_code=404, detail="CRM lead not found for this entity.")
-            lead_id = row["id"]
-            vis = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
-            if not vis:
-                raise HTTPException(status_code=404, detail="CRM lead not found.")
-            return dict(vis)
-    except HTTPException:
-        raise
-    except asyncpg.PostgresError:
-        logger.exception("Database error while fetching CRM lead by entity")
-        raise HTTPException(status_code=500, detail="Database error.")
+    async def _load_crm_lead_by_entity():
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT l.* FROM {DB_SCHEMA}.crm_leads l
+                    WHERE l.entity_type = $1 AND l.entity_id = $2 AND l.is_active = TRUE
+                    ORDER BY l.updated_at DESC NULLS LAST, l.id DESC
+                    LIMIT 1
+                    """,
+                    et,
+                    entity_id,
+                )
+                if not row:
+                    raise HTTPException(status_code=404, detail="CRM lead not found for this entity.")
+                lead_id = row["id"]
+                vis = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                if not vis:
+                    raise HTTPException(status_code=404, detail="CRM lead not found.")
+                return dict(vis)
+        except HTTPException:
+            raise
+        except asyncpg.PostgresError:
+            logger.exception("Database error while fetching CRM lead by entity")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_crm_lead_by_entity,
+        ttl_seconds=300,
+        tags=[_crm_lead_by_entity_tag()],
+    )
 
 
 @router.get("/{lead_id:int}", summary="Get CRM lead by id")
 async def get_crm_lead(lead_id: int, current_user=Depends(require_permission("EMPLOYEE", "READ"))):
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
+    cache_key = build_cache_key("crm:lead:by_id", lead_id=lead_id, role=role, emp_id=emp_id)
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            row = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
-            if not row:
-                raise HTTPException(status_code=404, detail="CRM lead not found.")
-            return dict(row)
-    except asyncpg.PostgresError:
-        logger.exception("Database error while fetching CRM lead")
-        raise HTTPException(status_code=500, detail="Database error.")
+    async def _load_crm_lead():
+        try:
+            async with pool.acquire() as conn:
+                row = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                if not row:
+                    raise HTTPException(status_code=404, detail="CRM lead not found.")
+                return dict(row)
+        except asyncpg.PostgresError:
+            logger.exception("Database error while fetching CRM lead")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_crm_lead,
+        ttl_seconds=300,
+        tags=[_crm_lead_by_id_tag(lead_id)],
+    )
 
 
 @router.post("/{lead_id:int}/edit", summary="Edit CRM lead")
@@ -1226,7 +1376,9 @@ async def edit_crm_lead(
                     f"UPDATE {DB_SCHEMA}.crm_leads SET {', '.join(fields)} WHERE id = ${idx} RETURNING *",
                     *values,
                 )
-                return {"message": "CRM lead updated successfully.", "lead": dict(new_row)}
+                result = {"message": "CRM lead updated successfully.", "lead": dict(new_row)}
+            await _invalidate_crm_cache(lead_id)
+            return result
     except asyncpg.exceptions.ForeignKeyViolationError:
         raise _validation_error("Invalid foreign key reference.", {"rm_id/op_id": "Referenced employee not found."})
     except asyncpg.exceptions.CheckViolationError as e:
@@ -1249,79 +1401,95 @@ async def list_crm_lead_call_activities(
     """CALL rows only: last_dailed_at, last_connected_at, call_status_code, call_type_code, old/new stage."""
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
+    cache_key = build_cache_key(
+        "crm:lead:calls",
+        lead_id=lead_id,
+        limit=limit,
+        offset=offset,
+        role=role,
+        emp_id=emp_id,
+    )
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
-            if not lead:
-                raise HTTPException(status_code=404, detail="CRM lead not found.")
+    async def _load_crm_lead_call_activities():
+        try:
+            async with pool.acquire() as conn:
+                lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                if not lead:
+                    raise HTTPException(status_code=404, detail="CRM lead not found.")
 
-            sql_calls_with_ts = f"""
-                SELECT
-                    a.id,
-                    a.lead_id,
-                    a.activity_type,
-                    a.call_type_code,
-                    a.call_status_code,
-                    a.old_stage,
-                    a.new_stage,
-                    a.followup_at,
-                    a.remarks,
-                    a.performed_by,
-                    e.first_name AS performed_by_first_name,
-                    a.performed_at,
-                    a.created_at,
-                    a.last_dailed_at,
-                    a.last_connected_at
-                FROM {DB_SCHEMA}.crm_activities a
-                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = a.performed_by
-                WHERE a.lead_id = $1
-                  AND a.activity_type = 'CALL'
-                ORDER BY a.performed_at DESC, a.id DESC
-                LIMIT $2 OFFSET $3
-                """
-            sql_calls_no_ts = f"""
-                SELECT
-                    a.id,
-                    a.lead_id,
-                    a.activity_type,
-                    a.call_type_code,
-                    a.call_status_code,
-                    a.old_stage,
-                    a.new_stage,
-                    a.followup_at,
-                    a.remarks,
-                    a.performed_by,
-                    e.first_name AS performed_by_first_name,
-                    a.performed_at,
-                    a.created_at
-                FROM {DB_SCHEMA}.crm_activities a
-                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = a.performed_by
-                WHERE a.lead_id = $1
-                  AND a.activity_type = 'CALL'
-                ORDER BY a.performed_at DESC, a.id DESC
-                LIMIT $2 OFFSET $3
-                """
-            try:
-                rows = await conn.fetch(sql_calls_with_ts, lead_id, limit, offset)
-            except asyncpg.UndefinedColumnError:
-                rows = await conn.fetch(sql_calls_no_ts, lead_id, limit, offset)
-                rows = [
-                    {**dict(r), "last_dailed_at": None, "last_connected_at": None}
-                    for r in rows
-                ]
-            else:
-                rows = [dict(r) for r in rows]
+                sql_calls_with_ts = f"""
+                    SELECT
+                        a.id,
+                        a.lead_id,
+                        a.activity_type,
+                        a.call_type_code,
+                        a.call_status_code,
+                        a.old_stage,
+                        a.new_stage,
+                        a.followup_at,
+                        a.remarks,
+                        a.performed_by,
+                        e.first_name AS performed_by_first_name,
+                        a.performed_at,
+                        a.created_at,
+                        a.last_dailed_at,
+                        a.last_connected_at
+                    FROM {DB_SCHEMA}.crm_activities a
+                    LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = a.performed_by
+                    WHERE a.lead_id = $1
+                      AND a.activity_type = 'CALL'
+                    ORDER BY a.performed_at DESC, a.id DESC
+                    LIMIT $2 OFFSET $3
+                    """
+                sql_calls_no_ts = f"""
+                    SELECT
+                        a.id,
+                        a.lead_id,
+                        a.activity_type,
+                        a.call_type_code,
+                        a.call_status_code,
+                        a.old_stage,
+                        a.new_stage,
+                        a.followup_at,
+                        a.remarks,
+                        a.performed_by,
+                        e.first_name AS performed_by_first_name,
+                        a.performed_at,
+                        a.created_at
+                    FROM {DB_SCHEMA}.crm_activities a
+                    LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = a.performed_by
+                    WHERE a.lead_id = $1
+                      AND a.activity_type = 'CALL'
+                    ORDER BY a.performed_at DESC, a.id DESC
+                    LIMIT $2 OFFSET $3
+                    """
+                try:
+                    rows = await conn.fetch(sql_calls_with_ts, lead_id, limit, offset)
+                except asyncpg.UndefinedColumnError:
+                    rows = await conn.fetch(sql_calls_no_ts, lead_id, limit, offset)
+                    rows = [
+                        {**dict(r), "last_dailed_at": None, "last_connected_at": None}
+                        for r in rows
+                    ]
+                else:
+                    rows = [dict(r) for r in rows]
 
-            return {
-                "lead_id": lead_id,
-                "items": rows,
-                "limit": limit,
-                "offset": offset,
-            }
-    except asyncpg.PostgresError:
-        logger.exception("Database error while fetching CRM call activities")
-        raise HTTPException(status_code=500, detail="Database error.")
+                return {
+                    "lead_id": lead_id,
+                    "items": rows,
+                    "limit": limit,
+                    "offset": offset,
+                }
+        except asyncpg.PostgresError:
+            logger.exception("Database error while fetching CRM call activities")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_crm_lead_call_activities,
+        ttl_seconds=300,
+        tags=[_crm_lead_calls_tag(lead_id)],
+    )
 
 
 @router.get(
@@ -1337,14 +1505,23 @@ async def list_crm_lead_stage_activity_history(
     """Rows where old_stage and new_stage differ (calls that moved stage, SYSTEM moves, etc.)."""
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
+    cache_key = build_cache_key(
+        "crm:lead:stage_history",
+        lead_id=lead_id,
+        limit=limit,
+        offset=offset,
+        role=role,
+        emp_id=emp_id,
+    )
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
-            if not lead:
-                raise HTTPException(status_code=404, detail="CRM lead not found.")
+    async def _load_crm_lead_stage_history():
+        try:
+            async with pool.acquire() as conn:
+                lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                if not lead:
+                    raise HTTPException(status_code=404, detail="CRM lead not found.")
 
-            sql_stage_with_ts = f"""
+                sql_stage_with_ts = f"""
                 SELECT
                     a.id,
                     a.lead_id,
@@ -1368,7 +1545,7 @@ async def list_crm_lead_stage_activity_history(
                 ORDER BY a.performed_at DESC, a.id DESC
                 LIMIT $2 OFFSET $3
                 """
-            sql_stage_no_ts = f"""
+                sql_stage_no_ts = f"""
                 SELECT
                     a.id,
                     a.lead_id,
@@ -1390,26 +1567,33 @@ async def list_crm_lead_stage_activity_history(
                 ORDER BY a.performed_at DESC, a.id DESC
                 LIMIT $2 OFFSET $3
                 """
-            try:
-                rows = await conn.fetch(sql_stage_with_ts, lead_id, limit, offset)
-            except asyncpg.UndefinedColumnError:
-                rows = await conn.fetch(sql_stage_no_ts, lead_id, limit, offset)
-                rows = [
-                    {**dict(r), "last_dailed_at": None, "last_connected_at": None}
-                    for r in rows
-                ]
-            else:
-                rows = [dict(r) for r in rows]
+                try:
+                    rows = await conn.fetch(sql_stage_with_ts, lead_id, limit, offset)
+                except asyncpg.UndefinedColumnError:
+                    rows = await conn.fetch(sql_stage_no_ts, lead_id, limit, offset)
+                    rows = [
+                        {**dict(r), "last_dailed_at": None, "last_connected_at": None}
+                        for r in rows
+                    ]
+                else:
+                    rows = [dict(r) for r in rows]
 
-            return {
-                "lead_id": lead_id,
-                "items": rows,
-                "limit": limit,
-                "offset": offset,
-            }
-    except asyncpg.PostgresError:
-        logger.exception("Database error while fetching CRM stage activity history")
-        raise HTTPException(status_code=500, detail="Database error.")
+                return {
+                    "lead_id": lead_id,
+                    "items": rows,
+                    "limit": limit,
+                    "offset": offset,
+                }
+        except asyncpg.PostgresError:
+            logger.exception("Database error while fetching CRM stage activity history")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_crm_lead_stage_history,
+        ttl_seconds=300,
+        tags=[_crm_lead_stage_history_tag(lead_id)],
+    )
 
 
 @router.get("/{lead_id:int}/activities", summary="Get CRM lead activities")
@@ -1421,29 +1605,45 @@ async def list_crm_activities(
 ):
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
+    cache_key = build_cache_key(
+        "crm:lead:activities",
+        lead_id=lead_id,
+        limit=limit,
+        offset=offset,
+        role=role,
+        emp_id=emp_id,
+    )
     pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
-            if not lead:
-                raise HTTPException(status_code=404, detail="CRM lead not found.")
+    async def _load_crm_activities():
+        try:
+            async with pool.acquire() as conn:
+                lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                if not lead:
+                    raise HTTPException(status_code=404, detail="CRM lead not found.")
 
-            rows = await conn.fetch(
-                f"""
-                SELECT a.*
-                FROM {DB_SCHEMA}.crm_activities a
-                WHERE a.lead_id = $1
-                ORDER BY a.performed_at DESC, a.id DESC
-                LIMIT $2 OFFSET $3
-                """,
-                lead_id,
-                limit,
-                offset,
-            )
-            return {"items": [dict(r) for r in rows], "limit": limit, "offset": offset}
-    except asyncpg.PostgresError:
-        logger.exception("Database error while fetching CRM activities")
-        raise HTTPException(status_code=500, detail="Database error.")
+                rows = await conn.fetch(
+                    f"""
+                    SELECT a.*
+                    FROM {DB_SCHEMA}.crm_activities a
+                    WHERE a.lead_id = $1
+                    ORDER BY a.performed_at DESC, a.id DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    lead_id,
+                    limit,
+                    offset,
+                )
+                return {"items": [dict(r) for r in rows], "limit": limit, "offset": offset}
+        except asyncpg.PostgresError:
+            logger.exception("Database error while fetching CRM activities")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_crm_activities,
+        ttl_seconds=300,
+        tags=[_crm_lead_activities_tag(lead_id)],
+    )
 
 
 @router.post("/{lead_id:int}/followup-status", summary="Update CRM lead follow-up status")
@@ -1477,9 +1677,11 @@ async def update_crm_followup_status(
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
 
-                return await _crm_apply_followup_status(
+                result = await _crm_apply_followup_status(
                     conn, emp_id, lead_id, lead, payload, follow_up_status, log
                 )
+            await _invalidate_crm_cache(lead_id)
+            return result
     except asyncpg.exceptions.CheckViolationError as e:
         raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
     except asyncpg.PostgresError:
@@ -1508,7 +1710,9 @@ async def update_crm_call(
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
 
-                return await _crm_apply_call_update(conn, role, emp_id, lead_id, lead, payload, log)
+                result = await _crm_apply_call_update(conn, role, emp_id, lead_id, lead, payload, log)
+            await _invalidate_crm_cache(lead_id)
+            return result
     except asyncpg.exceptions.ForeignKeyViolationError:
         raise _validation_error("Invalid foreign key reference.", {"performed_by": "Employee reference invalid."})
     except asyncpg.exceptions.CheckViolationError as e:

@@ -3,21 +3,236 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Depends, status
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from fastapi import Query
 
 from app.follow_ups.schemas import (
     CreateFilingFollowupRequest,
     CreateFilingFollowupResponse,
     UpdateFilingFollowupRequest,
     UpdateFilingFollowupResponse,
+    FilingFollowupListResponse,
 )
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_customer_service_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 
 router = APIRouter(
     prefix="/api/v1/filing-followups",
     tags=["GST Filing Followups"],
 )
+
+
+async def _invalidate_filing_followup_related_cache() -> None:
+    """
+    Invalidate cache tags that can be impacted by followup create/update flows.
+    This keeps service list and dashboard followup-sensitive views fresh.
+    """
+    tags = (
+        "filing_followups:filter:index",
+        "customer_services:filter:index",
+        "customer_services:dashboard:index",
+        "customer_services:pending:index",
+        "dashboard:gst_missed:gt_one:index",
+        "dashboard:gst_missed:buckets:index",
+        "dashboard:gst_missed:exact_one:index",
+    )
+    for tag in tags:
+        await redis_invalidate_tag(tag)
+
+
+@router.get(
+    "",
+    response_model=FilingFollowupListResponse,
+    summary="List GST Filing Manual Followups",
+)
+async def list_filing_followups(
+    followup_id: Optional[int] = Query(None, gt=0),
+    customer_service_id: Optional[int] = Query(None, gt=0),
+    assigned_to: Optional[int] = Query(None, gt=0),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    mode: Optional[str] = Query(None),
+    entity_id: Optional[int] = Query(None, gt=0),
+    service_id: Optional[int] = Query(None, gt=0),
+    followup_from: Optional[datetime] = Query(None),
+    followup_to: Optional[datetime] = Query(None),
+    created_from: Optional[datetime] = Query(None),
+    created_to: Optional[datetime] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "list_filing_followups"},
+    )
+
+    status_norm = status_filter.strip().upper() if isinstance(status_filter, str) else None
+    mode_norm = mode.strip().upper() if isinstance(mode, str) else None
+    valid_status = {"PENDING", "COMPLETED", "MISSED", "CANCELLED"}
+    valid_mode = {"MANUAL", "AUTO"}
+    if status_norm and status_norm not in valid_status:
+        raise HTTPException(status_code=400, detail="Invalid status value")
+    if mode_norm and mode_norm not in valid_mode:
+        raise HTTPException(status_code=400, detail="Invalid mode value")
+    if followup_from and followup_to and followup_from > followup_to:
+        raise HTTPException(status_code=400, detail="followup_from must be <= followup_to")
+    if created_from and created_to and created_from > created_to:
+        raise HTTPException(status_code=400, detail="created_from must be <= created_to")
+
+    cache_key = build_cache_key(
+        "filing_followups:list",
+        role=role,
+        emp_id=emp_id,
+        followup_id=followup_id,
+        customer_service_id=customer_service_id,
+        assigned_to=assigned_to,
+        status=status_norm,
+        mode=mode_norm,
+        entity_id=entity_id,
+        service_id=service_id,
+        followup_from=followup_from,
+        followup_to=followup_to,
+        created_from=created_from,
+        created_to=created_to,
+        limit=limit,
+        offset=offset,
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("DB connection failed")
+        raise HTTPException(500, "Database connection error")
+
+    async def _load_filing_followups():
+        conditions = ["f.entity_type = 'GST_FILING'"]
+        values = []
+        idx = 1
+
+        if followup_id is not None:
+            conditions.append(f"f.id = ${idx}")
+            values.append(followup_id)
+            idx += 1
+        if customer_service_id is not None:
+            conditions.append(f"f.customer_service_id = ${idx}")
+            values.append(customer_service_id)
+            idx += 1
+        if assigned_to is not None:
+            conditions.append(f"f.assigned_to = ${idx}")
+            values.append(assigned_to)
+            idx += 1
+        if status_norm:
+            conditions.append(f"f.status = ${idx}")
+            values.append(status_norm)
+            idx += 1
+        if mode_norm:
+            conditions.append(f"f.mode = ${idx}")
+            values.append(mode_norm)
+            idx += 1
+        if entity_id is not None:
+            conditions.append(f"f.entity_id = ${idx}")
+            values.append(entity_id)
+            idx += 1
+        if service_id is not None:
+            conditions.append(f"f.service_id = ${idx}")
+            values.append(service_id)
+            idx += 1
+        if followup_from is not None:
+            conditions.append(f"f.followup_at >= ${idx}")
+            values.append(followup_from)
+            idx += 1
+        if followup_to is not None:
+            conditions.append(f"f.followup_at <= ${idx}")
+            values.append(followup_to)
+            idx += 1
+        if created_from is not None:
+            conditions.append(f"f.created_at >= ${idx}")
+            values.append(created_from)
+            idx += 1
+        if created_to is not None:
+            conditions.append(f"f.created_at <= ${idx}")
+            values.append(created_to)
+            idx += 1
+
+        visibility_sql, visibility_values, _ = build_customer_service_visibility(
+            role,
+            emp_id,
+            idx,
+            DB_SCHEMA,
+        )
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+        count_sql = f"""
+            SELECT COUNT(*) AS total_count
+            FROM {DB_SCHEMA}.customer_service_followups f
+            JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+            {where_clause}
+        """
+        data_sql = f"""
+            SELECT
+                f.id,
+                f.customer_service_id,
+                f.mode,
+                f.followup_at,
+                f.status,
+                f.remarks,
+                f.assigned_to,
+                f.created_by,
+                f.completed_at,
+                f.reminder_sent,
+                f.created_at,
+                f.updated_at,
+                f.entity_type,
+                f.entity_id,
+                f.service_id,
+                f.reminder_count,
+                f.missed_at
+            FROM {DB_SCHEMA}.customer_service_followups f
+            JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+            {where_clause}
+            ORDER BY f.followup_at ASC, f.id DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                total_count = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(data_sql, *(values + [limit, offset]))
+        except asyncpg.PostgresError:
+            log.exception("DB error while listing filing followups")
+            raise HTTPException(500, "Database error occurred")
+        except Exception:
+            log.exception("Unexpected error while listing filing followups")
+            raise HTTPException(500, "Internal server error")
+
+        return {
+            "data": [dict(row) for row in rows],
+            "count": len(rows),
+            "total_count": int(total_count or 0),
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_filing_followups,
+        ttl_seconds=300,
+        tags=["filing_followups:filter:index"],
+    )
 
 
 @router.post(
@@ -232,6 +447,7 @@ async def create_filing_followup(
             payload.customer_service_id,
             assigned_to,
         )
+        await _invalidate_filing_followup_related_cache()
 
         return CreateFilingFollowupResponse(
             id=new_id,
@@ -498,6 +714,7 @@ async def update_filing_followup(
                 )
 
         log.info("Filing followup updated successfully | id=%s", followup_id)
+        await _invalidate_filing_followup_related_cache()
 
         return UpdateFilingFollowupResponse(
             id=followup_id,
@@ -514,3 +731,4 @@ async def update_filing_followup(
     except Exception:
         log.exception("Unexpected error")
         raise HTTPException(500, "Internal server error")
+

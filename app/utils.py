@@ -23,6 +23,12 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 # Make DB_SCHEMA available at module level
 DB_SCHEMA = os.getenv("DB_SCHEMA", "solvetax")
 
+# Redis configuration from .env
+# Supports both existing keys (host/port/password) and REDIS_* variants.
+REDIS_HOST = (os.getenv("REDIS_HOST") or os.getenv("host") or "").strip()
+REDIS_PORT = int((os.getenv("REDIS_PORT") or os.getenv("port") or "6379").strip())
+REDIS_PASSWORD = (os.getenv("REDIS_PASSWORD") or os.getenv("password") or "").strip()
+
 
 @dataclass(frozen=True)
 class AzureOpenAIBusinessDescriptionSettings:

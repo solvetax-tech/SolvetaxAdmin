@@ -3,6 +3,7 @@ from app.sign_up.schemas import SignupRequest, SignupResponse, ErrorResponse
 from app.utils import get_db_pool, hash_password, is_password_strong, DB_SCHEMA, generate_uuid
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.redis_cache import invalidate_tag as redis_invalidate_tag
 from dotenv import load_dotenv
 from typing import Optional
 import os
@@ -14,6 +15,13 @@ from datetime import datetime, timezone  # ✅ ADDED
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 router = APIRouter(prefix="/app/v1", tags=["Signup"])
+
+
+async def _invalidate_signup_related_cache(team_id: Optional[int]) -> None:
+    await redis_invalidate_tag("version:filter:index")
+    await redis_invalidate_tag("teams:list:index")
+    if team_id is not None:
+        await redis_invalidate_tag(f"teams:members:index:{team_id}")
 
 
 # --------------------------------------------------
@@ -504,6 +512,7 @@ async def signup(
             )
 
         log.info("[signup] Employee created successfully id=%s", created_id)
+        await _invalidate_signup_related_cache(payload.team_id)
 
         return SignupResponse(
             emp_id=created_id,

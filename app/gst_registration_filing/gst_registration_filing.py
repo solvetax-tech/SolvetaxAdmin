@@ -21,6 +21,11 @@ from app.utils import (
 )
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 from zoneinfo import ZoneInfo
 import json
 import uuid
@@ -158,6 +163,26 @@ _LEAD_DAYS_QUARTERLY = 12
 _LEAD_DAYS_YEARLY_ANNUAL = 7
 
 
+def _gst_filing_filter_tag() -> str:
+    return "gst_filing:filter:index"
+
+
+def _gst_filing_prefill_tag(gst_registration_id: int) -> str:
+    return f"gst_filing:prefill:index:{gst_registration_id}"
+
+
+async def _invalidate_gst_filing_cache(gst_registration_id: Optional[int] = None) -> None:
+    await redis_invalidate_tag(_gst_filing_filter_tag())
+    await redis_invalidate_tag("customer_services:filter:index")
+    await redis_invalidate_tag("customer_services:dashboard:index")
+    await redis_invalidate_tag("customer_services:pending:index")
+    await redis_invalidate_tag("dashboard:gst_missed:gt_one:index")
+    await redis_invalidate_tag("dashboard:gst_missed:buckets:index")
+    await redis_invalidate_tag("dashboard:gst_missed:exact_one:index")
+    if gst_registration_id is not None:
+        await redis_invalidate_tag(_gst_filing_prefill_tag(gst_registration_id))
+
+
 def _lead_days_for_periodic_frequency(filing_frequency: str) -> int:
     if filing_frequency == "MONTHLY":
         return _LEAD_DAYS_MONTHLY
@@ -243,6 +268,7 @@ async def filter_gst_filings(
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
     role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -421,7 +447,7 @@ async def filter_gst_filings(
         # VISIBILITY
         # ----------------------------
         visibility_sql, visibility_values, idx = build_gst_filing_visibility(
-            role, emp_id, idx, DB_SCHEMA
+            role_norm, emp_id, idx, DB_SCHEMA
         )
 
         if visibility_sql:
@@ -452,24 +478,68 @@ async def filter_gst_filings(
                 LIMIT ${idx} OFFSET ${idx+1}
             """
 
+        cache_key = build_cache_key(
+            "gst_filing:filter",
+            id=id,
+            customer_id=customer_id,
+            gst_registration_id=gst_registration_id,
+            gstin=(gstin or "").strip().upper() or None,
+            service_id=service_id,
+            filing_category=(filing_category or "").strip().upper() or None,
+            filing_period=(filing_period or "").strip().upper() or None,
+            filing_frequency=(filing_frequency or "").strip().upper() or None,
+            taxpayer_type=(taxpayer_type or "").strip().upper() or None,
+            turnover_details=(turnover_details or "").strip().upper() or None,
+            state=(state or "").strip().upper() or None,
+            status=(status or "").strip().upper() or None,
+            statuses=[s.upper() for s in statuses] if statuses else None,
+            rm_id=rm_id,
+            op_id=op_id,
+            username=(username or "").strip() or None,
+            email_id=(email_id or "").strip().lower() or None,
+            rent_min=rent_min,
+            rent_max=rent_max,
+            rule14a=rule14a,
+            due_from=due_from,
+            due_to=due_to,
+            created_from=created_from,
+            created_to=created_to,
+            data_received_from=data_received_from,
+            data_received_to=data_received_to,
+            is_active=is_active,
+            include_inactive=include_inactive,
+            is_overdue=is_overdue,
+            is_upcoming=is_upcoming,
+            is_auto_enabled=is_auto_enabled,
+            is_auto_generated=is_auto_generated,
+            include_details=include_details,
+            limit=limit,
+            offset=offset,
+            role=role_norm,
+            emp_id=emp_id,
+        )
         values += [limit, offset]
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(query, *values)
+        async def _load_filter_gst_filings():
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *values)
+            data = [dict(r) for r in rows]
+            for d in data:
+                d["password"] = None
+            return {
+                "data": data,
+                "count": len(data),
+                "limit": limit,
+                "offset": offset,
+                "request_id": request_id
+            }
 
-        data = [dict(r) for r in rows]
-
-        # 🔥 PASSWORD MASK
-        for d in data:
-            d["password"] = None
-
-        return {
-            "data": data,
-            "count": len(data),
-            "limit": limit,
-            "offset": offset,
-            "request_id": request_id
-        }
+        return await redis_get_or_set_json(
+            cache_key,
+            loader=_load_filter_gst_filings,
+            ttl_seconds=300,
+            tags=[_gst_filing_filter_tag()],
+        )
 
     except Exception:
         log.exception("Filter error")
@@ -545,47 +615,62 @@ async def get_gst_registration_prefill_for_filing(
           ON c.customer_id = g.customer_id
         WHERE {where_clause}
     """
-
-    try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(query, *values)
-    except Exception:
-        log.exception("Prefill query failed")
-        raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
-
-    if not row:
-        raise HTTPException(404, GstFilingApiMessages.PREFILL_GST_REGISTRATION_NOT_FOUND)
-
-    r = dict(row)
-    pwd = r.get("password")
-    password_set = bool(pwd and str(pwd).strip())
-
-    taxpayer_type = _upper_or_none(
-        r.get("taxpayer_type") or r.get("registration_type")
-    )
-    filing_frequency = _upper_or_none(
-        r.get("filing_frequency") or r.get("filing_preference")
-    )
-    business_type = _upper_or_none(
-        r.get("customer_business_type") or r.get("business_type")
+    cache_key = build_cache_key(
+        "gst_filing:prefill",
+        gst_registration_id=gst_registration_id,
+        role=role_norm,
+        emp_id=emp_id,
     )
 
-    return GSTRegistrationFilingPrefillOut(
-        request_id=request_id,
-        gst_registration_id=int(r["id"]),
-        gstin=_upper_or_none(r.get("gstin")),
-        is_active=bool(r["is_active"]),
-        username=(r.get("username") or "").strip(),
-        password_set=password_set,
-        taxpayer_type=taxpayer_type,
-        filing_frequency=filing_frequency,
-        turnover_details=_upper_or_none(r.get("turnover_details")),
-        state=_upper_or_none(r.get("state")),
-        gst_reg_status=_upper_or_none(r.get("registration_status")),
-        business_name=(r.get("customer_business_name") or "").strip() or None,
-        business_type=business_type,
-        business_description=(r.get("customer_business_description") or "").strip() or None,
+    async def _load_gst_registration_prefill():
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, *values)
+        except Exception:
+            log.exception("Prefill query failed")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
+
+        if not row:
+            raise HTTPException(404, GstFilingApiMessages.PREFILL_GST_REGISTRATION_NOT_FOUND)
+
+        r = dict(row)
+        pwd = r.get("password")
+        password_set = bool(pwd and str(pwd).strip())
+
+        taxpayer_type = _upper_or_none(
+            r.get("taxpayer_type") or r.get("registration_type")
+        )
+        filing_frequency = _upper_or_none(
+            r.get("filing_frequency") or r.get("filing_preference")
+        )
+        business_type = _upper_or_none(
+            r.get("customer_business_type") or r.get("business_type")
+        )
+
+        return {
+            "request_id": request_id,
+            "gst_registration_id": int(r["id"]),
+            "gstin": _upper_or_none(r.get("gstin")),
+            "is_active": bool(r["is_active"]),
+            "username": (r.get("username") or "").strip(),
+            "password_set": password_set,
+            "taxpayer_type": taxpayer_type,
+            "filing_frequency": filing_frequency,
+            "turnover_details": _upper_or_none(r.get("turnover_details")),
+            "state": _upper_or_none(r.get("state")),
+            "gst_reg_status": _upper_or_none(r.get("registration_status")),
+            "business_name": (r.get("customer_business_name") or "").strip() or None,
+            "business_type": business_type,
+            "business_description": (r.get("customer_business_description") or "").strip() or None,
+        }
+
+    cached = await redis_get_or_set_json(
+        cache_key,
+        loader=_load_gst_registration_prefill,
+        ttl_seconds=300,
+        tags=[_gst_filing_prefill_tag(gst_registration_id)],
     )
+    return GSTRegistrationFilingPrefillOut(**cached)
 
 
 @router.post(
@@ -1062,6 +1147,7 @@ async def create_gst_filing(
                     None,
                 )
 
+                await _invalidate_gst_filing_cache(payload.gst_registration_id)
                 return {
                     "data": {
                         **dict(filing_row),
@@ -1537,6 +1623,7 @@ async def update_gst_filing(
                 result = dict(new)
                 result["password"] = None
 
+                await _invalidate_gst_filing_cache(new.get("gst_registration_id"))
                 return {
                     "data": result,
                     "message": GstFilingApiMessages.UPDATE_SUCCESS,
@@ -1732,6 +1819,7 @@ async def deactivate_gst_filing(
                 len(deactivated_docs),
             )
 
+            await _invalidate_gst_filing_cache(updated_filing.get("gst_registration_id"))
             return {
                 "data": dict(updated_filing),
                 "documents_deactivated_count": len(deactivated_docs),
@@ -1949,6 +2037,7 @@ async def activate_gst_filing(
                 len(activated_docs),
             )
 
+            await _invalidate_gst_filing_cache(activated_filing.get("gst_registration_id"))
             return {
                 "data": dict(activated_filing),
                 "documents_activated_count": len(activated_docs),
@@ -2155,6 +2244,7 @@ async def update_return_statuses(
                     updated_fields.append("filing_frequency")
                 active_rows = sum(1 for r in rows if r["is_active"])
 
+                await _invalidate_gst_filing_cache()
                 return {
                     "data": [dict(r) for r in rows],
                     "message": GstFilingApiMessages.RETURN_STATUS_SUCCESS,
@@ -2270,6 +2360,7 @@ async def bulk_delete_missed_return_details(
 
     skipped_ids = [rid for rid in requested_ids if rid not in selected_ids]
 
+    await _invalidate_gst_filing_cache()
     return {
         "message": GstFilingApiMessages.RETURN_DETAILS_BULK_DELETE_SUCCESS,
         "deleted_ids": deleted_ids,

@@ -7,6 +7,11 @@ from app.gst_registration_filing.schemas import GSTFilingDocumentIn, GSTFilingDo
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_filing_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 from zoneinfo import ZoneInfo
 import json
 import uuid
@@ -16,6 +21,15 @@ router = APIRouter(
     prefix="/api/v1/gst-filings-docs",
     tags=["GST Filings Docs"],
 )
+
+
+def _gst_filing_documents_filter_tag() -> str:
+    return "gst_filing_documents:filter:index"
+
+
+async def _invalidate_gst_filing_documents_cache() -> None:
+    await redis_invalidate_tag(_gst_filing_documents_filter_tag())
+    await redis_invalidate_tag("gst_filing:filter:index")
 
 # -------------------------------------------------------------------
 # CREATE GST FILING DOCUMENT (link URL in DB only; no blob)
@@ -157,6 +171,7 @@ async def create_gst_filing_document(
                 "GST Filing document created successfully | document_id=%s",
                 document_row["document_id"],
             )
+            await _invalidate_gst_filing_documents_cache()
 
             return {
                 **dict(document_row),
@@ -357,6 +372,7 @@ async def update_gst_filing_document(
                     json.dumps(dict(old), default=str),
                     json.dumps(dict(new), default=str),
                 )
+                await _invalidate_gst_filing_documents_cache()
 
                 return {
                     "data": dict(new),
@@ -458,6 +474,7 @@ async def filter_gst_filing_documents(
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
     role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -474,6 +491,27 @@ async def filter_gst_filing_documents(
 
     if verified_from and verified_to and verified_from > verified_to:
         raise HTTPException(400, "verified_from cannot be greater than verified_to")
+    gstin_norm = gstin.strip().upper() if gstin and gstin.strip() else None
+    document_type_norm = document_type.strip().upper() if document_type and document_type.strip() else None
+    cache_key = build_cache_key(
+        "gst_filing_documents:filter",
+        document_id=document_id,
+        gst_filing_id=gst_filing_id,
+        gstin=gstin_norm,
+        document_type=document_type_norm,
+        verified=verified,
+        verified_by=verified_by,
+        created_from=created_from,
+        created_to=created_to,
+        verified_from=verified_from,
+        verified_to=verified_to,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
+        role=role_norm,
+        emp_id=emp_id,
+    )
 
     try:
         pool = await get_db_pool()
@@ -481,7 +519,7 @@ async def filter_gst_filing_documents(
         log.exception("DB connection failed")
         raise HTTPException(500, "Database connection error")
 
-    try:
+    async def _load_filter_gst_filing_documents():
         conditions = []
         values = []
         idx = 1
@@ -499,17 +537,17 @@ async def filter_gst_filing_documents(
             values.append(gst_filing_id)
             idx += 1
 
-        if gstin and gstin.strip():
+        if gstin_norm:
             conditions.append(f"upper(d.gstin) = ${idx}")
-            values.append(gstin.strip().upper())
+            values.append(gstin_norm)
             idx += 1
 
         # --------------------------------------------------
         # DOCUMENT FILTERS
         # --------------------------------------------------
-        if document_type:
+        if document_type_norm:
             conditions.append(f"d.document_type = ${idx}")
-            values.append(document_type.upper())
+            values.append(document_type_norm)
             idx += 1
 
         if verified is not None:
@@ -559,7 +597,7 @@ async def filter_gst_filing_documents(
         # 🔥 VISIBILITY (JOIN WITH GST FILINGS)
         # --------------------------------------------------
         visibility_sql, visibility_values, idx = build_gst_filing_visibility(
-            role, emp_id, idx, DB_SCHEMA
+            role_norm, emp_id, idx, DB_SCHEMA
         )
 
         if visibility_sql:
@@ -626,16 +664,12 @@ async def filter_gst_filing_documents(
     # --------------------------------------------------
     # ERROR HANDLING
     # --------------------------------------------------
-    except asyncpg.PostgresError:
-        log.exception("Database error during GST filing documents filter")
-        raise HTTPException(500, "Database error.")
-
-    except HTTPException:
-        raise
-
-    except Exception:
-        log.exception("Unexpected error during GST filing documents filter")
-        raise HTTPException(500, "Internal server error.")
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_filter_gst_filing_documents,
+        ttl_seconds=300,
+        tags=[_gst_filing_documents_filter_tag()],
+    )
 # -------------------------------------------------------------------
 # DEACTIVATE GST FILING DOCUMENT (SOFT DELETE)
 # -------------------------------------------------------------------
@@ -739,6 +773,7 @@ async def deactivate_gst_filing_document(
                 )
 
             log.info("Document deactivated successfully | document_id=%s", document_id)
+            await _invalidate_gst_filing_documents_cache()
 
             return {
                 **dict(deleted_row),
@@ -894,6 +929,7 @@ async def activate_gst_filing_document(
                 )
 
             log.info("Document activated successfully | document_id=%s", document_id)
+            await _invalidate_gst_filing_documents_cache()
 
             return {
                 **dict(activated_row),

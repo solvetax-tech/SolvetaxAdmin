@@ -9,6 +9,11 @@ from app.utils import get_db_pool, DB_SCHEMA
 from app.security.rbac import require_permission
 from app.logger import logger
 from app.utils import mask_sensitive_data,generate_uuid,build_customer_service_visibility
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 import json
 from zoneinfo import ZoneInfo
 IST = ZoneInfo("Asia/Kolkata")
@@ -19,6 +24,24 @@ router = APIRouter(
     prefix="/api/v1/services",
     tags=["services"]
 )
+
+
+def _customer_services_filter_tag() -> str:
+    return "customer_services:filter:index"
+
+
+def _customer_services_dashboard_tag() -> str:
+    return "customer_services:dashboard:index"
+
+
+def _customer_services_pending_tag() -> str:
+    return "customer_services:pending:index"
+
+
+async def _invalidate_customer_services_cache() -> None:
+    await redis_invalidate_tag(_customer_services_filter_tag())
+    await redis_invalidate_tag(_customer_services_dashboard_tag())
+    await redis_invalidate_tag(_customer_services_pending_tag())
 @router.get(
     "/customer-services/filter",
     summary="Filter Customer Services (Dynamic Filter)",
@@ -60,6 +83,26 @@ async def filter_customer_services(
     log = logging.LoggerAdapter(
         logger,
         {"request_id": request_id, "emp_id": emp_id, "api": "filter_customer_services"},
+    )
+    cache_key = build_cache_key(
+        "customer_services:filter",
+        id=id,
+        customer_id=customer_id,
+        service_code=service_code,
+        service_codes=service_codes,
+        service_status=service_status,
+        status=status,
+        rm_id=rm_id,
+        op_id=op_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+        cursor=cursor,
+        role=(role or "").strip().upper() or None,
+        emp_id=emp_id,
     )
 
     # --------------------------------------------------
@@ -111,96 +154,96 @@ async def filter_customer_services(
         raise HTTPException(status_code=500, detail="Database connection error")
 
     try:
+        async def _load_filtered_customer_services():
+            conditions = []
+            values = []
+            idx = 1
 
-        conditions = []
-        values = []
-        idx = 1
-
-        if id is not None:
-            conditions.append(f"cs.id = ${idx}")
-            values.append(id)
-            idx += 1
-
-        if customer_id is not None:
-            conditions.append(f"cs.customer_id = ${idx}")
-            values.append(customer_id)
-            idx += 1
-
-        if rm_id is not None:
-            conditions.append(f"cs.rm_id = ${idx}")
-            values.append(rm_id)
-            idx += 1
-
-        if op_id is not None:
-            conditions.append(f"cs.op_id = ${idx}")
-            values.append(op_id)
-            idx += 1
-
-        if service_status:
-            conditions.append(f"cs.service_status = ${idx}")
-            values.append(service_status)
-            idx += 1
-
-        if status:
-            conditions.append(f"cs.status = ${idx}")
-            values.append(status)
-            idx += 1
-
-        if entity_type:
-            conditions.append(f"cs.entity_type = ${idx}")
-            values.append(entity_type)
-            idx += 1
-
-        if entity_id:
-            conditions.append(f"cs.entity_id = ${idx}")
-            values.append(entity_id)
-            idx += 1
-
-        if service_code:
-            conditions.append(f"s.service_code = ${idx}")
-            values.append(service_code.strip())
-            idx += 1
-
-        if service_codes:
-            cleaned = [s.strip() for s in service_codes if s.strip()]
-            if cleaned:
-                conditions.append(f"s.service_code = ANY(${idx})")
-                values.append(cleaned)
+            if id is not None:
+                conditions.append(f"cs.id = ${idx}")
+                values.append(id)
                 idx += 1
 
-        if from_date:
-            conditions.append(f"cs.created_at >= ${idx}")
-            values.append(from_date)
-            idx += 1
+            if customer_id is not None:
+                conditions.append(f"cs.customer_id = ${idx}")
+                values.append(customer_id)
+                idx += 1
 
-        if to_date:
-            conditions.append(f"cs.created_at <= ${idx}")
-            values.append(to_date)
-            idx += 1
+            if rm_id is not None:
+                conditions.append(f"cs.rm_id = ${idx}")
+                values.append(rm_id)
+                idx += 1
 
-        if cursor:
-            conditions.append(f"cs.created_at < ${idx}")
-            values.append(cursor)
-            idx += 1
+            if op_id is not None:
+                conditions.append(f"cs.op_id = ${idx}")
+                values.append(op_id)
+                idx += 1
 
-        visibility_sql, visibility_values, idx = build_customer_service_visibility(
-            role, emp_id, idx, DB_SCHEMA
-        )
+            if service_status:
+                conditions.append(f"cs.service_status = ${idx}")
+                values.append(service_status)
+                idx += 1
 
-        if visibility_sql:
-            conditions.append(visibility_sql)
-            values.extend(visibility_values)
+            if status:
+                conditions.append(f"cs.status = ${idx}")
+                values.append(status)
+                idx += 1
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            if entity_type:
+                conditions.append(f"cs.entity_type = ${idx}")
+                values.append(entity_type)
+                idx += 1
 
-        if cursor:
-            pagination_sql = f"LIMIT ${idx}"
-            values_with_pagination = values + [limit]
-        else:
-            pagination_sql = f"LIMIT ${idx} OFFSET ${idx+1}"
-            values_with_pagination = values + [limit, offset]
+            if entity_id:
+                conditions.append(f"cs.entity_id = ${idx}")
+                values.append(entity_id)
+                idx += 1
 
-        main_sql = f"""
+            if service_code:
+                conditions.append(f"s.service_code = ${idx}")
+                values.append(service_code.strip())
+                idx += 1
+
+            if service_codes:
+                cleaned = [s.strip() for s in service_codes if s.strip()]
+                if cleaned:
+                    conditions.append(f"s.service_code = ANY(${idx})")
+                    values.append(cleaned)
+                    idx += 1
+
+            if from_date:
+                conditions.append(f"cs.created_at >= ${idx}")
+                values.append(from_date)
+                idx += 1
+
+            if to_date:
+                conditions.append(f"cs.created_at <= ${idx}")
+                values.append(to_date)
+                idx += 1
+
+            if cursor:
+                conditions.append(f"cs.created_at < ${idx}")
+                values.append(cursor)
+                idx += 1
+
+            visibility_sql, visibility_values, idx = build_customer_service_visibility(
+                role, emp_id, idx, DB_SCHEMA
+            )
+
+            if visibility_sql:
+                conditions.append(visibility_sql)
+                values.extend(visibility_values)
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            if cursor:
+                pagination_sql = f"LIMIT ${idx}"
+                values_with_pagination = values + [limit]
+            else:
+                pagination_sql = f"LIMIT ${idx} OFFSET ${idx+1}"
+                values_with_pagination = values + [limit, offset]
+
+            main_sql = f"""
             SELECT
                 cs.id,
                 cs.customer_id,
@@ -236,16 +279,23 @@ async def filter_customer_services(
             {pagination_sql}
         """
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(main_sql, *values_with_pagination)
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(main_sql, *values_with_pagination)
 
-        next_cursor = rows[-1]["created_at"] if rows else None
+            next_cursor = rows[-1]["created_at"] if rows else None
 
-        return {
-            "data": [dict(row) for row in rows],
-            "next_cursor": next_cursor,
-            "request_id": request_id  # ✅ ADDED (consistency)
-        }
+            return {
+                "data": [dict(row) for row in rows],
+                "next_cursor": next_cursor,
+                "request_id": request_id
+            }
+
+        return await redis_get_or_set_json(
+            cache_key,
+            loader=_load_filtered_customer_services,
+            ttl_seconds=300,
+            tags=[_customer_services_filter_tag()],
+        )
 
     except asyncpg.PostgresError:
         log.exception("DB error")
@@ -369,6 +419,7 @@ async def activate_customer_service(
                 )
 
             log.info("Customer service activated | id=%s", service_id)
+            await _invalidate_customer_services_cache()
 
             return {
                 "data": dict(new_row),  # ✅ ADDED (wrapped)
@@ -503,6 +554,7 @@ async def deactivate_customer_service(
                 )
 
             log.info("Customer service deactivated | id=%s", service_id)
+            await _invalidate_customer_services_cache()
 
             return {
                 "data": dict(new_row),  # ✅ ADDED (wrapped)
@@ -549,6 +601,12 @@ async def get_service_dashboard_stats(
         logger,
         {"request_id": request_id, "api": "get_service_dashboard_stats"},
     )
+    cache_key = build_cache_key(
+        "customer_services:dashboard",
+        filter_type=filter_type,
+        role=(role or "").strip().upper() or None,
+        emp_id=emp_id,
+    )
 
     IST = ZoneInfo("Asia/Kolkata")
     now = datetime.now(IST)
@@ -593,32 +651,32 @@ async def get_service_dashboard_stats(
 
     async with pool.acquire() as conn:
         try:
+            async def _load_service_dashboard_stats():
+                conditions = ["cs.status = 'ACTIVE'"]
+                values = []
+                idx = 1
 
-            conditions = ["cs.status = 'ACTIVE'"]  # ✅ IMPORTANT
-            values = []
-            idx = 1
+                if start_dt and end_dt:
+                    conditions.append(f"cs.created_at >= ${idx}")
+                    values.append(start_dt)
+                    idx += 1
 
-            if start_dt and end_dt:
-                conditions.append(f"cs.created_at >= ${idx}")
-                values.append(start_dt)
-                idx += 1
-
-                conditions.append(f"cs.created_at <= ${idx}")
-                values.append(end_dt)
-                idx += 1
+                    conditions.append(f"cs.created_at <= ${idx}")
+                    values.append(end_dt)
+                    idx += 1
 
             # ✅ VISIBILITY CHECK
-            visibility_sql, visibility_values, idx = build_customer_service_visibility(
-                role, emp_id, idx, DB_SCHEMA
-            )
+                visibility_sql, visibility_values, idx = build_customer_service_visibility(
+                    role, emp_id, idx, DB_SCHEMA
+                )
 
-            if visibility_sql:
-                conditions.append(visibility_sql)
-                values.extend(visibility_values)
+                if visibility_sql:
+                    conditions.append(visibility_sql)
+                    values.extend(visibility_values)
 
-            where_clause = f"WHERE {' AND '.join(conditions)}"
+                where_clause = f"WHERE {' AND '.join(conditions)}"
 
-            query = f"""
+                query = f"""
                 SELECT
                     COUNT(*) FILTER (WHERE cs.service_status = 'PENDING') AS pending_services,
                     COUNT(*) FILTER (WHERE cs.service_status = 'PROVIDED') AS provided_services,
@@ -627,16 +685,23 @@ async def get_service_dashboard_stats(
                 {where_clause}
             """
 
-            row = await conn.fetchrow(query, *values)
+                row = await conn.fetchrow(query, *values)
 
-            return {
-                "data": dict(row) if row else {
-                    "pending_services": 0,
-                    "provided_services": 0,
-                    "total_services": 0
-                },
-                "request_id": request_id
-            }
+                return {
+                    "data": dict(row) if row else {
+                        "pending_services": 0,
+                        "provided_services": 0,
+                        "total_services": 0
+                    },
+                    "request_id": request_id
+                }
+
+            return await redis_get_or_set_json(
+                cache_key,
+                loader=_load_service_dashboard_stats,
+                ttl_seconds=300,
+                tags=[_customer_services_dashboard_tag()],
+            )
 
         except Exception as e:
             log.error(f"Error fetching service dashboard stats: {e}")
@@ -663,53 +728,67 @@ async def get_pending_services(
         raise HTTPException(500, "Database connection error.")
 
     try:
-
-        conditions = [
-            "cs.service_status = 'PENDING'",
-            "cs.status = 'ACTIVE'"  # ✅ IMPORTANT
-        ]
-
-        values = []
-        idx = 1
-
-        # ✅ VISIBILITY CHECK
-        visibility_sql, visibility_values, idx = build_customer_service_visibility(
-            role, emp_id, idx, DB_SCHEMA
+        cache_key = build_cache_key(
+            "customer_services:pending",
+            limit=limit,
+            offset=offset,
+            role=(role or "").strip().upper() or None,
+            emp_id=emp_id,
         )
 
-        if visibility_sql:
-            conditions.append(visibility_sql)
-            values.extend(visibility_values)
+        async def _load_pending_services():
+            conditions = [
+                "cs.service_status = 'PENDING'",
+                "cs.status = 'ACTIVE'"
+            ]
 
-        where_clause = f"WHERE {' AND '.join(conditions)}"
+            values = []
+            idx = 1
 
-        query = f"""
-            SELECT
-                cs.id,
-                c.customer_id,
-                c.full_name,
-                s.service_name,
-                s.service_code,
-                cs.rm_id,
-                cs.op_id,
-                cs.created_at
-            FROM {DB_SCHEMA}.customer_services cs
-            JOIN {DB_SCHEMA}.customers c
-                ON c.customer_id = cs.customer_id
-            JOIN {DB_SCHEMA}.service_config s
-                ON s.id = cs.service_id
-            {where_clause}
-            ORDER BY cs.created_at DESC
-            LIMIT ${idx} OFFSET ${idx+1}
-        """
+            visibility_sql, visibility_values, idx = build_customer_service_visibility(
+                role, emp_id, idx, DB_SCHEMA
+            )
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(query, *values, limit, offset)
+            if visibility_sql:
+                conditions.append(visibility_sql)
+                values.extend(visibility_values)
 
-        return {
-            "data": [dict(r) for r in rows],
-            "request_id": request_id,
-        }
+            where_clause = f"WHERE {' AND '.join(conditions)}"
+
+            query = f"""
+                SELECT
+                    cs.id,
+                    c.customer_id,
+                    c.full_name,
+                    s.service_name,
+                    s.service_code,
+                    cs.rm_id,
+                    cs.op_id,
+                    cs.created_at
+                FROM {DB_SCHEMA}.customer_services cs
+                JOIN {DB_SCHEMA}.customers c
+                    ON c.customer_id = cs.customer_id
+                JOIN {DB_SCHEMA}.service_config s
+                    ON s.id = cs.service_id
+                {where_clause}
+                ORDER BY cs.created_at DESC
+                LIMIT ${idx} OFFSET ${idx+1}
+            """
+
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *values, limit, offset)
+
+            return {
+                "data": [dict(r) for r in rows],
+                "request_id": request_id,
+            }
+
+        return await redis_get_or_set_json(
+            cache_key,
+            loader=_load_pending_services,
+            ttl_seconds=300,
+            tags=[_customer_services_pending_tag()],
+        )
 
     except Exception:
         raise HTTPException(500, "Internal server error")

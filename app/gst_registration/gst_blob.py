@@ -10,6 +10,7 @@ from app.gst_registration.schemas import (
 )
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, get_blob_service_client, AZURE_STORAGE_CONTAINER, generate_blob_sas_url, extract_blob_path
 from app.logger import logger
+from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
@@ -167,7 +168,7 @@ async def upload_registration_document_file(
         500: {"description": "Unable to generate view link"},
     },
 )
-def view_registration_document(
+async def view_registration_document(
     blob_url: str,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
@@ -183,38 +184,51 @@ def view_registration_document(
     )
 
     log.info("Generating secure VIEW URL | blob_url=%s", blob_url)
+    cache_key = build_cache_key(
+        "gst_blob:view",
+        blob_url=blob_url,
+        emp_id=emp_id,
+    )
 
-    try:
+    async def _load_view_registration_document():
+        try:
 
-        blob_path = extract_blob_path(blob_url)
+            blob_path = extract_blob_path(blob_url)
 
-        # inline -> preview in browser
-        sas_url = generate_blob_sas_url(blob_path, disposition="inline")
+            # inline -> preview in browser
+            sas_url = generate_blob_sas_url(blob_path, disposition="inline")
 
-        log.info("View URL generated successfully | blob=%s", blob_path)
+            log.info("View URL generated successfully | blob=%s", blob_path)
 
-    except ValueError as e:
+        except ValueError as e:
 
-        log.error("Invalid blob URL | error=%s", str(e))
+            log.error("Invalid blob URL | error=%s", str(e))
 
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid blob URL provided",
-        )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid blob URL provided",
+            )
 
-    except Exception:
+        except Exception:
 
-        log.exception("Failed generating view URL")
+            log.exception("Failed generating view URL")
 
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to generate document view link",
-        )
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to generate document view link",
+            )
 
-    return {
-        "view_url": sas_url,
-        "request_id": request_id,
-    }
+        return {
+            "view_url": sas_url,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_view_registration_document,
+        ttl_seconds=300,
+        tags=["gst_blob:view:index"],
+    )
 
     # --------------------------------------------------
 # DOWNLOAD GST DOCUMENT (SAS URL GENERATION)
@@ -229,7 +243,7 @@ def view_registration_document(
         500: {"description": "Unable to generate download link"},
     },
 )
-def download_registration_document(
+async def download_registration_document(
     blob_url: str,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
@@ -245,35 +259,48 @@ def download_registration_document(
     )
 
     log.info("Generating secure DOWNLOAD URL | blob_url=%s", blob_url)
+    cache_key = build_cache_key(
+        "gst_blob:download",
+        blob_url=blob_url,
+        emp_id=emp_id,
+    )
 
-    try:
+    async def _load_download_registration_document():
+        try:
 
-        blob_path = extract_blob_path(blob_url)
+            blob_path = extract_blob_path(blob_url)
 
-        # attachment -> download
-        sas_url = generate_blob_sas_url(blob_path, disposition="attachment")
+            # attachment -> download
+            sas_url = generate_blob_sas_url(blob_path, disposition="attachment")
 
-        log.info("Download URL generated successfully | blob=%s", blob_path)
+            log.info("Download URL generated successfully | blob=%s", blob_path)
 
-    except ValueError as e:
+        except ValueError as e:
 
-        log.error("Invalid blob URL | error=%s", str(e))
+            log.error("Invalid blob URL | error=%s", str(e))
 
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid blob URL provided",
-        )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid blob URL provided",
+            )
 
-    except Exception:
+        except Exception:
 
-        log.exception("Failed generating download URL")
+            log.exception("Failed generating download URL")
 
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to generate document download link",
-        )
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to generate document download link",
+            )
 
-    return {
-        "download_url": sas_url,
-        "request_id": request_id,
-    }
+        return {
+            "download_url": sas_url,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_download_registration_document,
+        ttl_seconds=300,
+        tags=["gst_blob:download:index"],
+    )

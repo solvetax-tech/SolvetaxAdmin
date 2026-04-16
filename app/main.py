@@ -23,6 +23,7 @@ app = FastAPI(title="Slove Tax", version="1.0.0")
 
 # Ensure DB pool is created once per process and closed on shutdown.
 from app.utils import get_db_pool, close_db_pool
+from app.redis_cache import close_redis_client
 from app.schedular.schedular import start_scheduler_if_enabled, stop_scheduler
 
 @app.on_event("startup")
@@ -35,6 +36,7 @@ async def _startup_init_db_pool():
 async def _shutdown_close_db_pool():
     await stop_scheduler()
     await close_db_pool()
+    await close_redis_client()
 
 # Add middleware in correct order (they execute in reverse order)
 # First add TokenValidator, then CORS - so CORS runs before TokenValidator

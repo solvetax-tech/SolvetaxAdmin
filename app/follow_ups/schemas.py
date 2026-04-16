@@ -54,3 +54,32 @@ class UpdateFilingFollowupRequest(FollowupBaseSchema):
 class UpdateFilingFollowupResponse(FollowupBaseSchema):
     id: int
     message: str
+
+
+class FilingFollowupListItem(FollowupBaseSchema):
+    id: int
+    customer_service_id: int
+    mode: str
+    followup_at: datetime
+    status: str
+    remarks: Optional[str] = None
+    assigned_to: Optional[int] = None
+    created_by: Optional[int] = None
+    completed_at: Optional[datetime] = None
+    reminder_sent: Optional[bool] = None
+    reminder_count: Optional[int] = None
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
+    service_id: Optional[int] = None
+    missed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class FilingFollowupListResponse(FollowupBaseSchema):
+    data: list[FilingFollowupListItem]
+    count: int
+    total_count: int
+    limit: int
+    offset: int
+    request_id: str

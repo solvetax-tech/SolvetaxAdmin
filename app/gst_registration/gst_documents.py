@@ -10,6 +10,11 @@ from app.gst_registration.schemas import (
 )
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, get_blob_service_client, AZURE_STORAGE_CONTAINER, generate_blob_sas_url, extract_blob_path,build_gst_visibility
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
@@ -20,6 +25,16 @@ router = APIRouter(
     prefix="/api/v1/gst-documents",
     tags=["GST Registration Documents"],
 )
+
+
+def _gst_documents_filter_tag() -> str:
+    return "gst_documents:filter:index"
+
+
+async def _invalidate_gst_documents_cache() -> None:
+    await redis_invalidate_tag(_gst_documents_filter_tag())
+    # Required-documents GET depends on gst_registration_documents table state.
+    await redis_invalidate_tag("document_config:required_documents:index")
 
 # -------------------------------------------------------------------
 # CREATE REGISTRATION DOCUMENT (Production Standard + Version Audit + IST)
@@ -181,6 +196,7 @@ async def create_registration_document(
                 "Registration document created successfully | document_id=%s",
                 document_row["document_id"],
             )
+            await _invalidate_gst_documents_cache()
 
             return {
                 **dict(document_row),
@@ -284,6 +300,27 @@ async def list_registration_documents(
             status_code=400,
             detail="from_date cannot be greater than to_date.",
         )
+    role_norm = str(role).strip().upper() if role is not None else None
+    emp_id_for_scope = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    gstin_norm = gstin.strip().upper() if gstin and gstin.strip() else None
+    document_type_norm = document_type.strip() if document_type and document_type.strip() else None
+    mobile_norm = mobile.strip() if mobile and mobile.strip() else None
+    cache_key = build_cache_key(
+        "gst_documents:filter",
+        gstin=gstin_norm,
+        person_id=person_id,
+        document_type=document_type_norm,
+        verified=verified,
+        mobile=mobile_norm,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+        role=role_norm,
+        emp_id=emp_id_for_scope,
+    )
 
     # --------------------------------------------------
     # DB Pool
@@ -297,8 +334,7 @@ async def list_registration_documents(
             detail="Database connection error.",
         )
 
-    try:
-
+    async def _load_registration_documents():
         conditions = []
         values = []
         param_index = 1
@@ -312,9 +348,9 @@ async def list_registration_documents(
             values.append(person_id)
             param_index += 1
 
-        if gstin and gstin.strip():
+        if gstin_norm:
             conditions.append(f"UPPER(d.gstin) = ${param_index}")
-            values.append(gstin.strip().upper())
+            values.append(gstin_norm)
             param_index += 1
 
         if verified is not None:
@@ -322,18 +358,18 @@ async def list_registration_documents(
             values.append(verified)
             param_index += 1
 
-        if mobile and mobile.strip():
+        if mobile_norm:
             conditions.append(f"d.mobile = ${param_index}")
-            values.append(mobile.strip())
+            values.append(mobile_norm)
             param_index += 1
 
         # --------------------------------------------------
         # Partial Match Filters
         # --------------------------------------------------
 
-        if document_type and document_type.strip():
+        if document_type_norm:
             conditions.append(f"d.document_type ILIKE ${param_index}")
-            values.append(f"%{document_type.strip()}%")
+            values.append(f"%{document_type_norm}%")
             param_index += 1
 
         # --------------------------------------------------
@@ -366,8 +402,8 @@ async def list_registration_documents(
         # --------------------------------------------------
 
         visibility_sql, visibility_values, param_index = build_gst_visibility(
-            role,
-            int(current_emp_id) if str(current_emp_id).isdigit() else None,
+            role_norm,
+            emp_id_for_scope,
             param_index,
             DB_SCHEMA,
         )
@@ -436,50 +472,52 @@ async def list_registration_documents(
 
         values_with_pagination = values + [limit, offset]
 
-        async with pool.acquire() as conn:
+        try:
+            async with pool.acquire() as conn:
+                total = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(data_sql, *values_with_pagination)
 
-            total = await conn.fetchval(count_sql, *values)
+            log.info(
+                "Registration documents filtered successfully | returned=%s total=%s",
+                len(rows),
+                total,
+            )
 
-            rows = await conn.fetch(data_sql, *values_with_pagination)
+            return {
+                "data": [dict(row) for row in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "request_id": request_id,
+            }
 
-        log.info(
-            "Registration documents filtered successfully | returned=%s total=%s",
-            len(rows),
-            total,
-        )
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during registration document filtering | error=%s",
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred during filtering.",
+            )
 
-        return {
-            "data": [dict(row) for row in rows],
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "request_id": request_id,
-        }
+        except HTTPException:
+            raise
 
-    except asyncpg.PostgresError as e:
+        except Exception:
+            log.exception("Unexpected error during registration document filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-        log.error(
-            "Database error during registration document filtering | error=%s",
-            str(e),
-            exc_info=True,
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail="Database error occurred during filtering.",
-        )
-
-    except HTTPException:
-        raise
-
-    except Exception:
-
-        log.exception("Unexpected error during registration document filtering")
-
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_registration_documents,
+        ttl_seconds=300,
+        tags=[_gst_documents_filter_tag()],
+    )
 # -------------------------------------------------------------------
 # EDIT REGISTRATION DOCUMENT (Flexible Verified + Version Audit)
 # -------------------------------------------------------------------
@@ -640,6 +678,7 @@ async def edit_registration_document(
                     json.dumps(dict(old_row), default=str),
                     json.dumps(dict(new_row), default=str),
                 )
+                await _invalidate_gst_documents_cache()
 
                 return {
                     **dict(new_row),
@@ -863,6 +902,7 @@ async def soft_delete_registration_document(
                 "Document soft deleted successfully | document_id=%s",
                 document_id,
             )
+            await _invalidate_gst_documents_cache()
 
             return {
                 **dict(deleted_row),
@@ -1060,6 +1100,7 @@ async def activate_registration_document(
                 )
 
             log.info("Document activated successfully | document_id=%s", document_id)
+            await _invalidate_gst_documents_cache()
 
             return {
                 **dict(activated_row),
@@ -1193,6 +1234,7 @@ async def deactivate_gst_filing_document(
                 )
 
             log.info("Document deactivated successfully | document_id=%s", document_id)
+            await _invalidate_gst_documents_cache()
 
             return {
                 **dict(deleted_row),

@@ -11,12 +11,26 @@ from app.logger import logger
 from app.utils import mask_sensitive_data,generate_uuid
 import json
 from zoneinfo import ZoneInfo
+from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
 IST = ZoneInfo("Asia/Kolkata")
 
 router = APIRouter(
     prefix="/api/v1/services-config",
     tags=["Services_config"]
 )
+
+
+def _services_dropdown_cache_key(
+    service_category_cleaned: Optional[str],
+    role: Optional[str],
+    emp_id: Optional[int],
+) -> str:
+    return build_cache_key(
+        "service_config:get_services",
+        service_category=service_category_cleaned,
+        role=(role or "").strip().upper() or None,
+        emp_id=emp_id,
+    )
 
 # -------------------------------------------------------------------
 # GET SERVICE CONFIG (Dropdown)
@@ -35,11 +49,13 @@ async def get_services(
 ):
 
     request_id = generate_uuid()
-    emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": emp_id},
+        {"request_id": request_id, "emp_id": emp_id if emp_id is not None else "-"},
     )
 
     # --------------------------------------------------
@@ -56,6 +72,7 @@ async def get_services(
         "Fetching services dropdown | category=%s",
         service_category_cleaned
     )
+    cache_key = _services_dropdown_cache_key(service_category_cleaned, role, emp_id)
 
     # --------------------------------------------------
     # DB Pool
@@ -71,51 +88,59 @@ async def get_services(
 
     try:
 
-        conditions = ["is_active = TRUE"]
-        values = []
-        param_index = 1
+        async def _load_services_dropdown():
+            conditions = ["is_active = TRUE"]
+            values = []
+            param_index = 1
 
-        # --------------------------------------------------
-        # CATEGORY FILTER
-        # --------------------------------------------------
+            # --------------------------------------------------
+            # CATEGORY FILTER
+            # --------------------------------------------------
 
-        if service_category_cleaned:
-            conditions.append(f"service_category = ${param_index}")
-            values.append(service_category_cleaned)
-            param_index += 1
+            if service_category_cleaned:
+                conditions.append(f"service_category = ${param_index}")
+                values.append(service_category_cleaned)
+                param_index += 1
 
-        where_clause = f"WHERE {' AND '.join(conditions)}"
+            where_clause = f"WHERE {' AND '.join(conditions)}"
 
-        # --------------------------------------------------
-        # MAIN QUERY (IMPROVED)
-        # --------------------------------------------------
+            # --------------------------------------------------
+            # MAIN QUERY (IMPROVED)
+            # --------------------------------------------------
 
-        sql = f"""
-            SELECT
-                id,
-                service_category,
-                service_code,
-                service_name,
-                description,
-                COALESCE(followup_mode, 'MANUAL') AS followup_mode  -- ✅ ADDED
-            FROM {DB_SCHEMA}.service_config
-            {where_clause}
-            ORDER BY service_category, service_name
-        """
+            sql = f"""
+                SELECT
+                    id,
+                    service_category,
+                    service_code,
+                    service_name,
+                    description,
+                    COALESCE(followup_mode, 'MANUAL') AS followup_mode
+                FROM {DB_SCHEMA}.service_config
+                {where_clause}
+                ORDER BY service_category, service_name
+            """
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql, *values)
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, *values)
 
-        log.info(
-            "Services fetched successfully | count=%s",
-            len(rows)
+            log.info(
+                "Services fetched successfully | count=%s",
+                len(rows)
+            )
+
+            return {
+                "data": [dict(row) for row in rows],
+                "count": len(rows),
+                "request_id": request_id,
+            }
+
+        return await redis_get_or_set_json(
+            cache_key,
+            loader=_load_services_dropdown,
+            ttl_seconds=300,
+            tags=["service_config:get_services:index"],
         )
-
-        return {
-            "data": [dict(row) for row in rows],
-            "count": len(rows),
-            "request_id": request_id,
-        }
 
     except asyncpg.PostgresError as e:
         log.error(

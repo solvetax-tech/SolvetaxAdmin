@@ -8,6 +8,11 @@ from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, hash_password, is_p
 from app.sign_up.schemas import EmployeeEditIn, EmployeeOut,  ChangePasswordRequest
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 import json
 
 
@@ -16,6 +21,41 @@ router = APIRouter(
     prefix="/api/v1/employees",
     tags=["Employees"]
 )
+
+
+def _employee_filter_tag() -> str:
+    return "employee:filter:index"
+
+
+def _employee_by_id_tag(emp_id: int) -> str:
+    return f"employee:get_by_id:index:{emp_id}"
+
+
+def _employee_active_rm_tag() -> str:
+    return "employee:active_rm:index"
+
+
+def _employee_active_op_tag() -> str:
+    return "employee:active_op:index"
+
+
+def _employee_active_managers_tag() -> str:
+    return "employee:active_managers:index"
+
+
+def _roles_list_tag() -> str:
+    return "employee:roles:list:index"
+
+
+async def _invalidate_employee_related_cache(emp_id: Optional[int] = None) -> None:
+    await redis_invalidate_tag(_employee_filter_tag())
+    await redis_invalidate_tag(_employee_active_rm_tag())
+    await redis_invalidate_tag(_employee_active_op_tag())
+    await redis_invalidate_tag(_employee_active_managers_tag())
+    await redis_invalidate_tag("teams:list:index")
+    await redis_invalidate_tag("version:filter:index")
+    if emp_id is not None:
+        await redis_invalidate_tag(_employee_by_id_tag(emp_id))
 
 # -------------------------------------------------------------------
 # EDIT EMPLOYEE (DYNAMIC UPDATE - PRODUCTION SAFE + VERSION AUDIT)
@@ -343,6 +383,7 @@ async def edit_employee(
                     json.dumps(dict(new_row), default=str),
                 )
 
+            await _invalidate_employee_related_cache(emp_id)
             return {
                 **dict(new_row),
                 "message": "Employee updated successfully."
@@ -406,6 +447,22 @@ async def filter_employees(
     )
 
     log.info("Incoming employee filter request limit=%s offset=%s", limit, offset)
+    role_cleaned = sorted([r.strip() for r in role if r and r.strip()]) if role else None
+    cache_key = build_cache_key(
+        "employees:filter",
+        emp_id=emp_id,
+        full_name=full_name.strip() if full_name else None,
+        email=email.strip() if email else None,
+        phone_number=phone_number.strip() if phone_number else None,
+        role=role_cleaned,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        from_date=from_date.isoformat() if from_date else None,
+        to_date=to_date.isoformat() if to_date else None,
+        limit=limit,
+        offset=offset,
+        current_emp_id=current_emp_id,
+    )
 
     # --------------------------------------------------
     # Date Sanity Validation
@@ -419,112 +476,97 @@ async def filter_employees(
 
     try:
         pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed during employee filtering")
+        raise HTTPException(status_code=500, detail="Database connection error.")
 
-        conditions = []
-        values = []
-        param_index = 1
+    async def _load_filtered_employees():
+        try:
+            conditions = []
+            values = []
+            param_index = 1
 
-        # --------------------------------------------------
-        # Business Filters
-        # --------------------------------------------------
-
-        if emp_id is not None:
-            conditions.append(f"emp_id = ${param_index}")
-            values.append(emp_id)
-            param_index += 1
-
-        if full_name and full_name.strip():
-            conditions.append(
-                f"(first_name || ' ' || last_name) ILIKE ${param_index}"
-            )
-            values.append(f"%{full_name.strip()}%")
-            param_index += 1
-
-        if email and email.strip():
-            conditions.append(f"email ILIKE ${param_index}")
-            values.append(f"%{email.strip()}%")
-            param_index += 1
-
-        if phone_number and phone_number.strip():
-            conditions.append(f"phone_number = ${param_index}")
-            values.append(phone_number.strip())
-            param_index += 1
-
-        # --------------------------------------------------
-        # ROLE FILTERING (IMPROVED FOR MULTIPLE ROLES)
-        # --------------------------------------------------
-
-        if role:
-            cleaned_roles = [r.strip() for r in role if r and r.strip()]
-            if cleaned_roles:
-                conditions.append(f"role = ANY(${param_index})")
-                values.append(cleaned_roles)
+            if emp_id is not None:
+                conditions.append(f"emp_id = ${param_index}")
+                values.append(emp_id)
                 param_index += 1
 
-        # --------------------------------------------------
-        # Status Filtering
-        # --------------------------------------------------
+            if full_name and full_name.strip():
+                conditions.append(
+                    f"(first_name || ' ' || last_name) ILIKE ${param_index}"
+                )
+                values.append(f"%{full_name.strip()}%")
+                param_index += 1
 
-        if is_active is not None:
-            conditions.append(f"is_active = ${param_index}")
-            values.append(is_active)
-            param_index += 1
-        elif not include_inactive:
-            conditions.append("is_active = TRUE")
+            if email and email.strip():
+                conditions.append(f"email ILIKE ${param_index}")
+                values.append(f"%{email.strip()}%")
+                param_index += 1
 
-        # --------------------------------------------------
-        # Date Filtering
-        # --------------------------------------------------
+            if phone_number and phone_number.strip():
+                conditions.append(f"phone_number = ${param_index}")
+                values.append(phone_number.strip())
+                param_index += 1
 
-        if from_date:
-            conditions.append(f"created_at >= ${param_index}")
-            values.append(from_date)
-            param_index += 1
+            if role_cleaned:
+                conditions.append(f"role = ANY(${param_index})")
+                values.append(role_cleaned)
+                param_index += 1
 
-        if to_date:
-            conditions.append(f"created_at <= ${param_index}")
-            values.append(to_date)
-            param_index += 1
+            if is_active is not None:
+                conditions.append(f"is_active = ${param_index}")
+                values.append(is_active)
+                param_index += 1
+            elif not include_inactive:
+                conditions.append("is_active = TRUE")
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            if from_date:
+                conditions.append(f"created_at >= ${param_index}")
+                values.append(from_date)
+                param_index += 1
 
-        sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.employees
-              {where_clause}
-             ORDER BY created_at DESC
-             LIMIT ${param_index} OFFSET ${param_index + 1}
-        """
+            if to_date:
+                conditions.append(f"created_at <= ${param_index}")
+                values.append(to_date)
+                param_index += 1
 
-        values.extend([limit, offset])
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            sql = f"""
+                SELECT *
+                  FROM {DB_SCHEMA}.employees
+                  {where_clause}
+                 ORDER BY created_at DESC
+                 LIMIT ${param_index} OFFSET ${param_index + 1}
+            """
+            values.extend([limit, offset])
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql, *values)
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, *values)
 
-        log.info("Employees filtered successfully count=%s", len(rows))
+            log.info("Employees filtered successfully count=%s", len(rows))
+            return [
+                {**dict(row), "message": "Employees filtered successfully."}
+                for row in rows
+            ]
+        except asyncpg.PostgresError:
+            log.exception("Database error during employee filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error.",
+            )
+        except Exception:
+            log.exception("Unexpected error during employee filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-        return [
-            {**dict(row), "message": "Employees filtered successfully."}
-            for row in rows
-        ]
-
-    # --------------------------------------------------
-    # DB VALIDATIONS
-    # --------------------------------------------------
-
-    except asyncpg.PostgresError:
-        log.exception("Database error during employee filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Database error.",
-        )
-
-    except Exception:
-        log.exception("Unexpected error during employee filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_filtered_employees,
+        ttl_seconds=300,
+        tags=[_employee_filter_tag()],
+    )
 @router.get(
     "/employee/{emp_id}",
     summary="Get Employee",
@@ -572,6 +614,11 @@ async def get_employee(
         "Incoming get employee request | emp_id=%s",
         emp_id,
     )
+    cache_key = build_cache_key(
+        "employees:get_by_id",
+        emp_id=emp_id,
+        current_emp_id=current_emp_id,
+    )
 
     # --------------------------------------------------
     # SQL Query (Exclude password_hash)
@@ -610,67 +657,56 @@ async def get_employee(
             detail="Database connection error.",
         )
 
-    try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(sql, emp_id)
+    async def _load_employee():
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(sql, emp_id)
 
-        # --------------------------------------------------
-        # Not Found Handling
-        # --------------------------------------------------
-        if not row:
-            log.warning(
-                "Employee not found or inactive | emp_id=%s",
+            if not row:
+                log.warning(
+                    "Employee not found or inactive | emp_id=%s",
+                    emp_id,
+                )
+                raise HTTPException(
+                    status_code=404,
+                    detail="Employee not found.",
+                )
+
+            log.info("Employee fetched successfully | emp_id=%s", emp_id)
+            return {
+                **dict(row),
+                "message": "Employee fetched successfully.",
+                "request_id": request_id,
+            }
+        except HTTPException:
+            raise
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during get employee | emp_id=%s | error=%s",
+                emp_id,
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Database error.",
+            )
+        except Exception:
+            log.exception(
+                "Unexpected error during get employee | emp_id=%s",
                 emp_id,
             )
             raise HTTPException(
-                status_code=404,
-                detail="Employee not found.",
+                status_code=500,
+                detail="Internal server error.",
             )
 
-        log.info(
-            "Employee fetched successfully | emp_id=%s",
-            emp_id,
-        )
-
-        return {
-            **dict(row),
-            "message": "Employee fetched successfully.",
-            "request_id": request_id,
-        }
-
-    # --------------------------------------------------
-    # IMPORTANT: Re-raise HTTP Exceptions First
-    # --------------------------------------------------
-    except HTTPException:
-        raise
-
-    # --------------------------------------------------
-    # DATABASE ERROR HANDLING
-    # --------------------------------------------------
-    except asyncpg.PostgresError as e:
-        log.error(
-            "Database error during get employee | emp_id=%s | error=%s",
-            emp_id,
-            str(e),
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Database error.",
-        )
-
-    # --------------------------------------------------
-    # FALLBACK UNEXPECTED ERROR
-    # --------------------------------------------------
-    except Exception:
-        log.exception(
-            "Unexpected error during get employee | emp_id=%s",
-            emp_id,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_employee,
+        ttl_seconds=300,
+        tags=[_employee_by_id_tag(emp_id)],
+    )
 
 
 # -------------------------------------------------------------------
@@ -693,6 +729,10 @@ async def get_active_rms(
     )
 
     log.info("Fetching active Relationship Managers")
+    cache_key = build_cache_key(
+        "employees:active_rm",
+        current_emp_id=current_emp_id,
+    )
 
     sql = f"""
         SELECT *
@@ -704,31 +744,38 @@ async def get_active_rms(
 
     try:
         pool = await get_db_pool()
-
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql)
-
-        log.info("Active RMs retrieved count=%s", len(rows))
-
-        # Return raw dicts with message, bypassing Pydantic validation
-        return [
-            {**dict(row), "message": "Active managers retrieved successfully."}
-            for row in rows
-        ]
-
-    except asyncpg.PostgresError:
-        log.exception("Database error while fetching active RMs")
-        raise HTTPException(
-            status_code=500,
-            detail="Database error.",
-        )
-
     except Exception:
-        log.exception("Unexpected error while fetching active RMs")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+        log.exception("Database pool acquisition failed for active RMs")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async def _load_active_rms():
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql)
+            log.info("Active RMs retrieved count=%s", len(rows))
+            return [
+                {**dict(row), "message": "Active managers retrieved successfully."}
+                for row in rows
+            ]
+        except asyncpg.PostgresError:
+            log.exception("Database error while fetching active RMs")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error.",
+            )
+        except Exception:
+            log.exception("Unexpected error while fetching active RMs")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_active_rms,
+        ttl_seconds=300,
+        tags=[_employee_active_rm_tag()],
+    )
 
 # -------------------------------------------------------------------
 # GET ACTIVE OPERATIONS PERSONNEL
@@ -750,6 +797,10 @@ async def get_active_ops(
     )
 
     log.info("Fetching active Operations personnel")
+    cache_key = build_cache_key(
+        "employees:active_op",
+        current_emp_id=current_emp_id,
+    )
 
     sql = f"""
         SELECT *
@@ -761,31 +812,38 @@ async def get_active_ops(
 
     try:
         pool = await get_db_pool()
-
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql)
-
-        log.info("Active OPs retrieved count=%s", len(rows))
-
-        # Return raw dicts with message, bypassing Pydantic validation
-        return [
-            {**dict(row), "message": "Active managers retrieved successfully."}
-            for row in rows
-        ]
-
-    except asyncpg.PostgresError:
-        log.exception("Database error while fetching active OPs")
-        raise HTTPException(
-            status_code=500,
-            detail="Database error.",
-        )
-
     except Exception:
-        log.exception("Unexpected error while fetching active OPs")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+        log.exception("Database pool acquisition failed for active OPs")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async def _load_active_ops():
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql)
+            log.info("Active OPs retrieved count=%s", len(rows))
+            return [
+                {**dict(row), "message": "Active managers retrieved successfully."}
+                for row in rows
+            ]
+        except asyncpg.PostgresError:
+            log.exception("Database error while fetching active OPs")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error.",
+            )
+        except Exception:
+            log.exception("Unexpected error while fetching active OPs")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_active_ops,
+        ttl_seconds=300,
+        tags=[_employee_active_op_tag()],
+    )
 
 # -------------------------------------------------------------------
 # GET ACTIVE MANAGERS
@@ -807,6 +865,10 @@ async def get_active_managers(
     )
 
     log.info("Fetching active managers")
+    cache_key = build_cache_key(
+        "employees:active_managers",
+        current_emp_id=current_emp_id,
+    )
 
     sql = f"""
         SELECT *
@@ -818,31 +880,38 @@ async def get_active_managers(
 
     try:
         pool = await get_db_pool()
-
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql)
-
-        log.info("Active managers retrieved count=%s", len(rows))
-
-        # Return raw dicts with message, bypassing Pydantic validation
-        return [
-            {**dict(row), "message": "Active managers retrieved successfully."}
-            for row in rows
-        ]
-
-    except asyncpg.PostgresError:
-        log.exception("Database error while fetching active managers")
-        raise HTTPException(
-            status_code=500,
-            detail="Database error.",
-        )
-
     except Exception:
-        log.exception("Unexpected error while fetching active managers")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+        log.exception("Database pool acquisition failed for active managers")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async def _load_active_managers():
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql)
+            log.info("Active managers retrieved count=%s", len(rows))
+            return [
+                {**dict(row), "message": "Active managers retrieved successfully."}
+                for row in rows
+            ]
+        except asyncpg.PostgresError:
+            log.exception("Database error while fetching active managers")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error.",
+            )
+        except Exception:
+            log.exception("Unexpected error while fetching active managers")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_active_managers,
+        ttl_seconds=300,
+        tags=[_employee_active_managers_tag()],
+    )
 # -------------------------------------------------------------------
 # SOFT DELETE EMPLOYEE (SET is_active TO FALSE + VERSION AUDIT)
 # -------------------------------------------------------------------
@@ -967,6 +1036,7 @@ async def soft_delete_employee(
                 )
 
             log.info("Employee soft deleted successfully emp_id=%s", emp_id)
+            await _invalidate_employee_related_cache(emp_id)
 
             return {
                 **dict(row),
@@ -1064,6 +1134,14 @@ async def list_roles(
         limit,
         offset,
     )
+    cache_key = build_cache_key(
+        "employees:list_roles",
+        is_active=is_active,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
+        current_emp_id=current_emp_id,
+    )
 
     # --------------------------------------------------
     # Database Pool Acquisition
@@ -1077,74 +1155,81 @@ async def list_roles(
             detail="Database connection error.",
         )
 
-    try:
-        conditions = []
-        values = []
-        param_index = 1
+    async def _load_roles():
+        try:
+            conditions = []
+            values = []
+            param_index = 1
 
         # --------------------------------------------------
         # Active Filtering Logic (Enterprise Pattern)
         # --------------------------------------------------
-        if is_active is not None:
-            conditions.append(f"is_active = ${param_index}")
-            values.append(is_active)
-            param_index += 1
+            if is_active is not None:
+                conditions.append(f"is_active = ${param_index}")
+                values.append(is_active)
+                param_index += 1
 
-        elif not include_inactive:
-            conditions.append("is_active = TRUE")
+            elif not include_inactive:
+                conditions.append("is_active = TRUE")
 
         # --------------------------------------------------
         # WHERE Clause Builder
         # --------------------------------------------------
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.roles
-              {where_clause}
-             ORDER BY id ASC
-             LIMIT ${param_index} OFFSET ${param_index + 1}
-        """
+            sql = f"""
+                SELECT *
+                  FROM {DB_SCHEMA}.roles
+                  {where_clause}
+                 ORDER BY id ASC
+                 LIMIT ${param_index} OFFSET ${param_index + 1}
+            """
 
-        values.extend([limit, offset])
+            values.extend([limit, offset])
 
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(sql, *values)
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, *values)
 
-        log.info(
-            "Roles fetched successfully | count=%s",
-            len(rows),
-        )
+            log.info(
+                "Roles fetched successfully | count=%s",
+                len(rows),
+            )
 
-        return [
-            {
-                **dict(row),
-                "message": "Roles fetched successfully.",
-                "request_id": request_id,
-            }
-            for row in rows
-        ]
+            return [
+                {
+                    **dict(row),
+                    "message": "Roles fetched successfully.",
+                    "request_id": request_id,
+                }
+                for row in rows
+            ]
 
     # --------------------------------------------------
     # Database Error Handling
     # --------------------------------------------------
-    except asyncpg.PostgresError as e:
-        log.error(
-            "Database error during roles fetch | error=%s",
-            str(e),
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Database error.",
-        )
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during roles fetch | error=%s",
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Database error.",
+            )
+        except Exception:
+            log.exception("Unexpected error during roles fetch")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-    except Exception:
-        log.exception("Unexpected error during roles fetch")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_roles,
+        ttl_seconds=300,
+        tags=[_roles_list_tag()],
+    )
 # -------------------------------------------------------------------
 # CREATE ROLE
 # -------------------------------------------------------------------
@@ -1241,6 +1326,7 @@ async def create_role(
             )
 
             log.info("Role created successfully id=%s role_code=%s", row["id"], role_code)
+            await redis_invalidate_tag(_roles_list_tag())
 
             return dict(row)
 
@@ -1403,6 +1489,7 @@ async def change_password(
                 )
 
             log.info("Password changed successfully for emp_id=%s", emp_id)
+            await _invalidate_employee_related_cache(emp_id)
             return {"message": "Password changed successfully."}
 
         except HTTPException:

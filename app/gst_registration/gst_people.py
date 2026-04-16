@@ -9,6 +9,11 @@ from app.gst_registration.schemas import (
 )
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from app.logger import logger
+from app.redis_cache import (
+    build_cache_key,
+    get_or_set_json as redis_get_or_set_json,
+    invalidate_tag as redis_invalidate_tag,
+)
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
@@ -18,6 +23,19 @@ router = APIRouter(
     prefix="/api/v1/gst-people",
     tags=["GST Registration People"]
 )
+
+
+def _gst_people_designations_tag() -> str:
+    return "gst_people:designations:index"
+
+
+def _gst_people_filter_tag() -> str:
+    return "gst_people:filter:index"
+
+
+async def _invalidate_gst_people_cache() -> None:
+    await redis_invalidate_tag(_gst_people_designations_tag())
+    await redis_invalidate_tag(_gst_people_filter_tag())
 
 # -------------------------------------------------------------------
 # GET DESIGNATIONS BASED ON OWNERSHIP CATEGORY
@@ -52,6 +70,11 @@ async def get_designations(
         "Fetching designations | gst_id=%s",
         gst_id,
     )
+    cache_key = build_cache_key(
+        "gst_people:designations",
+        gst_id=gst_id,
+        emp_id=emp_id,
+    )
 
     # --------------------------------------------------
     # DB Pool
@@ -69,100 +92,84 @@ async def get_designations(
             detail="Database connection error."
         )
 
-    async with pool.acquire() as conn:
-
-        try:
-
-            # --------------------------------------------------
-            # Fetch GST Registration
-            # --------------------------------------------------
-
-            gst_row = await conn.fetchrow(
-                f"""
-                SELECT
-                    id,
-                    ownership_category
-                FROM {DB_SCHEMA}.gst_registration
-                WHERE id = $1
-                AND is_active = TRUE
-                """,
-                gst_id,
-            )
-
-            if not gst_row:
-
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "error":{
-                            "type":"validation_error",
-                            "message":"Validation failed",
-                            "fields":{
-                                "gst_id":"GST registration not found or inactive."
-                            }
-                        }
-                    }
+    async def _load_designations():
+        async with pool.acquire() as conn:
+            try:
+                gst_row = await conn.fetchrow(
+                    f"""
+                    SELECT
+                        id,
+                        ownership_category
+                    FROM {DB_SCHEMA}.gst_registration
+                    WHERE id = $1
+                    AND is_active = TRUE
+                    """,
+                    gst_id,
                 )
 
-            ownership_category = gst_row["ownership_category"]
+                if not gst_row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail={
+                            "error": {
+                                "type": "validation_error",
+                                "message": "Validation failed",
+                                "fields": {
+                                    "gst_id": "GST registration not found or inactive."
+                                }
+                            }
+                        }
+                    )
 
-            # --------------------------------------------------
-            # Fetch Designations
-            # --------------------------------------------------
+                ownership_category = gst_row["ownership_category"]
+                rows = await conn.fetch(
+                    f"""
+                    SELECT
+                        value,
+                        display_name,
+                        description
+                    FROM {DB_SCHEMA}.gst_registration_config
+                    WHERE config_type = $1
+                    AND is_active = TRUE
+                    ORDER BY sort_order
+                    """,
+                    ownership_category,
+                )
+                designations = [dict(r) for r in rows]
 
-            rows = await conn.fetch(
-                f"""
-                SELECT
-                    value,
-                    display_name,
-                    description
-                FROM {DB_SCHEMA}.gst_registration_config
-                WHERE config_type = $1
-                AND is_active = TRUE
-                ORDER BY sort_order
-                """,
-                ownership_category,
-            )
+                log.info(
+                    "Designations fetched successfully | ownership_category=%s count=%s",
+                    ownership_category,
+                    len(designations),
+                )
 
-            designations = [dict(r) for r in rows]
+                return {
+                    "gst_id": gst_id,
+                    "ownership_category": ownership_category,
+                    "designations": designations,
+                    "request_id": request_id,
+                }
+            except asyncpg.PostgresError:
+                log.exception("Database error while fetching designations")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Database error occurred."
+                )
+            except HTTPException:
+                raise
+            except Exception:
+                log.exception("Unexpected error while fetching designations")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal server error."
+                )
 
-            log.info(
-                "Designations fetched successfully | ownership_category=%s count=%s",
-                ownership_category,
-                len(designations),
-            )
-
-            return {
-                "gst_id": gst_id,
-                "ownership_category": ownership_category,
-                "designations": designations,
-                "request_id": request_id,
-            }
-
-        # --------------------------------------------------
-        # DATABASE ERROR
-        # --------------------------------------------------
-
-        except asyncpg.PostgresError:
-
-            log.exception("Database error while fetching designations")
-
-            raise HTTPException(
-                status_code=500,
-                detail="Database error occurred."
-            )
-
-        except HTTPException:
-            raise
-
-        except Exception:
-
-            log.exception("Unexpected error while fetching designations")
-
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error."
-            )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_designations,
+        ttl_seconds=300,
+        tags=[_gst_people_designations_tag()],
+    )
 # -------------------------------------------------------------------
 # CREATE REGISTRATION PERSON (Production Standard + Version Audit + IST)
 # -------------------------------------------------------------------
@@ -464,6 +471,7 @@ async def create_registration_person(
                 "Registration person created successfully | person_id=%s",
                 person_row["person_id"],
             )
+            await _invalidate_gst_people_cache()
 
             return {
                 **dict(person_row),
@@ -594,6 +602,38 @@ async def list_registration_persons(
             status_code=400,
             detail="from_date cannot be greater than to_date.",
         )
+    role_norm = str(role).strip().upper() if role is not None else None
+    gstin_norm = gstin.strip().upper() if gstin and gstin.strip() else None
+    pan_norm = pan.strip().upper() if pan and pan.strip() else None
+    aadhaar_norm = aadhaar.strip() if aadhaar and aadhaar.strip() else None
+    mobile_norm = mobile.strip() if mobile and mobile.strip() else None
+    email_norm = email.strip().lower() if email and email.strip() else None
+    full_name_norm = full_name.strip() if full_name and full_name.strip() else None
+    designation_norm = designation.strip() if designation and designation.strip() else None
+    emp_id_for_scope = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    cache_key = build_cache_key(
+        "gst_people:filter",
+        person_id=person_id,
+        customer_id=customer_id,
+        gst_registration_id=gst_registration_id,
+        gstin=gstin_norm,
+        gstin_is_null=gstin_is_null,
+        pan=pan_norm,
+        aadhaar=aadhaar_norm,
+        mobile=mobile_norm,
+        email=email_norm,
+        full_name=full_name_norm,
+        designation=designation_norm,
+        is_primary_customer=is_primary_customer,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+        role=role_norm,
+        emp_id=emp_id_for_scope,
+    )
 
     # --------------------------------------------------
     # DB Pool
@@ -607,7 +647,7 @@ async def list_registration_persons(
             detail="Database connection error.",
         )
 
-    try:
+    async def _load_list_registration_persons():
         conditions = []
         values = []
         param_index = 1
@@ -634,29 +674,29 @@ async def list_registration_persons(
         # ---------------- GSTIN ----------------
         if gstin_is_null:
             conditions.append("p.gstin IS NULL")
-        elif gstin and gstin.strip():
+        elif gstin_norm:
             conditions.append(f"upper(p.gstin) = ${param_index}")
-            values.append(gstin.strip().upper())
+            values.append(gstin_norm)
             param_index += 1
 
-        if pan and pan.strip():
+        if pan_norm:
             conditions.append(f"upper(p.pan) = ${param_index}")
-            values.append(pan.strip().upper())
+            values.append(pan_norm)
             param_index += 1
 
-        if aadhaar and aadhaar.strip():
+        if aadhaar_norm:
             conditions.append(f"trim(p.aadhaar) = ${param_index}")
-            values.append(aadhaar.strip())
+            values.append(aadhaar_norm)
             param_index += 1
 
-        if mobile and mobile.strip():
+        if mobile_norm:
             conditions.append(f"p.mobile = ${param_index}")
-            values.append(mobile.strip())
+            values.append(mobile_norm)
             param_index += 1
 
-        if email and email.strip():
+        if email_norm:
             conditions.append(f"lower(p.email) = ${param_index}")
-            values.append(email.strip().lower())
+            values.append(email_norm)
             param_index += 1
 
         if is_primary_customer is not None:
@@ -668,14 +708,14 @@ async def list_registration_persons(
         # Partial Match Filters
         # --------------------------------------------------
 
-        if full_name and full_name.strip():
+        if full_name_norm:
             conditions.append(f"p.full_name ILIKE ${param_index}")
-            values.append(f"%{full_name.strip()}%")
+            values.append(f"%{full_name_norm}%")
             param_index += 1
 
-        if designation and designation.strip():
+        if designation_norm:
             conditions.append(f"p.designation ILIKE ${param_index}")
-            values.append(f"%{designation.strip()}%")
+            values.append(f"%{designation_norm}%")
             param_index += 1
 
         # --------------------------------------------------
@@ -708,8 +748,8 @@ async def list_registration_persons(
         # --------------------------------------------------
 
         visibility_sql, visibility_values, param_index = build_gst_visibility(
-            role,
-            int(current_emp_id) if str(current_emp_id).isdigit() else None,
+            role_norm,
+            emp_id_for_scope,
             param_index,
             DB_SCHEMA
         )
@@ -759,40 +799,45 @@ async def list_registration_persons(
 
         values_with_pagination = values + [limit, offset]
 
-        async with pool.acquire() as conn:
-            total_count = await conn.fetchval(count_sql, *values)
-            rows = await conn.fetch(data_sql, *values_with_pagination)
+        try:
+            async with pool.acquire() as conn:
+                total_count = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(data_sql, *values_with_pagination)
 
-        log.info(
-            "Registration persons filter success | returned=%s total=%s",
-            len(rows),
-            total_count,
-        )
+            log.info(
+                "Registration persons filter success | returned=%s total=%s",
+                len(rows),
+                total_count,
+            )
 
-        return {
-            "data": [dict(row) for row in rows]
-        }
+            return {
+                "data": [dict(row) for row in rows]
+            }
+        except asyncpg.PostgresError as e:
+            log.error(
+                "Database error during registration persons filtering | error=%s",
+                str(e),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred during filtering.",
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            log.exception("Unexpected error during registration persons filtering")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
 
-    except asyncpg.PostgresError as e:
-        log.error(
-            "Database error during registration persons filtering | error=%s",
-            str(e),
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Database error occurred during filtering.",
-        )
-
-    except HTTPException:
-        raise
-
-    except Exception:
-        log.exception("Unexpected error during registration persons filtering")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error.",
-        )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_list_registration_persons,
+        ttl_seconds=300,
+        tags=[_gst_people_filter_tag()],
+    )
 
 def mask_gstin(gstin: str) -> str:
     if not gstin or len(gstin) < 6:
@@ -1136,6 +1181,7 @@ async def edit_registration_person(
                 "Registration person updated successfully | person_id=%s",
                 person_id,
             )
+            await _invalidate_gst_people_cache()
 
             return {
                 **dict(new_row),
@@ -1372,6 +1418,7 @@ async def soft_delete_registration_person(
                 person_id,
                 len(deleted_docs),
             )
+            await _invalidate_gst_people_cache()
 
             return {
                 **dict(deleted_person),
@@ -1600,6 +1647,7 @@ async def activate_registration_person(
                 person_id,
                 len(activated_docs),
             )
+            await _invalidate_gst_people_cache()
 
             return {
                 **dict(activated_person),

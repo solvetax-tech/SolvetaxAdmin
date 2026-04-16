@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_filing_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
 import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Depends, status
@@ -238,6 +239,13 @@ async def get_employee_dashboard_metrics(
             status_code=400,
             detail="Provide either filter_type or start_date & end_date."
         )
+    cache_key = build_cache_key(
+        "dashboard:employee_metrics",
+        filter_type=filter_type,
+        start_date=start_dt,
+        end_date=end_dt,
+        emp_id=current_emp_id,
+    )
 
     # --------------------------------------------------
     # Database Query
@@ -251,51 +259,58 @@ async def get_employee_dashboard_metrics(
             detail="Database connection error.",
         )
 
-    async with pool.acquire() as conn:
-        try:
-            sql = f"""
-                SELECT COUNT(*) AS total_employees
-                FROM {DB_SCHEMA}.employees
-                WHERE created_at >= $1
-                  AND created_at <= $2
-            """
+    async def _load_employee_dashboard_metrics():
+        async with pool.acquire() as conn:
+            try:
+                sql = f"""
+                    SELECT COUNT(*) AS total_employees
+                    FROM {DB_SCHEMA}.employees
+                    WHERE created_at >= $1
+                      AND created_at <= $2
+                """
 
-            row = await conn.fetchrow(sql, start_dt, end_dt)
+                row = await conn.fetchrow(sql, start_dt, end_dt)
+                total = row["total_employees"] if row else 0
 
-            total = row["total_employees"] if row else 0
+                log.info(
+                    "Dashboard metrics fetched successfully | count=%s | start=%s | end=%s",
+                    total,
+                    start_dt,
+                    end_dt
+                )
 
-            log.info(
-                "Dashboard metrics fetched successfully | count=%s | start=%s | end=%s",
-                total,
-                start_dt,
-                end_dt
-            )
+                return {
+                    "filter_type": filter_type,
+                    "start_datetime_ist": start_dt,
+                    "end_datetime_ist": end_dt,
+                    "total_employees_registered": total,
+                    "request_id": request_id
+                }
 
-            return {
-                "filter_type": filter_type,
-                "start_datetime_ist": start_dt,
-                "end_datetime_ist": end_dt,
-                "total_employees_registered": total,
-                "request_id": request_id
-            }
+            except asyncpg.PostgresError as e:
+                log.error(
+                    "Database error during dashboard query error=%s",
+                    e,
+                    exc_info=True
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Database error.",
+                )
 
-        except asyncpg.PostgresError as e:
-            log.error(
-                "Database error during dashboard query error=%s",
-                e,
-                exc_info=True
-            )
-            raise HTTPException(
-                status_code=500,
-                detail="Database error.",
-            )
+            except Exception:
+                log.exception("Unexpected error during dashboard metrics")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Internal server error.",
+                )
 
-        except Exception:
-            log.exception("Unexpected error during dashboard metrics")
-            raise HTTPException(
-                status_code=500,
-                detail="Internal server error.",
-            )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_employee_dashboard_metrics,
+        ttl_seconds=300,
+        tags=["dashboard:employee_metrics:index"],
+    )
 
 
 @router.get(
@@ -404,6 +419,13 @@ async def get_customer_dashboard_metrics(
             status_code=400,
             detail="Provide either filter_type or start_date & end_date."
         )
+    cache_key = build_cache_key(
+        "dashboard:customer_metrics",
+        filter_type=filter_type,
+        start_date=start_dt,
+        end_date=end_dt,
+        emp_id=current_emp_id,
+    )
 
     # --------------------------------------------------
     # DB Query
@@ -414,38 +436,46 @@ async def get_customer_dashboard_metrics(
         log.exception("Database pool acquisition failed error=%s", e)
         raise HTTPException(status_code=500, detail="Database connection error.")
 
-    async with pool.acquire() as conn:
-        try:
-            sql = f"""
-                SELECT COUNT(*) AS total_customers
-                FROM {DB_SCHEMA}.customers
-                WHERE created_at >= $1
-                  AND created_at <= $2
-            """
+    async def _load_customer_dashboard_metrics():
+        async with pool.acquire() as conn:
+            try:
+                sql = f"""
+                    SELECT COUNT(*) AS total_customers
+                    FROM {DB_SCHEMA}.customers
+                    WHERE created_at >= $1
+                      AND created_at <= $2
+                """
 
-            row = await conn.fetchrow(sql, start_dt, end_dt)
-            total = row["total_customers"] if row else 0
+                row = await conn.fetchrow(sql, start_dt, end_dt)
+                total = row["total_customers"] if row else 0
 
-            log.info(
-                "Customer dashboard metrics fetched successfully | count=%s",
-                total
-            )
+                log.info(
+                    "Customer dashboard metrics fetched successfully | count=%s",
+                    total
+                )
 
-            return {
-                "filter_type": filter_type,
-                "start_datetime_ist": start_dt,
-                "end_datetime_ist": end_dt,
-                "total_customers_registered": total,
-                "request_id": request_id
-            }
+                return {
+                    "filter_type": filter_type,
+                    "start_datetime_ist": start_dt,
+                    "end_datetime_ist": end_dt,
+                    "total_customers_registered": total,
+                    "request_id": request_id
+                }
 
-        except asyncpg.PostgresError as e:
-            log.error("Database error during dashboard query error=%s", e, exc_info=True)
-            raise HTTPException(status_code=500, detail="Database error.")
+            except asyncpg.PostgresError as e:
+                log.error("Database error during dashboard query error=%s", e, exc_info=True)
+                raise HTTPException(status_code=500, detail="Database error.")
 
-        except Exception:
-            log.exception("Unexpected error during dashboard metrics")
-            raise HTTPException(status_code=500, detail="Internal server error.")
+            except Exception:
+                log.exception("Unexpected error during dashboard metrics")
+                raise HTTPException(status_code=500, detail="Internal server error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_customer_dashboard_metrics,
+        ttl_seconds=300,
+        tags=["dashboard:customer_metrics:index"],
+    )
 
 @router.get(
     "/payment-metrics",
@@ -486,31 +516,50 @@ async def get_payment_dashboard_metrics(
         end_dt = end_date.replace(tzinfo=IST) if end_date.tzinfo is None else end_date.astimezone(IST)
     else:
         raise HTTPException(status_code=400, detail="Missing filter")
+    cache_key = build_cache_key(
+        "dashboard:payment_metrics",
+        filter_type=filter_type,
+        start_date=start_dt,
+        end_date=end_dt,
+        emp_id=current_emp_id,
+    )
 
     try:
         pool = await get_db_pool()
-        async with pool.acquire() as conn:
-            # Aggregate collected amount and total pending
-            sql = f"""
-                SELECT 
-                    SUM(COALESCE(paid_amount, 0)) AS total_received,
-                    SUM(CASE 
-                        WHEN payment_status != 'CANCELLED' THEN COALESCE(net_amount, 0) - COALESCE(paid_amount, 0) 
-                        ELSE 0 
-                    END) AS total_pending
-                FROM {DB_SCHEMA}.payments
-                WHERE created_at >= $1 AND created_at <= $2
-                  AND is_active = TRUE
-            """
-            row = await conn.fetchrow(sql, start_dt, end_dt)
-            return {
-                "total_received": float(row["total_received"] or 0),
-                "total_pending": float(row["total_pending"] or 0),
-                "request_id": request_id
-            }
-    except Exception as e:
-        log.exception("Payment dashboard error")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    except Exception:
+        log.exception("Payment dashboard DB connection error")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async def _load_payment_dashboard_metrics():
+        try:
+            async with pool.acquire() as conn:
+                sql = f"""
+                    SELECT 
+                        SUM(COALESCE(paid_amount, 0)) AS total_received,
+                        SUM(CASE 
+                            WHEN payment_status != 'CANCELLED' THEN COALESCE(net_amount, 0) - COALESCE(paid_amount, 0) 
+                            ELSE 0 
+                        END) AS total_pending
+                    FROM {DB_SCHEMA}.payments
+                    WHERE created_at >= $1 AND created_at <= $2
+                      AND is_active = TRUE
+                """
+                row = await conn.fetchrow(sql, start_dt, end_dt)
+                return {
+                    "total_received": float(row["total_received"] or 0),
+                    "total_pending": float(row["total_pending"] or 0),
+                    "request_id": request_id
+                }
+        except Exception:
+            log.exception("Payment dashboard error")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_payment_dashboard_metrics,
+        ttl_seconds=300,
+        tags=["dashboard:payment_metrics:index"],
+    )
 
 
 @router.get(
@@ -624,6 +673,30 @@ async def get_gst_missed_filings_gt_one(
         filed_to=filed_to_ist,
         include_inactive=include_inactive,
     )
+    cache_key = build_cache_key(
+        "dashboard:gst_missed:gt_one",
+        role=role,
+        emp_id=emp_id,
+        gst_filing_id=gst_filing_id,
+        customer_id=customer_id,
+        gst_registration_id=gst_registration_id,
+        cx_number=cx_number_norm,
+        rm_id=rm_id,
+        op_id=op_id,
+        filing_category=filing_category_norm,
+        filing_status=filing_status_norm,
+        filing_frequency=freq,
+        is_auto_enabled=is_auto_enabled,
+        created_from=created_from_ist,
+        created_to=created_to_ist,
+        data_received_from=data_received_from_ist,
+        data_received_to=data_received_to_ist,
+        filed_from=filed_from_ist,
+        filed_to=filed_to_ist,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
+    )
 
     base_cte = f"""
         WITH per_filing AS (
@@ -662,25 +735,33 @@ async def get_gst_missed_filings_gt_one(
         """
     )
 
-    try:
-        async with pool.acquire() as conn:
-            total = await conn.fetchval(count_sql, *values)
-            rows = await conn.fetch(data_sql, *(values + [limit, offset]))
-    except asyncpg.PostgresError:
-        log.exception("Database error for gt-one MISSED dashboard query")
-        raise HTTPException(status_code=500, detail="Database error.")
-    except Exception:
-        log.exception("Unexpected error for gt-one MISSED dashboard query")
-        raise HTTPException(status_code=500, detail="Internal server error.")
+    async def _load_gst_missed_filings_gt_one():
+        try:
+            async with pool.acquire() as conn:
+                total = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(data_sql, *(values + [limit, offset]))
+        except asyncpg.PostgresError:
+            log.exception("Database error for gt-one MISSED dashboard query")
+            raise HTTPException(status_code=500, detail="Database error.")
+        except Exception:
+            log.exception("Unexpected error for gt-one MISSED dashboard query")
+            raise HTTPException(status_code=500, detail="Internal server error.")
 
-    return {
-        "data": [dict(r) for r in rows],
-        "count": len(rows),
-        "total_count": int(total or 0),
-        "limit": limit,
-        "offset": offset,
-        "request_id": request_id,
-    }
+        return {
+            "data": [dict(r) for r in rows],
+            "count": len(rows),
+            "total_count": int(total or 0),
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_gst_missed_filings_gt_one,
+        ttl_seconds=300,
+        tags=["dashboard:gst_missed:gt_one:index"],
+    )
 
 
 @router.get(
@@ -729,6 +810,13 @@ async def get_gst_missed_filings_buckets(
     filing_category_norm = filing_category.strip().upper() if isinstance(filing_category, str) else None
     filing_status_norm = filing_status.strip().upper() if isinstance(filing_status, str) else None
     cx_number_norm = cx_number.strip() if isinstance(cx_number, str) else None
+    ist = ZoneInfo("Asia/Kolkata")
+    created_from_ist = _to_ist_or_none(created_from, ist)
+    created_to_ist = _to_ist_or_none(created_to, ist)
+    data_received_from_ist = _to_ist_or_none(data_received_from, ist)
+    data_received_to_ist = _to_ist_or_none(data_received_to, ist)
+    filed_from_ist = _to_ist_or_none(filed_from, ist)
+    filed_to_ist = _to_ist_or_none(filed_to, ist)
 
     if freq and freq not in {"MONTHLY", "QUARTERLY", "YEARLY"}:
         raise HTTPException(status_code=400, detail="Invalid filing_frequency.")
@@ -776,6 +864,32 @@ async def get_gst_missed_filings_buckets(
         filed_from=filed_from_ist,
         filed_to=filed_to_ist,
         include_inactive=include_inactive,
+    )
+    cache_key = build_cache_key(
+        "dashboard:gst_missed:buckets",
+        role=role,
+        emp_id=emp_id,
+        threshold=threshold,
+        bucket=bucket_norm,
+        gst_filing_id=gst_filing_id,
+        customer_id=customer_id,
+        gst_registration_id=gst_registration_id,
+        cx_number=cx_number_norm,
+        rm_id=rm_id,
+        op_id=op_id,
+        filing_category=filing_category_norm,
+        filing_status=filing_status_norm,
+        filing_frequency=freq,
+        is_auto_enabled=is_auto_enabled,
+        created_from=created_from_ist,
+        created_to=created_to_ist,
+        data_received_from=data_received_from_ist,
+        data_received_to=data_received_to_ist,
+        filed_from=filed_from_ist,
+        filed_to=filed_to_ist,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
     )
 
     base_cte = f"""
@@ -842,41 +956,49 @@ async def get_gst_missed_filings_buckets(
         data_values.append(threshold)
     data_values += [limit, offset]
 
-    try:
-        async with pool.acquire() as conn:
-            summary_row = await conn.fetchrow(summary_sql, *(values + [threshold]))
-            rows = await conn.fetch(data_sql, *data_values)
-    except asyncpg.PostgresError:
-        log.exception("Database error for MISSED bucket dashboard query")
-        raise HTTPException(status_code=500, detail="Database error.")
-    except Exception:
-        log.exception("Unexpected error for MISSED bucket dashboard query")
-        raise HTTPException(status_code=500, detail="Internal server error.")
+    async def _load_gst_missed_filings_buckets():
+        try:
+            async with pool.acquire() as conn:
+                summary_row = await conn.fetchrow(summary_sql, *(values + [threshold]))
+                rows = await conn.fetch(data_sql, *data_values)
+        except asyncpg.PostgresError:
+            log.exception("Database error for MISSED bucket dashboard query")
+            raise HTTPException(status_code=500, detail="Database error.")
+        except Exception:
+            log.exception("Unexpected error for MISSED bucket dashboard query")
+            raise HTTPException(status_code=500, detail="Internal server error.")
 
-    exact_one_count = int(summary_row["exact_one_count"] or 0)
-    gt_one_count = int(summary_row["gt_one_count"] or 0)
-    gt_limit_count = int(summary_row["gt_limit_count"] or 0)
-    selected_total = (
-        exact_one_count if bucket_norm == "exact_one"
-        else gt_one_count if bucket_norm == "gt_one"
-        else gt_limit_count
+        exact_one_count = int(summary_row["exact_one_count"] or 0)
+        gt_one_count = int(summary_row["gt_one_count"] or 0)
+        gt_limit_count = int(summary_row["gt_limit_count"] or 0)
+        selected_total = (
+            exact_one_count if bucket_norm == "exact_one"
+            else gt_one_count if bucket_norm == "gt_one"
+            else gt_limit_count
+        )
+
+        return {
+            "data": [dict(r) for r in rows],
+            "bucket": bucket_norm,
+            "threshold": threshold,
+            "count": len(rows),
+            "total_count": selected_total,
+            "summary": {
+                "exact_one_count": exact_one_count,
+                "gt_one_count": gt_one_count,
+                "gt_limit_count": gt_limit_count,
+            },
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_gst_missed_filings_buckets,
+        ttl_seconds=300,
+        tags=["dashboard:gst_missed:buckets:index"],
     )
-
-    return {
-        "data": [dict(r) for r in rows],
-        "bucket": bucket_norm,
-        "threshold": threshold,
-        "count": len(rows),
-        "total_count": selected_total,
-        "summary": {
-            "exact_one_count": exact_one_count,
-            "gt_one_count": gt_one_count,
-            "gt_limit_count": gt_limit_count,
-        },
-        "limit": limit,
-        "offset": offset,
-        "request_id": request_id,
-    }
 
 
 @router.get(
@@ -921,6 +1043,13 @@ async def get_gst_missed_filings_exact_one(
     filing_category_norm = filing_category.strip().upper() if isinstance(filing_category, str) else None
     filing_status_norm = filing_status.strip().upper() if isinstance(filing_status, str) else None
     cx_number_norm = cx_number.strip() if isinstance(cx_number, str) else None
+    ist = ZoneInfo("Asia/Kolkata")
+    created_from_ist = _to_ist_or_none(created_from, ist)
+    created_to_ist = _to_ist_or_none(created_to, ist)
+    data_received_from_ist = _to_ist_or_none(data_received_from, ist)
+    data_received_to_ist = _to_ist_or_none(data_received_to, ist)
+    filed_from_ist = _to_ist_or_none(filed_from, ist)
+    filed_to_ist = _to_ist_or_none(filed_to, ist)
 
     if freq and freq not in {"MONTHLY", "QUARTERLY", "YEARLY"}:
         raise HTTPException(status_code=400, detail="Invalid filing_frequency.")
@@ -969,6 +1098,30 @@ async def get_gst_missed_filings_exact_one(
         filed_to=filed_to_ist,
         include_inactive=include_inactive,
     )
+    cache_key = build_cache_key(
+        "dashboard:gst_missed:exact_one",
+        role=role,
+        emp_id=emp_id,
+        gst_filing_id=gst_filing_id,
+        customer_id=customer_id,
+        gst_registration_id=gst_registration_id,
+        cx_number=cx_number_norm,
+        rm_id=rm_id,
+        op_id=op_id,
+        filing_category=filing_category_norm,
+        filing_status=filing_status_norm,
+        filing_frequency=freq,
+        is_auto_enabled=is_auto_enabled,
+        created_from=created_from_ist,
+        created_to=created_to_ist,
+        data_received_from=data_received_from_ist,
+        data_received_to=data_received_to_ist,
+        filed_from=filed_from_ist,
+        filed_to=filed_to_ist,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
+    )
 
     base_cte = f"""
         WITH per_filing AS (
@@ -1007,22 +1160,30 @@ async def get_gst_missed_filings_exact_one(
         """
     )
 
-    try:
-        async with pool.acquire() as conn:
-            total = await conn.fetchval(count_sql, *values)
-            rows = await conn.fetch(data_sql, *(values + [limit, offset]))
-    except asyncpg.PostgresError:
-        log.exception("Database error for exact-one MISSED dashboard query")
-        raise HTTPException(status_code=500, detail="Database error.")
-    except Exception:
-        log.exception("Unexpected error for exact-one MISSED dashboard query")
-        raise HTTPException(status_code=500, detail="Internal server error.")
+    async def _load_gst_missed_filings_exact_one():
+        try:
+            async with pool.acquire() as conn:
+                total = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(data_sql, *(values + [limit, offset]))
+        except asyncpg.PostgresError:
+            log.exception("Database error for exact-one MISSED dashboard query")
+            raise HTTPException(status_code=500, detail="Database error.")
+        except Exception:
+            log.exception("Unexpected error for exact-one MISSED dashboard query")
+            raise HTTPException(status_code=500, detail="Internal server error.")
 
-    return {
-        "data": [dict(r) for r in rows],
-        "count": len(rows),
-        "total_count": int(total or 0),
-        "limit": limit,
-        "offset": offset,
-        "request_id": request_id,
-    }
+        return {
+            "data": [dict(r) for r in rows],
+            "count": len(rows),
+            "total_count": int(total or 0),
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_gst_missed_filings_exact_one,
+        ttl_seconds=300,
+        tags=["dashboard:gst_missed:exact_one:index"],
+    )
