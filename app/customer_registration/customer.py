@@ -1,6 +1,8 @@
 import logging
 import uuid
 import asyncpg
+import httpx
+from difflib import SequenceMatcher
 from fastapi import APIRouter, HTTPException, Query, Depends, status, UploadFile, File
 from pydantic import constr, validator
 from typing import Optional, List
@@ -60,6 +62,249 @@ async def _invalidate_customer_cache(customer_id: int) -> None:
     # invalidate their tags here too when customer fields affect those responses.
     await redis_invalidate_tag(_customer_get_by_id_tag(customer_id))
     await redis_invalidate_tag(_customer_filter_tag())
+
+
+def _customer_pincode_lookup_tag() -> str:
+    return "customer:pincode_lookup:index"
+
+
+def _customer_pincode_lookup_cache_key(pincode: str) -> str:
+    return build_cache_key("customer:pincode_lookup", pincode=pincode)
+
+
+@router.get(
+    "/pincode/{pincode}",
+    summary="Lookup city/state by pincode",
+    responses={
+        200: {"description": "Pincode lookup successful."},
+        400: {"description": "Invalid pincode."},
+        404: {"description": "Pincode not found."},
+        502: {"description": "Upstream service error."},
+    },
+)
+async def lookup_pincode(
+    pincode: str,
+    search: Optional[str] = Query(
+        None,
+        description="Optional search text to filter location name/district/state.",
+    ),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "lookup_pincode"},
+    )
+
+    pincode_norm = (pincode or "").strip()
+    if not (pincode_norm.isdigit() and len(pincode_norm) == 6):
+        raise HTTPException(status_code=400, detail="Pincode must be a 6-digit number.")
+
+    search_norm = search.strip().lower() if isinstance(search, str) and search.strip() else None
+    cache_key = build_cache_key(
+        "customer:pincode_lookup:v2",
+        pincode=pincode_norm,
+        search=search_norm,
+    )
+
+    async def _load_pincode_location():
+        url = f"https://api.postalpincode.in/pincode/{pincode_norm}"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                response = await client.get(url)
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPError:
+            log.exception("Pincode lookup HTTP error | pincode=%s", pincode_norm)
+            raise HTTPException(status_code=502, detail="Pincode service unavailable.")
+        except ValueError:
+            log.exception("Pincode lookup invalid JSON | pincode=%s", pincode_norm)
+            raise HTTPException(status_code=502, detail="Invalid response from pincode service.")
+
+        if not isinstance(payload, list) or not payload:
+            raise HTTPException(status_code=502, detail="Unexpected pincode service response.")
+
+        first = payload[0] or {}
+        if first.get("Status") != "Success":
+            raise HTTPException(status_code=404, detail="Pincode not found.")
+
+        post_offices = first.get("PostOffice") or []
+        if not post_offices:
+            raise HTTPException(status_code=404, detail="Pincode not found.")
+
+        locations = []
+        seen = set()
+        for po in post_offices:
+            location = {
+                "name": po.get("Name"),
+                "district": po.get("District"),
+                "state": po.get("State"),
+                "country": po.get("Country"),
+            }
+            if search_norm:
+                haystack = " ".join(
+                    str(v).strip().lower()
+                    for v in (location["name"], location["district"], location["state"])
+                    if v
+                )
+                if search_norm not in haystack:
+                    continue
+            key = (
+                location["name"],
+                location["district"],
+                location["state"],
+                location["country"],
+            )
+            if key not in seen:
+                seen.add(key)
+                locations.append(location)
+
+        if not locations:
+            raise HTTPException(status_code=404, detail="No locations match the search for this pincode.")
+
+        return {
+            "pincode": pincode_norm,
+            "search": search_norm,
+            "state": locations[0].get("state"),
+            "city": locations[0].get("district"),
+            "locations": locations,
+            "source": "india_post",
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_pincode_location,
+        ttl_seconds=86400,
+        tags=[_customer_pincode_lookup_tag()],
+    )
+
+
+@router.get(
+    "/pincode-search",
+    summary="Lookup location details by name (pincode optional)",
+    responses={
+        200: {"description": "Location search successful."},
+        400: {"description": "Invalid search input."},
+        404: {"description": "Location not found."},
+        502: {"description": "Upstream service error."},
+    },
+)
+async def lookup_location_by_name(
+    search: str = Query(..., min_length=2, description="Post office/city/locality search text."),
+    pincode: Optional[str] = Query(None, description="Optional 6-digit pincode filter."),
+    min_match_percent: int = Query(
+        35,
+        ge=30,
+        le=40,
+        description="Minimum fuzzy name match percentage (30-40).",
+    ),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "lookup_location_by_name"},
+    )
+
+    search_norm = search.strip()
+    if not search_norm:
+        raise HTTPException(status_code=400, detail="search is required.")
+
+    pincode_norm = pincode.strip() if isinstance(pincode, str) and pincode.strip() else None
+    if pincode_norm and not (pincode_norm.isdigit() and len(pincode_norm) == 6):
+        raise HTTPException(status_code=400, detail="pincode must be a 6-digit number.")
+
+    cache_key = build_cache_key(
+        "customer:pincode_search:v1",
+        search=search_norm.lower(),
+        pincode=pincode_norm,
+        min_match_percent=min_match_percent,
+    )
+
+    async def _load_location_search():
+        url = f"https://api.postalpincode.in/postoffice/{search_norm}"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                response = await client.get(url)
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPError:
+            log.exception("Location search HTTP error | search=%s", search_norm)
+            raise HTTPException(status_code=502, detail="Location search service unavailable.")
+        except ValueError:
+            log.exception("Location search invalid JSON | search=%s", search_norm)
+            raise HTTPException(status_code=502, detail="Invalid response from location service.")
+
+        if not isinstance(payload, list) or not payload:
+            raise HTTPException(status_code=502, detail="Unexpected location service response.")
+
+        first = payload[0] or {}
+        if first.get("Status") != "Success":
+            raise HTTPException(status_code=404, detail="No locations found.")
+
+        post_offices = first.get("PostOffice") or []
+        locations = []
+        seen = set()
+        search_lower = search_norm.lower()
+        min_match_ratio = min_match_percent / 100.0
+        for po in post_offices:
+            row_pincode = str(po.get("Pincode") or "").strip()
+            if pincode_norm and row_pincode != pincode_norm:
+                continue
+            location = {
+                "name": po.get("Name"),
+                "district": po.get("District"),
+                "state": po.get("State"),
+                "country": po.get("Country"),
+                "pincode": row_pincode or None,
+            }
+            candidates = [
+                str(location["name"] or "").strip().lower(),
+                str(location["district"] or "").strip().lower(),
+                str(location["state"] or "").strip().lower(),
+            ]
+            score = max(SequenceMatcher(None, search_lower, c).ratio() for c in candidates if c)
+            if score < min_match_ratio:
+                continue
+            key = (
+                location["name"],
+                location["district"],
+                location["state"],
+                location["country"],
+                location["pincode"],
+            )
+            if key not in seen:
+                seen.add(key)
+                location["match_percent"] = round(score * 100, 2)
+                locations.append(location)
+
+        if not locations:
+            raise HTTPException(status_code=404, detail="No locations match the given filters.")
+
+        locations.sort(key=lambda item: item.get("match_percent", 0), reverse=True)
+
+        return {
+            "search": search_norm,
+            "pincode": pincode_norm,
+            "min_match_percent": min_match_percent,
+            "state": locations[0].get("state"),
+            "city": locations[0].get("district"),
+            "locations": locations,
+            "source": "india_post",
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_location_search,
+        ttl_seconds=86400,
+        tags=[_customer_pincode_lookup_tag()],
+    )
 # -------------------------------------------------------------------
 # CREATE CUSTOMER (Enterprise Production + Version Audit + Services)
 # -------------------------------------------------------------------

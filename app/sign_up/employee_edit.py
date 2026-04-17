@@ -101,8 +101,13 @@ async def edit_employee(
             detail="At least one field must be provided for update.",
         )
     
-    # Extract team_id for logical update, as it's not a column in the employees table
+    # Team assignment is managed via security/teams APIs only.
     requested_team_id = update_data.pop("team_id", None)
+    if requested_team_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="team_id updates are not allowed in employee edit. Use teams API to assign/move team.",
+        )
 
 
     try:
@@ -132,7 +137,7 @@ async def edit_employee(
                     raise HTTPException(status_code=404, detail="Employee not found.")
 
                 old_role = old_row["role"]
-                old_manager = old_row["manager_emp_id"]
+                manager_roles = {"SALES_MANAGER", "OP_MANAGER"}
 
                 # --------------------------------------------------
                 # Normalize critical fields
@@ -205,6 +210,25 @@ async def edit_employee(
                         }
                     )
 
+                # Validate manager_emp_id compatibility when provided.
+                if "manager_emp_id" in update_data and update_data["manager_emp_id"] is not None:
+                    manager_emp_id = update_data["manager_emp_id"]
+                    manager_row = await conn.fetchrow(
+                        f"""
+                        SELECT e.emp_id, e.is_active, e.role
+                        FROM {DB_SCHEMA}.employees e
+                        WHERE e.emp_id = $1
+                        """,
+                        manager_emp_id,
+                    )
+                    if not manager_row or not manager_row["is_active"]:
+                        raise HTTPException(status_code=400, detail="Invalid manager_emp_id.")
+                    if (manager_row["role"] or "").strip().upper() not in manager_roles | {"ADMIN"}:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="manager_emp_id must be ADMIN/SALES_MANAGER/OP_MANAGER.",
+                        )
+
                 # --------------------------------------------------
                 # Dynamic update
                 # --------------------------------------------------
@@ -236,133 +260,23 @@ async def edit_employee(
                         detail="Employee state changed. Please retry."
                     )
 
-                new_role = new_row["role"]
-                new_manager = new_row["manager_emp_id"]
-
-                # --------------------------------------------------
-                # TEAM MEMBERS SYNC (Explicit team_id Change)
-                # --------------------------------------------------
-                if requested_team_id is not None:
-                    # Validate team exists
-                    team_exists = await conn.fetchval(
-                        f"SELECT EXISTS(SELECT 1 FROM {DB_SCHEMA}.teams WHERE id = $1 AND is_active = TRUE)",
-                        requested_team_id
-                    )
-                    if not team_exists:
-                        raise HTTPException(status_code=400, detail="Invalid target team_id provided.")
-
-                    # Deactivate old team memberships
-                    await conn.execute(
-                        f"UPDATE {DB_SCHEMA}.team_members SET is_active = FALSE, updated_at = NOW() WHERE emp_id = $1",
-                        emp_id
-                    )
-
-                    # Insert/Update new membership
-                    await conn.execute(
+                new_role = (new_row["role"] or "").strip().upper()
+                if (old_role or "").strip().upper() in manager_roles and new_role not in manager_roles:
+                    is_active_manager = await conn.fetchval(
                         f"""
-                        INSERT INTO {DB_SCHEMA}.team_members (team_id, emp_id, is_active, created_at, updated_at)
-                        VALUES ($1,$2,TRUE,NOW(),NOW())
-                        ON CONFLICT (team_id, emp_id)
-                        DO UPDATE SET is_active = TRUE, updated_at = NOW()
-                        """,
-                        requested_team_id,
-                        emp_id
-                    )
-
-                # --------------------------------------------------
-                # TEAM MEMBERS SYNC (Manager Change)
-                # --------------------------------------------------
-
-                if new_manager and new_manager != old_manager:
-
-                    manager_team = await conn.fetchval(
-                        f"""
-                        SELECT team_id
-                        FROM {DB_SCHEMA}.team_members
-                        WHERE emp_id = $1
-                        AND is_active = TRUE
-                        """,
-                        new_manager
-                    )
-
-                    if manager_team:
-
-                        await conn.execute(
-                            f"""
-                            UPDATE {DB_SCHEMA}.team_members
-                            SET is_active = FALSE,
-                            updated_at = NOW()
-                            WHERE emp_id = $1
-                            """,
-                            emp_id
-                        )
-
-                        await conn.execute(
-                            f"""
-                            INSERT INTO {DB_SCHEMA}.team_members
-                            (team_id, emp_id, is_active, created_at, updated_at)
-                            VALUES ($1,$2,TRUE,NOW(),NOW())
-                            ON CONFLICT (team_id, emp_id)
-                            DO UPDATE SET is_active = TRUE, updated_at = NOW()
-                            """,
-                            manager_team,
-                            emp_id
-                        )
-
-                # --------------------------------------------------
-                # TEAM MANAGER SYNC (Role Change)
-                # --------------------------------------------------
-
-                manager_roles = ["SALES_MANAGER", "OP_MANAGER"]
-
-                if old_role not in manager_roles and new_role in manager_roles:
-
-                    team_id = await conn.fetchval(
-                        f"""
-                        SELECT team_id
-                        FROM {DB_SCHEMA}.team_members
-                        WHERE emp_id = $1
-                        AND is_active = TRUE
-                        """,
-                        emp_id
-                    )
-
-                    if team_id:
-
-                        await conn.execute(
-                            f"""
-                            UPDATE {DB_SCHEMA}.team_managers
-                            SET is_active = FALSE,
-                            updated_at = NOW()
-                            WHERE team_id = $1
-                            AND is_active = TRUE
-                            """,
-                            team_id
-                        )
-
-                        await conn.execute(
-                            f"""
-                            INSERT INTO {DB_SCHEMA}.team_managers
-                            (team_id, manager_emp_id, is_active, created_at, updated_at)
-                            VALUES ($1,$2,TRUE,NOW(),NOW())
-                            ON CONFLICT DO NOTHING
-                            """,
-                            team_id,
-                            emp_id
-                        )
-
-                if old_role in manager_roles and new_role not in manager_roles:
-
-                    await conn.execute(
-                        f"""
-                        UPDATE {DB_SCHEMA}.team_managers
-                        SET is_active = FALSE,
-                        updated_at = NOW()
+                        SELECT 1
+                        FROM {DB_SCHEMA}.team_managers
                         WHERE manager_emp_id = $1
-                        AND is_active = TRUE
+                          AND is_active = TRUE
+                        LIMIT 1
                         """,
-                        emp_id
+                        emp_id,
                     )
+                    if is_active_manager:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Cannot demote active team manager via employee edit. Reassign team manager in teams API first.",
+                        )
 
                 # --------------------------------------------------
                 # VERSION AUDIT
@@ -389,6 +303,8 @@ async def edit_employee(
                 "message": "Employee updated successfully."
             }
 
+        except HTTPException:
+            raise
         except Exception:
             log.exception("Unexpected error during employee update emp_id=%s", emp_id)
             raise HTTPException(status_code=500, detail="Internal server error.")
