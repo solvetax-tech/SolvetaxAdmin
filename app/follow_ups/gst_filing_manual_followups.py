@@ -1,9 +1,10 @@
 import logging
 import asyncpg
-from fastapi import APIRouter, HTTPException, Depends, status
-from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, status, Query
+from typing import Optional, List
+from zoneinfo import ZoneInfo
+IST = ZoneInfo("Asia/Kolkata")
 from datetime import datetime, timezone, timedelta
-from fastapi import Query
 
 from app.follow_ups.schemas import (
     CreateFilingFollowupRequest,
@@ -732,3 +733,250 @@ async def update_filing_followup(
         log.exception("Unexpected error")
         raise HTTPException(500, "Internal server error")
 
+
+# --------------------------------------------------
+# LIST / FILTER FOLLOWUPS
+# --------------------------------------------------
+
+
+@router.get(
+    "/filter",
+    summary="Filter GST Filing Manual Followups",
+)
+async def filter_filing_followups(
+    statuses: Optional[List[str]] = Query(None),
+    customer_service_id: Optional[int] = None,
+    rm_id: Optional[int] = None,
+    op_id: Optional[int] = None,
+    from_date: Optional[datetime] = None,
+    to_date: Optional[datetime] = None,
+    id: Optional[int] = None,  # For fetching single by ID if needed
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "filter_filing_followups"},
+    )
+
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            conditions = [
+                "f.entity_type = 'GST_FILING'",
+                "f.status != 'CANCELLED'",
+            ]
+            values = []
+            idx = 1
+
+            if id:
+                conditions.append(f"f.id = ${idx}")
+                values.append(id)
+                idx += 1
+
+            if statuses:
+                conditions.append(f"f.status = ANY(${idx})")
+                values.append(statuses)
+                idx += 1
+
+            if customer_service_id:
+                conditions.append(f"f.customer_service_id = ${idx}")
+                values.append(customer_service_id)
+                idx += 1
+
+            if from_date:
+                conditions.append(f"f.followup_at >= ${idx}")
+                values.append(from_date)
+                idx += 1
+
+            if to_date:
+                conditions.append(f"f.followup_at <= ${idx}")
+                values.append(to_date)
+                idx += 1
+
+            visibility_sql, visibility_values, idx = build_customer_service_visibility(
+                role, emp_id, idx, DB_SCHEMA
+            )
+            if visibility_sql:
+                conditions.append(visibility_sql)
+                values.extend(visibility_values)
+
+            lim_idx = idx
+            off_idx = idx + 1
+            where_clause = f"WHERE {' AND '.join(conditions)}"
+
+            query = f"""
+                SELECT
+                    f.*,
+                    c.customer_id,
+                    c.full_name,
+                    c.mobile,
+                    sc.service_name,
+                    sc.service_code,
+                    cs.rm_id as service_rm_id,
+                    cs.op_id as service_op_id,
+                    e.username as assigned_to_name
+                FROM {DB_SCHEMA}.customer_service_followups f
+                JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+                JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+                JOIN {DB_SCHEMA}.service_config sc ON sc.id = cs.service_id
+                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = f.assigned_to
+                {where_clause}
+                ORDER BY f.id DESC
+                LIMIT ${lim_idx} OFFSET ${off_idx}
+            """
+
+            rows = await conn.fetch(query, *values, limit, offset)
+
+            count_query = f"""
+                SELECT COUNT(*)
+                FROM {DB_SCHEMA}.customer_service_followups f
+                JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+                {where_clause}
+            """
+            total = await conn.fetchval(count_query, *values)
+
+            return {
+                "data": [dict(r) for r in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "request_id": request_id,
+            }
+
+    except Exception:
+        log.exception("Error filtering filing followups")
+        raise HTTPException(500, "Internal server error")
+
+
+@router.get(
+    "/counts",
+    summary="Get GST Filing Followup Counts",
+)
+async def get_filing_followup_counts(
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+
+    now = datetime.now(IST)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            conditions = [
+                "f.entity_type = 'GST_FILING'",
+                "f.status != 'CANCELLED'",
+            ]
+            values = []
+            idx = 3
+
+            visibility_sql, visibility_values, idx = build_customer_service_visibility(
+                role, emp_id, idx, DB_SCHEMA
+            )
+            if visibility_sql:
+                conditions.append(visibility_sql)
+                values.extend(visibility_values)
+
+            where_clause = f"WHERE {' AND '.join(conditions)}"
+
+            query = f"""
+                SELECT
+                    COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2) as scheduled_today,
+                    COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2 AND (f.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' OR f.status = 'COMPLETED')) as evaluated_today,
+                    COUNT(*) FILTER (WHERE f.missed_at IS NOT NULL AND f.followup_at >= $1 AND f.followup_at < $2) as overdue_today,
+                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as completed_today,
+                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as successful_today,
+                    COUNT(*) FILTER (WHERE f.completed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as pending_today
+                FROM {DB_SCHEMA}.customer_service_followups f
+                JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+                {where_clause}
+            """
+            row = await conn.fetchrow(query, today_start, today_end, *values)
+            res_data = dict(row)
+
+            evaluated = res_data.get("evaluated_today", 0)
+            successful = res_data.get("successful_today", 0)
+            res_data["success_rate"] = (
+                round((successful / evaluated) * 100) if evaluated > 0 else 100
+            )
+
+            return {
+                "data": res_data,
+                "request_id": request_id,
+            }
+
+    except Exception:
+        logger.exception("Error fetching filing followup counts")
+        raise HTTPException(500, "Internal server error")
+
+
+@router.get(
+    "/alerts",
+    summary="Get GST Filing Followup Alerts",
+)
+async def get_filing_followup_alerts(
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+
+    now = datetime.now(timezone.utc)
+    next_24h = now + timedelta(hours=24)
+
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            conditions = [
+                "f.entity_type = 'GST_FILING'",
+                "f.status IN ('PENDING', 'MISSED')",
+                f"(f.followup_at < ${1} OR f.followup_at < ${2})",
+            ]
+            values = [now, next_24h]
+            idx = 3
+
+            visibility_sql, visibility_values, idx = build_customer_service_visibility(
+                role, emp_id, idx, DB_SCHEMA
+            )
+            if visibility_sql:
+                conditions.append(visibility_sql)
+                values.extend(visibility_values)
+
+            where_clause = f"WHERE {' AND '.join(conditions)}"
+
+            query = f"""
+                SELECT
+                    f.*,
+                    c.customer_id,
+                    c.full_name,
+                    sc.service_name
+                FROM {DB_SCHEMA}.customer_service_followups f
+                JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+                JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+                JOIN {DB_SCHEMA}.service_config sc ON sc.id = cs.service_id
+                {where_clause}
+                ORDER BY f.followup_at ASC
+                LIMIT 50
+            """
+            rows = await conn.fetch(query, *values)
+
+            return {
+                "data": [dict(r) for r in rows],
+                "request_id": request_id,
+            }
+
+    except Exception:
+        logger.exception("Error fetching filing followup alerts")
+        raise HTTPException(500, "Internal server error")

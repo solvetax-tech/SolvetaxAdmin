@@ -728,10 +728,10 @@ async def generate_business_description(
 
     if not is_business_description_ai_configured():
         raise HTTPException(
-            status_code=503,
+            status_code=400,
             detail={
                 "error": {
-                    "type": "server_error",
+                    "type": "config_error",
                     "message": "AI not configured: set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT.",
                     "fields": {},
                 }
@@ -742,10 +742,10 @@ async def generate_business_description(
     generated = await request_business_description(body, log=log)
     if not generated:
         raise HTTPException(
-            status_code=503,
+            status_code=400,
             detail={
                 "error": {
-                    "type": "server_error",
+                    "type": "upstream_error",
                     "message": "Upstream did not return a usable description (check logs / response shape).",
                     "fields": {},
                 }

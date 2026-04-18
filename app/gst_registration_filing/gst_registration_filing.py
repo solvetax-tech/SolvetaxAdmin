@@ -459,10 +459,23 @@ async def filter_gst_filings(
         # ----------------------------
         # FINAL QUERY
         # ----------------------------
+        select_clause = f"""
+            SELECT f.*, 
+                   COALESCE(f.business_name, r.business_name) AS business_name,
+                   COALESCE(f.business_type, r.business_type) AS business_type,
+                   COALESCE(f.state, r.state) AS state
+        """
+        
+        from_clause = f"""
+            FROM {DB_SCHEMA}.gst_filings f
+            LEFT JOIN {DB_SCHEMA}.gst_registration r
+                ON r.id = f.gst_registration_id
+        """
+
         if include_details:
             query = f"""
-                SELECT f.*, d.*
-                FROM {DB_SCHEMA}.gst_filings f
+                {select_clause}, d.*
+                {from_clause}
                 LEFT JOIN {DB_SCHEMA}.gst_filing_return_details d
                     ON d.gst_filing_id = f.id
                 {where_clause}
@@ -471,8 +484,8 @@ async def filter_gst_filings(
             """
         else:
             query = f"""
-                SELECT f.*
-                FROM {DB_SCHEMA}.gst_filings f
+                {select_clause}
+                {from_clause}
                 {where_clause}
                 ORDER BY f.created_at DESC
                 LIMIT ${idx} OFFSET ${idx+1}
@@ -643,8 +656,13 @@ async def get_gst_registration_prefill_for_filing(
         filing_frequency = _upper_or_none(
             r.get("filing_frequency") or r.get("filing_preference")
         )
-        business_type = _upper_or_none(
-            r.get("customer_business_type") or r.get("business_type")
+
+        final_business_name = (r.get("business_name") or "").strip()
+        if not final_business_name:
+            final_business_name = (r.get("customer_business_name") or "").strip()
+
+        final_business_type = _upper_or_none(
+            r.get("business_type") or r.get("customer_business_type")
         )
 
         return {
@@ -659,9 +677,13 @@ async def get_gst_registration_prefill_for_filing(
             "turnover_details": _upper_or_none(r.get("turnover_details")),
             "state": _upper_or_none(r.get("state")),
             "gst_reg_status": _upper_or_none(r.get("registration_status")),
-            "business_name": (r.get("customer_business_name") or "").strip() or None,
-            "business_type": business_type,
-            "business_description": (r.get("customer_business_description") or "").strip() or None,
+            "business_name": final_business_name or None,
+            "business_type": final_business_type,
+            "business_description": (r.get("customer_business_description") or "").strip()
+            or None,
+            "rm_id": r.get("rm_id"),
+            "op_id": r.get("created_by"),
+            "email_id": (r.get("email") or "").strip() or None,
         }
 
     cached = await redis_get_or_set_json(
@@ -848,12 +870,14 @@ async def create_gst_filing(
                         taxpayer_type, filing_frequency,
                         turnover_details, state, gst_reg_status,
                         username, password, email_id, rent, rule14a,
+                        business_name, business_type, business_description,
                         created_at, updated_at
                     )
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
                         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                        $21,$22,$23,$24
+                        $21,$22,$23,$24,$25,
+                        $26,$27
                     )
                     RETURNING *""",
                     payload.customer_id,
@@ -878,6 +902,9 @@ async def create_gst_filing(
                     email_id,
                     payload.rent,
                     payload.rule14a,
+                    payload.business_name,
+                    payload.business_type,
+                    payload.business_description,
                     now,
                     now,
                 )
@@ -892,16 +919,19 @@ async def create_gst_filing(
                     safe_day = min(day, last_day)
                     return datetime(target.year, target.month, safe_day, tzinfo=IST)
 
+                def _get_status(due):
+                    return "MISSED" if due and due < now else "NOT_FILED"
+
                 if filing_category == "ANNUAL" and filing_frequency == "YEARLY":
                     # Annual returns only (same as legacy `/gst-filings/yearly`): one row — no GSTR-1/3B/CMP-08.
                     if payload.taxpayer_type == "REGULAR":
                         gstr9_due = build_due_date_safe(base_date, 9, 31)
-                        gstr9c_status = (
-                            "NOT_FILED" if payload.turnover_details == "MORE_THAN_5CR" else None
-                        )
-                        gstr9c_due = (
-                            build_due_date_safe(base_date, 9, 31) if gstr9c_status else None
-                        )
+                        gstr9c_valid = payload.turnover_details == "MORE_THAN_5CR"
+                        gstr9c_due = build_due_date_safe(base_date, 9, 31) if gstr9c_valid else None
+                        
+                        gstr9_status = _get_status(gstr9_due)
+                        gstr9c_status = _get_status(gstr9c_due) if gstr9c_valid else None
+
                         next_auto = _compute_next_auto_generate_at(
                             gstr9_due,
                             gstr9c_due,
@@ -920,7 +950,7 @@ async def create_gst_filing(
                             "YEARLY",
                             None,
                             None,
-                            "NOT_FILED",
+                            gstr9_status,
                             gstr9c_status,
                             None,
                             None,
@@ -935,6 +965,7 @@ async def create_gst_filing(
                         )
                     else:
                         gstr4_due = build_due_date_safe(base_date, 9, 30)
+                        gstr4_status = _get_status(gstr4_due)
                         next_auto = _compute_next_auto_generate_at(
                             gstr4_due,
                             lead_days=_LEAD_DAYS_YEARLY_ANNUAL,
@@ -955,7 +986,7 @@ async def create_gst_filing(
                             None,
                             None,
                             None,
-                            "NOT_FILED",
+                            gstr4_status,
                             None,
                             None,
                             None,
@@ -978,6 +1009,9 @@ async def create_gst_filing(
                     else:
                         raise HTTPException(400, GstFilingApiMessages.CREATE_REGULAR_FREQUENCY_INVALID)
 
+                    gstr1_status = _get_status(gstr1_due)
+                    gstr3b_status = _get_status(gstr3b_due)
+
                     next_auto_periodic = _compute_next_auto_generate_at(
                         gstr1_due,
                         gstr3b_due,
@@ -994,8 +1028,8 @@ async def create_gst_filing(
                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
                         filing_id,
                         filing_frequency,
-                        "NOT_FILED",
-                        "NOT_FILED",
+                        gstr1_status,
+                        gstr3b_status,
                         None,
                         None,
                         None,
@@ -1012,8 +1046,11 @@ async def create_gst_filing(
 
                     # Row 2: GSTR9 (+ GSTR9C when turnover > 5CR)
                     gstr9_due = build_due_date_safe(base_date, 9, 31)
-                    gstr9c_status = "NOT_FILED" if payload.turnover_details == "MORE_THAN_5CR" else None
-                    gstr9c_due = build_due_date_safe(base_date, 9, 31) if gstr9c_status else None
+                    gstr9c_valid = payload.turnover_details == "MORE_THAN_5CR"
+                    gstr9c_due = build_due_date_safe(base_date, 9, 31) if gstr9c_valid else None
+                    
+                    gstr9_status = _get_status(gstr9_due)
+                    gstr9c_status = _get_status(gstr9c_due) if gstr9c_valid else None
 
                     next_auto_annual = _compute_next_auto_generate_at(
                         gstr9_due,
@@ -1033,7 +1070,7 @@ async def create_gst_filing(
                         "YEARLY",
                         None,
                         None,
-                        "NOT_FILED",
+                        gstr9_status,
                         gstr9c_status,
                         None,
                         None,
@@ -1050,6 +1087,7 @@ async def create_gst_filing(
                 elif payload.taxpayer_type == "COMPOSITION":
                     # Row 1: CMP08
                     cmp08_due = build_due_date_safe(base_date, 1, 18)
+                    cmp08_status = _get_status(cmp08_due)
                     next_auto_cmp = _compute_next_auto_generate_at(
                         cmp08_due,
                         lead_days=_LEAD_DAYS_QUARTERLY,
@@ -1069,7 +1107,7 @@ async def create_gst_filing(
                         None,
                         None,
                         None,
-                        "NOT_FILED",
+                        cmp08_status,
                         None,
                         None,
                         None,
@@ -1083,6 +1121,7 @@ async def create_gst_filing(
 
                     # Row 2: GSTR4
                     gstr4_due = build_due_date_safe(base_date, 9, 30)
+                    gstr4_status = _get_status(gstr4_due)
                     next_auto_g4 = _compute_next_auto_generate_at(
                         gstr4_due,
                         lead_days=_LEAD_DAYS_YEARLY_ANNUAL,
@@ -1103,7 +1142,7 @@ async def create_gst_filing(
                         None,
                         None,
                         None,
-                        "NOT_FILED",
+                        gstr4_status,
                         None,
                         None,
                         None,

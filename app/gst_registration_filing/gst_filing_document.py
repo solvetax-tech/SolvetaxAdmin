@@ -118,13 +118,14 @@ async def create_gst_filing_document(
                         document_url,
                         verified,
                         verified_by,
+                        verified_at,
                         remarks,
                         created_at,
                         updated_at,
                         is_active
                     )
                     VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE
                     )
                     RETURNING *
                     """,
@@ -134,6 +135,7 @@ async def create_gst_filing_document(
                     payload.document_url,
                     payload.verified,
                     emp_id if payload.verified else None,
+                    now if payload.verified else None,
                     payload.remarks,
                     now,
                     now,
@@ -319,8 +321,10 @@ async def update_gst_filing_document(
                 if "verified" in update_data:
                     if update_data["verified"]:
                         update_data["verified_by"] = emp_id
+                        update_data["verified_at"] = now
                     else:
                         update_data["verified_by"] = None
+                        update_data["verified_at"] = None
 
                 # --------------------------------------------------
                 # 5️⃣ BUILD UPDATE QUERY

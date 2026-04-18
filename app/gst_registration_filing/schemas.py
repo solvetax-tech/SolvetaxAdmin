@@ -227,6 +227,9 @@ class GSTRegistrationFilingPrefillOut(BaseSchema):
     business_name: Optional[str] = None
     business_type: Optional[str] = None
     business_description: Optional[str] = None
+    rm_id: Optional[int] = None
+    op_id: Optional[int] = None
+    email_id: Optional[str] = None
 
 
 

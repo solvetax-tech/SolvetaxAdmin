@@ -124,20 +124,20 @@ async def get_payment_configs(
 
 @router.get(
     "/amount/{entity_id}",
-    summary="Get GST Registration Payment Details",
+    summary="Get Entity Payment Details",
 )
 async def get_payment_amount(
     entity_id: int,
+    entity_type: str = Query("GST_REGISTRATION"),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-
     request_id = generate_uuid()
-    entity_type = "GST_REGISTRATION"
+    entity_type_norm = entity_type.strip().upper()
     emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     cache_key = build_cache_key(
         "payments_config:get_amount",
         entity_id=entity_id,
-        entity_type=entity_type,
+        entity_type=entity_type_norm,
         emp_id=emp_id,
     )
 
@@ -146,24 +146,56 @@ async def get_payment_amount(
     async def _load_payment_amount():
         async with pool.acquire() as conn:
             try:
-                gst_row = await conn.fetchrow(
-                    f"""
-                    SELECT id, customer_id, ownership_category, is_active
-                    FROM {DB_SCHEMA}.gst_registration
-                    WHERE id = $1
-                    LIMIT 1
-                    """,
-                    entity_id,
-                )
+                customer_id = None
+                display_name = ""
+                description = ""
+                ownership_category = "N/A"
 
-                if not gst_row:
-                    raise HTTPException(404, "GST registration not found.")
+                if entity_type_norm == "GST_REGISTRATION":
+                    gst_row = await conn.fetchrow(
+                        f"""
+                        SELECT id, customer_id, ownership_category, is_active
+                        FROM {DB_SCHEMA}.gst_registration
+                        WHERE id = $1
+                        LIMIT 1
+                        """,
+                        entity_id,
+                    )
+                    if not gst_row:
+                        raise HTTPException(404, "GST registration not found.")
+                    if not gst_row["is_active"]:
+                        raise HTTPException(400, "GST registration is inactive.")
 
-                if not gst_row["is_active"]:
-                    raise HTTPException(400, "GST registration is inactive.")
+                    customer_id = gst_row["customer_id"]
+                    ownership_category = (
+                        (gst_row["ownership_category"] or "N/A").strip().upper()
+                    )
+                    display_name = "GST Registration"
 
-                customer_id = gst_row["customer_id"]
-                ownership_category = gst_row["ownership_category"].strip().upper()
+                elif entity_type_norm == "GST_FILING":
+                    filing_row = await conn.fetchrow(
+                        f"""
+                        SELECT id, customer_id, filing_frequency, gstin, is_active
+                        FROM {DB_SCHEMA}.gst_filings
+                        WHERE id = $1
+                        LIMIT 1
+                        """,
+                        entity_id,
+                    )
+                    if not filing_row:
+                        raise HTTPException(404, "GST filing not found.")
+                    if not filing_row["is_active"]:
+                        raise HTTPException(400, "GST filing is inactive.")
+
+                    customer_id = filing_row["customer_id"]
+                    display_name = f"GST Filing ({filing_row['filing_frequency']})"
+                    ownership_category = filing_row["filing_frequency"]
+
+                else:
+                    raise HTTPException(
+                        400,
+                        f"Unsupported entity type: {entity_type_norm}",
+                    )
 
                 payment_summary = await conn.fetchrow(
                     f"""
@@ -201,60 +233,75 @@ async def get_payment_amount(
                     """,
                     customer_id,
                     entity_id,
-                    entity_type,
+                    entity_type_norm,
                 )
 
                 if payment_summary["original_amount"] is None:
                     config = await conn.fetchrow(
-                        """
+                        f"""
                         SELECT display_name, amount, description, is_active
-                        FROM solvetax.payment_config
-                        WHERE entity_type = 'GST_REGISTRATION'
-                        AND config_type = 'PRICE'
-                        AND value = $1
+                        FROM {DB_SCHEMA}.payment_config
+                        WHERE upper(entity_type) = $1
+                          AND config_type = 'PRICE'
+                          AND (value = $2 OR value = 'DEFAULT')
+                        ORDER BY CASE WHEN value = $2 THEN 0 ELSE 1 END ASC
                         LIMIT 1
                         """,
+                        entity_type_norm,
                         ownership_category,
                     )
 
                     if not config:
-                        raise HTTPException(404, "Payment configuration not found.")
+                        original_amount = 0.0
+                        display_name = display_name or entity_type_norm
+                        description = f"Initial payment for {display_name}"
+                    else:
+                        if not config["is_active"]:
+                            raise HTTPException(
+                                400,
+                                "Payment configuration is inactive.",
+                            )
+                        original_amount = float(config["amount"])
+                        display_name = config["display_name"]
+                        description = config["description"]
 
-                    if not config["is_active"]:
-                        raise HTTPException(400, "Payment configuration is inactive.")
-
-                    original_amount = float(config["amount"])
                     total_discount = 0.0
                     total_paid = 0.0
-                    display_name = config["display_name"]
-                    description = config["description"]
+
                 else:
                     original_amount = float(payment_summary["original_amount"])
-                    total_discount = float(payment_summary["total_discount"] or 0)
-                    total_paid = float(payment_summary["total_paid"])
+                    total_discount = float(
+                        payment_summary["total_discount"] or 0
+                    )
+                    total_paid = float(payment_summary["total_paid"] or 0)
                     last_status = payment_summary["last_status"]
 
-                    display_name = "GST Registration"
-                    description = "Remaining payment for GST registration"
+                    if entity_type_norm == "GST_REGISTRATION":
+                        display_name = "GST Registration"
+                        description = "Remaining payment for GST registration"
+                    else:
+                        description = f"Remaining payment for {display_name}"
 
                     if last_status == "PAID":
                         raise HTTPException(
                             409,
-                            "Payment already completed for this registration.",
+                            f"Payment already completed for this {entity_type_norm.lower().replace('_', ' ')}.",
                         )
 
                 net_amount = original_amount - total_discount
                 remaining_amount = net_amount - total_paid
 
-                if remaining_amount <= 0:
+                if remaining_amount <= 0 and (
+                    original_amount > 0 or total_paid > 0
+                ):
                     raise HTTPException(
                         409,
-                        "Payment already completed for this registration.",
+                        f"Payment already completed for this {entity_type_norm.lower().replace('_', ' ')}.",
                     )
 
                 return {
                     "entity_id": entity_id,
-                    "entity_type": entity_type,
+                    "entity_type": entity_type_norm,
                     "ownership_category": ownership_category,
                     "display_name": display_name,
                     "original_amount": round(original_amount, 2),
