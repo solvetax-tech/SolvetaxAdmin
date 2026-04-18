@@ -750,6 +750,7 @@ async def create_gst_filing(
     filing_category = payload.filing_category.upper()
     state = payload.state.strip().upper() if payload.state else None
     gst_reg_status = payload.gst_reg_status.strip().upper() if payload.gst_reg_status else None
+    is_auto_enabled = True if payload.is_auto_enabled is None else bool(payload.is_auto_enabled)
 
     username = payload.username.strip() if payload.username else None
     password = payload.password.strip() if payload.password else None
@@ -866,7 +867,7 @@ async def create_gst_filing(
                     payload.remarks,
                     rm_id,
                     op_id,
-                    True,
+                    is_auto_enabled,
                     payload.taxpayer_type,
                     filing_frequency,
                     payload.turnover_details,

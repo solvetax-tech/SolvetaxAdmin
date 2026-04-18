@@ -39,10 +39,19 @@ def _gst_customer_fields_tag(customer_id: int) -> str:
     return f"gst_registration:customer_fields:index:{customer_id}"
 
 
-async def _invalidate_gst_registration_cache(customer_id: Optional[int] = None) -> None:
+def _gst_detail_tag(registration_id: int) -> str:
+    return f"gst_registration:detail:index:{registration_id}"
+
+
+async def _invalidate_gst_registration_cache(
+    customer_id: Optional[int] = None,
+    registration_id: Optional[int] = None,
+) -> None:
     await redis_invalidate_tag(_gst_filter_tag())
     if customer_id is not None:
         await redis_invalidate_tag(_gst_customer_fields_tag(customer_id))
+    if registration_id is not None:
+        await redis_invalidate_tag(_gst_detail_tag(registration_id))
 
 
 async def _sync_crm_lead_with_gst(
@@ -425,7 +434,10 @@ async def create_gst_registration(
                     json.dumps(dict(gst_row), default=str),
                     None,
                 )
-            await _invalidate_gst_registration_cache(gst_row.get("customer_id"))
+            await _invalidate_gst_registration_cache(
+                gst_row.get("customer_id"),
+                gst_row.get("id"),
+            )
 
             return {
                 **dict(gst_row),
@@ -875,6 +887,173 @@ async def list_gst_registrations(
 
 
 # -------------------------------------------------------------------
+# FULL GST REGISTRATION BUNDLE (registration row + persons + documents + services)
+# -------------------------------------------------------------------
+@router.get(
+    "/{registration_id}/full",
+    summary="Get full GST registration by registration id",
+    responses={
+        200: {"description": "Registration bundle returned."},
+        404: {"description": "Not found or not visible for current user."},
+        500: {"description": "Database or internal error."},
+    },
+)
+async def get_gst_registration_full(
+    registration_id: int,
+    include_inactive: bool = Query(
+        False,
+        description="When true, include inactive persons and documents.",
+    ),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    Returns the `gst_registration` row (with RM/creator names), all linked
+    `gst_registration_persons`, `gst_registration_documents`, and
+    `customer_services` for `entity_type = 'GST_REGISTRATION'`.
+
+    `registration_id` is the primary key `gst_registration.id`.
+    """
+    request_id = str(uuid.uuid4())
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "get_gst_registration_full"},
+    )
+
+    cache_key = build_cache_key(
+        "gst_registration:detail",
+        registration_id=registration_id,
+        include_inactive=include_inactive,
+        role=role_norm,
+        emp_id=emp_id,
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async def _load_gst_registration_full():
+        visibility_sql, visibility_values, _next = build_gst_visibility(
+            role_norm,
+            emp_id,
+            2,
+            DB_SCHEMA,
+        )
+        reg_values: List = [registration_id]
+        vis_clause = ""
+        if visibility_sql:
+            vis_clause = f" AND ({visibility_sql})"
+            reg_values.extend(visibility_values)
+
+        reg_sql = f"""
+            SELECT g.*,
+                   e_rm.first_name AS rm_name,
+                   e_creator.first_name AS created_by_name
+              FROM {DB_SCHEMA}.gst_registration g
+              LEFT JOIN {DB_SCHEMA}.employees e_rm
+                     ON g.rm_id = e_rm.emp_id
+              LEFT JOIN {DB_SCHEMA}.employees e_creator
+                     ON g.created_by = e_creator.emp_id
+             WHERE g.id = $1
+             {vis_clause}
+             LIMIT 1
+        """
+
+        person_active = "" if include_inactive else " AND p.is_active = TRUE"
+        doc_active = ""
+        if not include_inactive:
+            doc_active = " AND p.is_active = TRUE AND d.is_active = TRUE"
+
+        persons_sql = f"""
+            SELECT p.*,
+                   g.rm_id,
+                   g.created_by,
+                   e_rm.first_name AS rm_name,
+                   e_creator.first_name AS created_by_name
+              FROM {DB_SCHEMA}.gst_registration_persons p
+              JOIN {DB_SCHEMA}.gst_registration g
+                    ON p.gst_registration_id = g.id
+              LEFT JOIN {DB_SCHEMA}.employees e_rm
+                     ON g.rm_id = e_rm.emp_id
+              LEFT JOIN {DB_SCHEMA}.employees e_creator
+                     ON g.created_by = e_creator.emp_id
+             WHERE p.gst_registration_id = $1
+             {person_active}
+             ORDER BY p.created_at ASC NULLS LAST, p.person_id ASC
+        """
+
+        documents_sql = f"""
+            SELECT d.*,
+                   p.full_name,
+                   g.rm_id,
+                   g.created_by,
+                   e_rm.first_name AS rm_name,
+                   e_creator.first_name AS created_by_name,
+                   e_verify.first_name AS verified_by_name
+              FROM {DB_SCHEMA}.gst_registration_documents d
+              JOIN {DB_SCHEMA}.gst_registration_persons p
+                    ON d.person_id = p.person_id
+              JOIN {DB_SCHEMA}.gst_registration g
+                    ON p.gst_registration_id = g.id
+              LEFT JOIN {DB_SCHEMA}.employees e_rm
+                     ON g.rm_id = e_rm.emp_id
+              LEFT JOIN {DB_SCHEMA}.employees e_creator
+                     ON g.created_by = e_creator.emp_id
+              LEFT JOIN {DB_SCHEMA}.employees e_verify
+                     ON d.verified_by = e_verify.emp_id
+             WHERE p.gst_registration_id = $1
+             {doc_active}
+             ORDER BY d.created_at ASC NULLS LAST, d.document_id ASC
+        """
+
+        services_sql = f"""
+            SELECT *
+              FROM {DB_SCHEMA}.customer_services
+             WHERE entity_type = 'GST_REGISTRATION'
+               AND entity_id = $1
+             ORDER BY created_at DESC NULLS LAST
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                reg_row = await conn.fetchrow(reg_sql, *reg_values)
+                if not reg_row:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="GST registration not found or not accessible.",
+                    )
+                persons = await conn.fetch(persons_sql, registration_id)
+                documents = await conn.fetch(documents_sql, registration_id)
+                services = await conn.fetch(services_sql, registration_id)
+        except HTTPException:
+            raise
+        except asyncpg.PostgresError:
+            log.exception("Database error loading GST registration bundle")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+        return {
+            "registration": dict(reg_row),
+            "persons": [dict(r) for r in persons],
+            "documents": [dict(r) for r in documents],
+            "customer_services": [dict(r) for r in services],
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_gst_registration_full,
+        ttl_seconds=300,
+        tags=[_gst_detail_tag(registration_id), _gst_filter_tag()],
+    )
+
+
+# -------------------------------------------------------------------
 # CUSTOMER SNAPSHOT FOR GST (from customers.customer_id)
 # -------------------------------------------------------------------
 @router.get(
@@ -1266,7 +1445,10 @@ async def edit_gst_registration(
                     gst_id,
                     list(update_data.keys()),
                 )
-                await _invalidate_gst_registration_cache(new_row.get("customer_id"))
+                await _invalidate_gst_registration_cache(
+                    new_row.get("customer_id"),
+                    new_row.get("id"),
+                )
 
                 return {
                     **dict(new_row),
@@ -1525,7 +1707,10 @@ async def soft_delete_gst_registration(
                 len(deleted_persons),
                 len(deleted_documents),
             )
-            await _invalidate_gst_registration_cache(deleted_gst.get("customer_id"))
+            await _invalidate_gst_registration_cache(
+                deleted_gst.get("customer_id"),
+                deleted_gst.get("id"),
+            )
 
             return {
                 **dict(deleted_gst),
@@ -1731,7 +1916,10 @@ async def activate_gst_registration(
                 len(activated_persons),
                 len(activated_documents),
             )
-            await _invalidate_gst_registration_cache(activated_gst.get("customer_id"))
+            await _invalidate_gst_registration_cache(
+                activated_gst.get("customer_id"),
+                activated_gst.get("id"),
+            )
 
             return {
                 **dict(activated_gst),

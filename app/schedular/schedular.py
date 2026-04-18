@@ -154,7 +154,10 @@ async def _run_gst_filing_auto_generation(conn):
             WHERE d.is_active = TRUE
               AND f.is_active = TRUE
               AND f.is_auto_enabled = TRUE
-              AND f.gst_reg_status = 'APPROVED'
+              AND (
+                    (f.gst_registration_id IS NOT NULL AND f.gst_reg_status = 'APPROVED')
+                    OR (f.gst_registration_id IS NULL)
+                  )
               AND d.next_auto_generate_at IS NOT NULL
               AND d.next_auto_generate_at <= NOW()
             ORDER BY d.next_auto_generate_at ASC
