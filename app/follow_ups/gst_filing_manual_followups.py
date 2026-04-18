@@ -679,7 +679,7 @@ async def get_filing_followup_counts(
                     COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2 AND (f.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' OR f.status = 'COMPLETED')) as evaluated_today,
                     COUNT(*) FILTER (WHERE f.missed_at IS NOT NULL AND f.followup_at >= $1 AND f.followup_at < $2) as overdue_today,
                     COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as completed_today,
-                    COUNT(*) FILTER (WHERE f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2 AND (f.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' OR f.status = 'COMPLETED')) as successful_today,
+                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as successful_today,
                     COUNT(*) FILTER (WHERE f.completed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as pending_today
                 FROM {DB_SCHEMA}.customer_service_followups f
                 JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id

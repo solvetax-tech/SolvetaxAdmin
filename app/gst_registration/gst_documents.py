@@ -129,12 +129,13 @@ async def create_registration_document(
                         mobile,
                         verified,
                         verified_by,
+                        verified_at,
                         created_at,
                         updated_at,
                         is_active
                     )
                     VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE
                     )
                     RETURNING *
                     """,
@@ -145,6 +146,7 @@ async def create_registration_document(
                     mobile,
                     payload.verified,
                     emp_id if payload.verified else None,
+                    now if payload.verified else None,
                     now,
                     now,
                 )
@@ -523,8 +525,10 @@ async def edit_registration_document(
     if "verified" in update_data:
         if update_data["verified"]:
             update_data["verified_by"] = emp_id
+            update_data["verified_at"] = now
         else:
             update_data["verified_by"] = None
+            update_data["verified_at"] = None
 
     # --------------------------------------------------
     # Normalize strings
