@@ -62,7 +62,6 @@ class GstFilingApiMessages:
         "This action cannot be completed because related records are missing or invalid."
     )
     FILING_NOT_FOUND = "No GST filing was found for this ID."
-    FILTER_FAILED = SERVER_ERROR
     FILING_PERIOD_FORMAT_INVALID = (
         "Filing period must look like APR-2024, Q1-2024, or 2024-25. Please correct it."
     )
@@ -175,8 +174,14 @@ _LEAD_DAYS_YEARLY_ANNUAL = 7
 _FILING_FREQUENCY_TO_SERVICE_ID = {"MONTHLY": 4, "QUARTERLY": 5, "YEARLY": 6}
 
 
-def _gst_filing_filter_tag() -> str:
-    return "gst_filing:filter:index"
+def _gst_filing_table_filings_tag() -> str:
+    """Redis cache tag for GET ``/table/filings`` (``gst_filings`` only)."""
+    return "gst_filing:table:filings:index"
+
+
+def _gst_filing_table_return_details_tag() -> str:
+    """Redis cache tag for GET ``/table/return-details`` (``gst_filing_return_details`` only)."""
+    return "gst_filing:table:return_details:index"
 
 
 def _gst_filing_prefill_tag(gst_registration_id: int) -> str:
@@ -184,13 +189,14 @@ def _gst_filing_prefill_tag(gst_registration_id: int) -> str:
 
 
 async def _invalidate_gst_filing_cache(gst_registration_id: Optional[int] = None) -> None:
-    await redis_invalidate_tag(_gst_filing_filter_tag())
     await redis_invalidate_tag("customer_services:filter:index")
     await redis_invalidate_tag("customer_services:dashboard:index")
     await redis_invalidate_tag("customer_services:pending:index")
     await redis_invalidate_tag("dashboard:gst_missed:gt_one:index")
     await redis_invalidate_tag("dashboard:gst_missed:buckets:index")
     await redis_invalidate_tag("dashboard:gst_missed:exact_one:index")
+    await redis_invalidate_tag(_gst_filing_table_filings_tag())
+    await redis_invalidate_tag(_gst_filing_table_return_details_tag())
     if gst_registration_id is not None:
         await redis_invalidate_tag(_gst_filing_prefill_tag(gst_registration_id))
 
@@ -208,83 +214,320 @@ def _compute_next_auto_generate_at(*due_dates, lead_days: int = _LEAD_DAYS_YEARL
     if not valid:
         return None
     return min(valid) - timedelta(days=lead_days)
-# -------------------------------------------------------------------
-# FILTER GST FILINGS (FINAL - WITH USERNAME + PASSWORD + RENT + EMAIL + ESTIMATED INVOICE)
-# -------------------------------------------------------------------
-@router.get(
-    "/filter",
-    summary="Filter GST Filings",
-)
-async def filter_gst_filings(
 
-    # PRIMARY
-    id: Optional[int] = None,
+
+def _collect_gst_filings_only_conditions(
+    *,
+    filing_id: Optional[int] = None,
     customer_id: Optional[int] = None,
     gst_registration_id: Optional[int] = None,
     gstin: Optional[str] = None,
-
-    # SERVICE / TYPE
     service_id: Optional[int] = None,
     filing_category: Optional[str] = None,
     filing_period: Optional[str] = None,
-
-    # BUSINESS
     filing_frequency: Optional[str] = None,
     taxpayer_type: Optional[str] = None,
     turnover_details: Optional[str] = None,
     state: Optional[str] = None,
-
-    # STATUS
     status: Optional[str] = None,
-    statuses: Optional[List[str]] = Query(None),
-
-    # USERS
+    statuses: Optional[List[str]] = None,
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
-
-    # EXTRA
     username: Optional[str] = None,
     email_id: Optional[str] = None,
     rent_min: Optional[float] = None,
     rent_max: Optional[float] = None,
     rule14a: Optional[bool] = None,
-
-    # 🔥 DUE DATE FILTER (FROM RETURN TABLE)
     due_from: Optional[datetime] = None,
     due_to: Optional[datetime] = None,
-
-    # DATES
     created_from: Optional[datetime] = None,
     created_to: Optional[datetime] = None,
     data_received_from: Optional[datetime] = None,
     data_received_to: Optional[datetime] = None,
+    is_active: Optional[bool] = None,
+    include_inactive: bool = False,
+    is_overdue: Optional[bool] = None,
+    is_upcoming: Optional[bool] = None,
+    is_auto_enabled: Optional[bool] = None,
+    is_auto_generated: Optional[bool] = None,
+) -> tuple[list, list, int]:
+    """
+    WHERE fragments for ``gst_filings`` alias ``f`` only (no join to return_details).
+    Due / overdue / upcoming / auto_generated use EXISTS on ``gst_filing_return_details``.
+    """
+    conditions: list = []
+    values: list = []
+    idx = 1
 
-    # FLAGS
+    if filing_id:
+        conditions.append(f"f.id = ${idx}")
+        values.append(filing_id)
+        idx += 1
+
+    if customer_id:
+        conditions.append(f"f.customer_id = ${idx}")
+        values.append(customer_id)
+        idx += 1
+
+    if gst_registration_id:
+        conditions.append(f"f.gst_registration_id = ${idx}")
+        values.append(gst_registration_id)
+        idx += 1
+
+    if gstin:
+        conditions.append(f"upper(f.gstin) = ${idx}")
+        values.append(gstin.upper())
+        idx += 1
+
+    if service_id:
+        conditions.append(f"f.service_id = ${idx}")
+        values.append(service_id)
+        idx += 1
+
+    if filing_category:
+        conditions.append(f"f.filing_category = ${idx}")
+        values.append(filing_category.upper())
+        idx += 1
+
+    if filing_period:
+        conditions.append(f"f.filing_period = ${idx}")
+        values.append(filing_period.upper())
+        idx += 1
+
+    if filing_frequency:
+        conditions.append(f"f.filing_frequency = ${idx}")
+        values.append(filing_frequency.upper())
+        idx += 1
+
+    if taxpayer_type:
+        conditions.append(f"f.taxpayer_type = ${idx}")
+        values.append(taxpayer_type.upper())
+        idx += 1
+
+    if turnover_details:
+        conditions.append(f"f.turnover_details = ${idx}")
+        values.append(turnover_details.upper())
+        idx += 1
+
+    if state:
+        conditions.append(f"upper(f.state) = ${idx}")
+        values.append(state.upper())
+        idx += 1
+
+    if status:
+        conditions.append(f"f.status = ${idx}")
+        values.append(status.upper())
+        idx += 1
+
+    if statuses:
+        conditions.append(f"f.status = ANY(${idx})")
+        values.append([s.upper() for s in statuses])
+        idx += 1
+
+    if rm_id:
+        conditions.append(f"f.rm_id = ${idx}")
+        values.append(rm_id)
+        idx += 1
+
+    if op_id:
+        conditions.append(f"f.op_id = ${idx}")
+        values.append(op_id)
+        idx += 1
+
+    if username:
+        conditions.append(f"f.username ILIKE ${idx}")
+        values.append(f"%{username}%")
+        idx += 1
+
+    if email_id:
+        conditions.append(f"lower(f.email_id) = ${idx}")
+        values.append(email_id.lower())
+        idx += 1
+
+    if rent_min is not None:
+        conditions.append(f"f.rent >= ${idx}")
+        values.append(rent_min)
+        idx += 1
+
+    if rent_max is not None:
+        conditions.append(f"f.rent <= ${idx}")
+        values.append(rent_max)
+        idx += 1
+
+    if rule14a is not None:
+        conditions.append(f"f.rule14a = ${idx}")
+        values.append(rule14a)
+        idx += 1
+
+    if due_from:
+        conditions.append(
+            f"""
+            EXISTS (
+                SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details dx
+                WHERE dx.gst_filing_id = f.id
+                  AND GREATEST(
+                    COALESCE(dx.gstr1_due_date, '-infinity'::timestamptz),
+                    COALESCE(dx.gstr3b_due_date, '-infinity'::timestamptz),
+                    COALESCE(dx.gstr9_due_date, '-infinity'::timestamptz),
+                    COALESCE(dx.gstr9c_due_date, '-infinity'::timestamptz),
+                    COALESCE(dx.cmp08_due_date, '-infinity'::timestamptz),
+                    COALESCE(dx.gstr4_due_date, '-infinity'::timestamptz)
+                ) >= ${idx}
+            )
+            """
+        )
+        values.append(due_from)
+        idx += 1
+
+    if due_to:
+        conditions.append(
+            f"""
+            EXISTS (
+                SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details dx
+                WHERE dx.gst_filing_id = f.id
+                  AND LEAST(
+                    COALESCE(dx.gstr1_due_date, 'infinity'::timestamptz),
+                    COALESCE(dx.gstr3b_due_date, 'infinity'::timestamptz),
+                    COALESCE(dx.gstr9_due_date, 'infinity'::timestamptz),
+                    COALESCE(dx.gstr9c_due_date, 'infinity'::timestamptz),
+                    COALESCE(dx.cmp08_due_date, 'infinity'::timestamptz),
+                    COALESCE(dx.gstr4_due_date, 'infinity'::timestamptz)
+                ) <= ${idx}
+            )
+            """
+        )
+        values.append(due_to)
+        idx += 1
+
+    if is_overdue:
+        conditions.append(
+            f"""
+            EXISTS (
+                SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details dx
+                WHERE dx.gst_filing_id = f.id
+                  AND (
+                    (dx.gstr1_status = 'NOT_FILED' AND dx.gstr1_due_date < NOW())
+                    OR (dx.gstr3b_status = 'NOT_FILED' AND dx.gstr3b_due_date < NOW())
+                    OR (dx.gstr9_status = 'NOT_FILED' AND dx.gstr9_due_date < NOW())
+                    OR (dx.gstr9c_status = 'NOT_FILED' AND dx.gstr9c_due_date < NOW())
+                    OR (dx.cmp08_status = 'NOT_FILED' AND dx.cmp08_due_date < NOW())
+                    OR (dx.gstr4_status = 'NOT_FILED' AND dx.gstr4_due_date < NOW())
+                  )
+            )
+            """
+        )
+
+    if is_upcoming:
+        conditions.append(
+            f"""
+            EXISTS (
+                SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details dx
+                WHERE dx.gst_filing_id = f.id
+                  AND (
+                    (dx.gstr1_status = 'NOT_FILED' AND dx.gstr1_due_date >= NOW())
+                    OR (dx.gstr3b_status = 'NOT_FILED' AND dx.gstr3b_due_date >= NOW())
+                    OR (dx.gstr9_status = 'NOT_FILED' AND dx.gstr9_due_date >= NOW())
+                    OR (dx.gstr9c_status = 'NOT_FILED' AND dx.gstr9c_due_date >= NOW())
+                    OR (dx.cmp08_status = 'NOT_FILED' AND dx.cmp08_due_date >= NOW())
+                    OR (dx.gstr4_status = 'NOT_FILED' AND dx.gstr4_due_date >= NOW())
+                  )
+            )
+            """
+        )
+
+    if is_active is not None:
+        conditions.append(f"f.is_active = ${idx}")
+        values.append(is_active)
+        idx += 1
+    elif not include_inactive:
+        conditions.append("f.is_active = TRUE")
+
+    if is_auto_enabled is not None:
+        conditions.append(f"f.is_auto_enabled = ${idx}")
+        values.append(is_auto_enabled)
+        idx += 1
+
+    if is_auto_generated is not None:
+        conditions.append(
+            f"EXISTS (SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details d_auto "
+            f"WHERE d_auto.gst_filing_id = f.id AND d_auto.is_auto_generated = ${idx})"
+        )
+        values.append(is_auto_generated)
+        idx += 1
+
+    if created_from:
+        conditions.append(f"f.created_at >= ${idx}")
+        values.append(created_from)
+        idx += 1
+
+    if created_to:
+        conditions.append(f"f.created_at <= ${idx}")
+        values.append(created_to)
+        idx += 1
+
+    if data_received_from:
+        conditions.append(f"f.data_received_at >= ${idx}")
+        values.append(data_received_from)
+        idx += 1
+
+    if data_received_to:
+        conditions.append(f"f.data_received_at <= ${idx}")
+        values.append(data_received_to)
+        idx += 1
+
+    return conditions, values, idx
+
+
+@router.get(
+    "/table/filings",
+    summary="List GST filings only (gst_filings table, no return-detail join)",
+)
+async def list_gst_filings_table(
+    id: Optional[int] = None,
+    customer_id: Optional[int] = None,
+    gst_registration_id: Optional[int] = None,
+    gstin: Optional[str] = None,
+    service_id: Optional[int] = None,
+    filing_category: Optional[str] = None,
+    filing_period: Optional[str] = None,
+    filing_frequency: Optional[str] = None,
+    taxpayer_type: Optional[str] = None,
+    turnover_details: Optional[str] = None,
+    state: Optional[str] = None,
+    status: Optional[str] = None,
+    statuses: Optional[List[str]] = Query(None),
+    rm_id: Optional[int] = None,
+    op_id: Optional[int] = None,
+    username: Optional[str] = None,
+    email_id: Optional[str] = None,
+    rent_min: Optional[float] = None,
+    rent_max: Optional[float] = None,
+    rule14a: Optional[bool] = None,
+    due_from: Optional[datetime] = None,
+    due_to: Optional[datetime] = None,
+    created_from: Optional[datetime] = None,
+    created_to: Optional[datetime] = None,
+    data_received_from: Optional[datetime] = None,
+    data_received_to: Optional[datetime] = None,
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
     is_overdue: Optional[bool] = None,
     is_upcoming: Optional[bool] = None,
     is_auto_enabled: Optional[bool] = None,
     is_auto_generated: Optional[bool] = None,
-    include_details: bool = Query(True),
-
-    # PAGINATION
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-
+    """One row per filing; due-date style filters use EXISTS on return_details (no row explosion)."""
     request_id = generate_uuid()
-
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
-    role_norm = str(role).strip().upper() if role is not None else None
+    role_norm = str(current_user.get("role")).strip().upper() if current_user.get("role") is not None else None
 
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": emp_id},
+        {"request_id": request_id, "emp_id": emp_id, "api": "list_gst_filings_table"},
     )
 
     try:
@@ -293,282 +536,292 @@ async def filter_gst_filings(
         log.exception("DB connection failed")
         raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
 
-    try:
-        conditions = []
-        values = []
-        idx = 1
+    conditions, values, idx = _collect_gst_filings_only_conditions(
+        filing_id=id,
+        customer_id=customer_id,
+        gst_registration_id=gst_registration_id,
+        gstin=gstin,
+        service_id=service_id,
+        filing_category=filing_category,
+        filing_period=filing_period,
+        filing_frequency=filing_frequency,
+        taxpayer_type=taxpayer_type,
+        turnover_details=turnover_details,
+        state=state,
+        status=status,
+        statuses=statuses,
+        rm_id=rm_id,
+        op_id=op_id,
+        username=username,
+        email_id=email_id,
+        rent_min=rent_min,
+        rent_max=rent_max,
+        rule14a=rule14a,
+        due_from=due_from,
+        due_to=due_to,
+        created_from=created_from,
+        created_to=created_to,
+        data_received_from=data_received_from,
+        data_received_to=data_received_to,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        is_overdue=is_overdue,
+        is_upcoming=is_upcoming,
+        is_auto_enabled=is_auto_enabled,
+        is_auto_generated=is_auto_generated,
+    )
 
-        # ----------------------------
-        # BASIC FILTERS
-        # ----------------------------
-        if id:
-            conditions.append(f"f.id = ${idx}")
-            values.append(id); idx += 1
+    visibility_sql, visibility_values, idx = build_gst_filing_visibility(
+        role_norm, emp_id, idx, DB_SCHEMA
+    )
+    if visibility_sql:
+        conditions.append(visibility_sql)
+        values.extend(visibility_values)
 
-        if customer_id:
-            conditions.append(f"f.customer_id = ${idx}")
-            values.append(customer_id); idx += 1
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        if gst_registration_id:
-            conditions.append(f"f.gst_registration_id = ${idx}")
-            values.append(gst_registration_id); idx += 1
+    lim_idx = idx
+    off_idx = idx + 1
 
-        if gstin:
-            conditions.append(f"upper(f.gstin) = ${idx}")
-            values.append(gstin.upper()); idx += 1
+    select_sql = f"""
+        SELECT f.*,
+               COALESCE(f.business_name, r.business_name) AS business_name,
+               COALESCE(f.business_type, r.business_type) AS business_type,
+               COALESCE(f.state, r.state) AS state
+        FROM {DB_SCHEMA}.gst_filings f
+        LEFT JOIN {DB_SCHEMA}.gst_registration r
+            ON r.id = f.gst_registration_id
+        {where_clause}
+        ORDER BY f.created_at DESC
+        LIMIT ${lim_idx} OFFSET ${off_idx}
+    """
+    count_sql = f"""
+        SELECT COUNT(*)::bigint
+        FROM {DB_SCHEMA}.gst_filings f
+        LEFT JOIN {DB_SCHEMA}.gst_registration r
+            ON r.id = f.gst_registration_id
+        {where_clause}
+    """
 
-        if service_id:
-            conditions.append(f"f.service_id = ${idx}")
-            values.append(service_id); idx += 1
+    cache_key = build_cache_key(
+        "gst_filing:table:filings",
+        id=id,
+        customer_id=customer_id,
+        gst_registration_id=gst_registration_id,
+        gstin=(gstin or "").strip().upper() or None,
+        service_id=service_id,
+        filing_category=(filing_category or "").strip().upper() or None,
+        filing_period=(filing_period or "").strip().upper() or None,
+        filing_frequency=(filing_frequency or "").strip().upper() or None,
+        taxpayer_type=(taxpayer_type or "").strip().upper() or None,
+        turnover_details=(turnover_details or "").strip().upper() or None,
+        state=(state or "").strip().upper() or None,
+        status=(status or "").strip().upper() or None,
+        statuses=[s.upper() for s in statuses] if statuses else None,
+        rm_id=rm_id,
+        op_id=op_id,
+        username=(username or "").strip() or None,
+        email_id=(email_id or "").strip().lower() or None,
+        rent_min=rent_min,
+        rent_max=rent_max,
+        rule14a=rule14a,
+        due_from=due_from,
+        due_to=due_to,
+        created_from=created_from,
+        created_to=created_to,
+        data_received_from=data_received_from,
+        data_received_to=data_received_to,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        is_overdue=is_overdue,
+        is_upcoming=is_upcoming,
+        is_auto_enabled=is_auto_enabled,
+        is_auto_generated=is_auto_generated,
+        limit=limit,
+        offset=offset,
+        role=role_norm,
+        emp_id=emp_id,
+    )
 
-        if filing_category:
-            conditions.append(f"f.filing_category = ${idx}")
-            values.append(filing_category.upper()); idx += 1
-
-        if filing_period:
-            conditions.append(f"f.filing_period = ${idx}")
-            values.append(filing_period.upper()); idx += 1
-
-        # ----------------------------
-        # BUSINESS
-        # ----------------------------
-        if filing_frequency:
-            conditions.append(f"f.filing_frequency = ${idx}")
-            values.append(filing_frequency.upper()); idx += 1
-
-        if taxpayer_type:
-            conditions.append(f"f.taxpayer_type = ${idx}")
-            values.append(taxpayer_type.upper()); idx += 1
-
-        if turnover_details:
-            conditions.append(f"f.turnover_details = ${idx}")
-            values.append(turnover_details.upper()); idx += 1
-
-        if state:
-            conditions.append(f"upper(f.state) = ${idx}")
-            values.append(state.upper()); idx += 1
-
-        # ----------------------------
-        # STATUS
-        # ----------------------------
-        if status:
-            conditions.append(f"f.status = ${idx}")
-            values.append(status.upper()); idx += 1
-
-        if statuses:
-            conditions.append(f"f.status = ANY(${idx})")
-            values.append([s.upper() for s in statuses]); idx += 1
-
-        # ----------------------------
-        # EXTRA FILTERS
-        # ----------------------------
-        if username:
-            conditions.append(f"f.username ILIKE ${idx}")
-            values.append(f"%{username}%"); idx += 1
-
-        if email_id:
-            conditions.append(f"lower(f.email_id) = ${idx}")
-            values.append(email_id.lower()); idx += 1
-
-        if rent_min is not None:
-            conditions.append(f"f.rent >= ${idx}")
-            values.append(rent_min); idx += 1
-
-        if rent_max is not None:
-            conditions.append(f"f.rent <= ${idx}")
-            values.append(rent_max); idx += 1
-
-        if rule14a is not None:
-            conditions.append(f"f.rule14a = ${idx}")
-            values.append(rule14a); idx += 1
-
-        # ----------------------------
-        # 🔥 DUE DATE FILTER (RETURN TABLE)
-        # ----------------------------
-        if due_from:
-            conditions.append(f"""
-                GREATEST(
-                    COALESCE(d.gstr1_due_date, '-infinity'::timestamptz),
-                    COALESCE(d.gstr3b_due_date, '-infinity'::timestamptz),
-                    COALESCE(d.gstr9_due_date, '-infinity'::timestamptz),
-                    COALESCE(d.gstr9c_due_date, '-infinity'::timestamptz),
-                    COALESCE(d.cmp08_due_date, '-infinity'::timestamptz),
-                    COALESCE(d.gstr4_due_date, '-infinity'::timestamptz)
-                ) >= ${idx}
-            """)
-            values.append(due_from); idx += 1
-
-        if due_to:
-            conditions.append(f"""
-                LEAST(
-                    COALESCE(d.gstr1_due_date, 'infinity'::timestamptz),
-                    COALESCE(d.gstr3b_due_date, 'infinity'::timestamptz),
-                    COALESCE(d.gstr9_due_date, 'infinity'::timestamptz),
-                    COALESCE(d.gstr9c_due_date, 'infinity'::timestamptz),
-                    COALESCE(d.cmp08_due_date, 'infinity'::timestamptz),
-                    COALESCE(d.gstr4_due_date, 'infinity'::timestamptz)
-                ) <= ${idx}
-            """)
-            values.append(due_to); idx += 1
-
-        # ----------------------------
-        # FLAGS
-        # ----------------------------
-        if is_overdue:
-            conditions.append("""
-                (
-                    (d.gstr1_status = 'NOT_FILED' AND d.gstr1_due_date < NOW())
-                    OR (d.gstr3b_status = 'NOT_FILED' AND d.gstr3b_due_date < NOW())
-                    OR (d.gstr9_status = 'NOT_FILED' AND d.gstr9_due_date < NOW())
-                    OR (d.gstr9c_status = 'NOT_FILED' AND d.gstr9c_due_date < NOW())
-                    OR (d.cmp08_status = 'NOT_FILED' AND d.cmp08_due_date < NOW())
-                    OR (d.gstr4_status = 'NOT_FILED' AND d.gstr4_due_date < NOW())
-                )
-            """)
-
-        if is_upcoming:
-            conditions.append("""
-                (
-                    (d.gstr1_status = 'NOT_FILED' AND d.gstr1_due_date >= NOW())
-                    OR (d.gstr3b_status = 'NOT_FILED' AND d.gstr3b_due_date >= NOW())
-                    OR (d.gstr9_status = 'NOT_FILED' AND d.gstr9_due_date >= NOW())
-                    OR (d.gstr9c_status = 'NOT_FILED' AND d.gstr9c_due_date >= NOW())
-                    OR (d.cmp08_status = 'NOT_FILED' AND d.cmp08_due_date >= NOW())
-                    OR (d.gstr4_status = 'NOT_FILED' AND d.gstr4_due_date >= NOW())
-                )
-            """)
-
-        if is_active is not None:
-            conditions.append(f"f.is_active = ${idx}")
-            values.append(is_active); idx += 1
-        elif not include_inactive:
-            conditions.append("f.is_active = TRUE")
-
-        if is_auto_enabled is not None:
-            conditions.append(f"f.is_auto_enabled = ${idx}")
-            values.append(is_auto_enabled); idx += 1
-
-        if is_auto_generated is not None:
-            conditions.append(
-                f"EXISTS (SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details d_auto "
-                f"WHERE d_auto.gst_filing_id = f.id AND d_auto.is_auto_generated = ${idx})"
-            )
-            values.append(is_auto_generated); idx += 1
-
-        # ----------------------------
-        # VISIBILITY
-        # ----------------------------
-        visibility_sql, visibility_values, idx = build_gst_filing_visibility(
-            role_norm, emp_id, idx, DB_SCHEMA
-        )
-
-        if visibility_sql:
-            conditions.append(visibility_sql)
-            values.extend(visibility_values)
-
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        # ----------------------------
-        # FINAL QUERY
-        # ----------------------------
-        select_clause = f"""
-            SELECT f.*, 
-                   COALESCE(f.business_name, r.business_name) AS business_name,
-                   COALESCE(f.business_type, r.business_type) AS business_type,
-                   COALESCE(f.state, r.state) AS state
-        """
-        
-        from_clause = f"""
-            FROM {DB_SCHEMA}.gst_filings f
-            LEFT JOIN {DB_SCHEMA}.gst_registration r
-                ON r.id = f.gst_registration_id
-        """
-
-        if include_details:
-            query = f"""
-                {select_clause}, d.*
-                {from_clause}
-                LEFT JOIN {DB_SCHEMA}.gst_filing_return_details d
-                    ON d.gst_filing_id = f.id
-                {where_clause}
-                ORDER BY f.created_at DESC
-                LIMIT ${idx} OFFSET ${idx+1}
-            """
-        else:
-            query = f"""
-                {select_clause}
-                {from_clause}
-                {where_clause}
-                ORDER BY f.created_at DESC
-                LIMIT ${idx} OFFSET ${idx+1}
-            """
-
-        cache_key = build_cache_key(
-            "gst_filing:filter",
-            id=id,
-            customer_id=customer_id,
-            gst_registration_id=gst_registration_id,
-            gstin=(gstin or "").strip().upper() or None,
-            service_id=service_id,
-            filing_category=(filing_category or "").strip().upper() or None,
-            filing_period=(filing_period or "").strip().upper() or None,
-            filing_frequency=(filing_frequency or "").strip().upper() or None,
-            taxpayer_type=(taxpayer_type or "").strip().upper() or None,
-            turnover_details=(turnover_details or "").strip().upper() or None,
-            state=(state or "").strip().upper() or None,
-            status=(status or "").strip().upper() or None,
-            statuses=[s.upper() for s in statuses] if statuses else None,
-            rm_id=rm_id,
-            op_id=op_id,
-            username=(username or "").strip() or None,
-            email_id=(email_id or "").strip().lower() or None,
-            rent_min=rent_min,
-            rent_max=rent_max,
-            rule14a=rule14a,
-            due_from=due_from,
-            due_to=due_to,
-            created_from=created_from,
-            created_to=created_to,
-            data_received_from=data_received_from,
-            data_received_to=data_received_to,
-            is_active=is_active,
-            include_inactive=include_inactive,
-            is_overdue=is_overdue,
-            is_upcoming=is_upcoming,
-            is_auto_enabled=is_auto_enabled,
-            is_auto_generated=is_auto_generated,
-            include_details=include_details,
-            limit=limit,
-            offset=offset,
-            role=role_norm,
-            emp_id=emp_id,
-        )
-        values += [limit, offset]
-
-        async def _load_filter_gst_filings():
+    async def _load():
+        try:
             async with pool.acquire() as conn:
-                rows = await conn.fetch(query, *values)
-            data = [dict(r) for r in rows]
-            for d in data:
-                d["password"] = None
-            return {
-                "data": data,
-                "count": len(data),
-                "limit": limit,
-                "offset": offset,
-                "request_id": request_id
-            }
+                total = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(select_sql, *values, limit, offset)
+        except asyncpg.PostgresError:
+            log.exception("DB error (table filings)")
+            raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
+        except Exception:
+            log.exception("Unexpected error (table filings)")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
 
-        return await redis_get_or_set_json(
-            cache_key,
-            loader=_load_filter_gst_filings,
-            ttl_seconds=300,
-            tags=[_gst_filing_filter_tag()],
-        )
+        data = [dict(r) for r in rows]
+        for row in data:
+            row["password"] = None
+        return {
+            "data": data,
+            "count": len(data),
+            "total_count": int(total or 0),
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
+        }
 
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load,
+        ttl_seconds=300,
+        tags=[_gst_filing_table_filings_tag()],
+    )
+
+
+@router.get(
+    "/table/return-details",
+    summary="List GST filing return details only (gst_filing_return_details, scoped by visible filings)",
+)
+async def list_gst_filing_return_details_table(
+    id: Optional[int] = None,
+    gst_filing_id: Optional[int] = None,
+    customer_id: Optional[int] = None,
+    filing_period: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    include_inactive: bool = Query(False),
+    is_auto_generated: Optional[bool] = None,
+    filing_is_active: Optional[bool] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """Return-detail rows joined to parent ``gst_filings`` for RBAC; response is ``d.*`` shape (no merged filing blob)."""
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role_norm = str(current_user.get("role")).strip().upper() if current_user.get("role") is not None else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "list_gst_filing_return_details_table"},
+    )
+
+    try:
+        pool = await get_db_pool()
     except Exception:
-        log.exception("Filter error")
-        raise HTTPException(500, GstFilingApiMessages.FILTER_FAILED)
+        log.exception("DB connection failed")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
+
+    conditions: list = []
+    values: list = []
+    idx = 1
+
+    if id:
+        conditions.append(f"d.id = ${idx}")
+        values.append(id)
+        idx += 1
+
+    if gst_filing_id:
+        conditions.append(f"d.gst_filing_id = ${idx}")
+        values.append(gst_filing_id)
+        idx += 1
+
+    if customer_id:
+        conditions.append(f"f.customer_id = ${idx}")
+        values.append(customer_id)
+        idx += 1
+
+    if filing_period:
+        conditions.append(f"f.filing_period = ${idx}")
+        values.append(filing_period.upper())
+        idx += 1
+
+    if is_active is not None:
+        conditions.append(f"d.is_active = ${idx}")
+        values.append(is_active)
+        idx += 1
+    elif not include_inactive:
+        conditions.append("d.is_active = TRUE")
+
+    if is_auto_generated is not None:
+        conditions.append(f"d.is_auto_generated = ${idx}")
+        values.append(is_auto_generated)
+        idx += 1
+
+    if filing_is_active is not None:
+        conditions.append(f"f.is_active = ${idx}")
+        values.append(filing_is_active)
+        idx += 1
+    else:
+        conditions.append("f.is_active = TRUE")
+
+    visibility_sql, visibility_values, idx = build_gst_filing_visibility(
+        role_norm, emp_id, idx, DB_SCHEMA
+    )
+    if visibility_sql:
+        conditions.append(visibility_sql)
+        values.extend(visibility_values)
+
+    where_clause = f"WHERE {' AND '.join(conditions)}"
+
+    lim_idx = idx
+    off_idx = idx + 1
+
+    count_sql = f"""
+        SELECT COUNT(*)::bigint
+        FROM {DB_SCHEMA}.gst_filing_return_details d
+        INNER JOIN {DB_SCHEMA}.gst_filings f ON f.id = d.gst_filing_id
+        {where_clause}
+    """
+    select_sql = f"""
+        SELECT d.*
+        FROM {DB_SCHEMA}.gst_filing_return_details d
+        INNER JOIN {DB_SCHEMA}.gst_filings f ON f.id = d.gst_filing_id
+        {where_clause}
+        ORDER BY d.gst_filing_id DESC, d.id DESC
+        LIMIT ${lim_idx} OFFSET ${off_idx}
+    """
+
+    cache_key = build_cache_key(
+        "gst_filing:table:return_details",
+        id=id,
+        gst_filing_id=gst_filing_id,
+        customer_id=customer_id,
+        filing_period=(filing_period or "").strip().upper() or None,
+        is_active=is_active,
+        include_inactive=include_inactive,
+        is_auto_generated=is_auto_generated,
+        filing_is_active=filing_is_active,
+        limit=limit,
+        offset=offset,
+        role=role_norm,
+        emp_id=emp_id,
+    )
+
+    async def _load():
+        try:
+            async with pool.acquire() as conn:
+                total = await conn.fetchval(count_sql, *values)
+                rows = await conn.fetch(select_sql, *values, limit, offset)
+        except asyncpg.PostgresError:
+            log.exception("DB error (table return-details)")
+            raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
+        except Exception:
+            log.exception("Unexpected error (table return-details)")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
+
+        return {
+            "data": [dict(r) for r in rows],
+            "count": len(rows),
+            "total_count": int(total or 0),
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load,
+        ttl_seconds=300,
+        tags=[_gst_filing_table_return_details_tag()],
+    )
 
 
 def _upper_or_none(v) -> Optional[str]:

@@ -29,7 +29,8 @@ def _gst_filing_documents_filter_tag() -> str:
 
 async def _invalidate_gst_filing_documents_cache() -> None:
     await redis_invalidate_tag(_gst_filing_documents_filter_tag())
-    await redis_invalidate_tag("gst_filing:filter:index")
+    await redis_invalidate_tag("gst_filing:table:filings:index")
+    await redis_invalidate_tag("gst_filing:table:return_details:index")
 
 # -------------------------------------------------------------------
 # CREATE GST FILING DOCUMENT (link URL in DB only; no blob)
