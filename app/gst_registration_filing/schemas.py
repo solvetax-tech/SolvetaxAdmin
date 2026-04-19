@@ -28,7 +28,7 @@ class GSTFilingIn(BaseSchema):
     customer_id: int = Field(..., gt=0)
 
     # =====================================================
-    # GST LINK (EXACTLY ONE REQUIRED)
+    # GST LINK (at least one; both allowed — UI can mirror prefill; API prefers id)
     # =====================================================
     gst_registration_id: Optional[int] = Field(None, gt=0)
 
@@ -141,9 +141,6 @@ class GSTFilingIn(BaseSchema):
         if not self.gst_registration_id and not self.gstin:
             raise ValueError("Provide gst_registration_id or gstin")
 
-        if self.gst_registration_id and self.gstin:
-            raise ValueError("Provide only one: gst_registration_id or gstin")
-
         # CATEGORY vs FREQUENCY
         if self.filing_category == "ANNUAL" and self.filing_frequency != "YEARLY":
             raise ValueError("ANNUAL must be YEARLY")
@@ -201,14 +198,22 @@ class GSTRegistrationFilingPrefillOut(BaseSchema):
     Minimal fields from `gst_registration` for the create-filing screen.
     `taxpayer_type` aligns with DB `taxpayer_type` or legacy `registration_type`;
     `filing_frequency` with DB `filing_frequency` or legacy `filing_preference`.
-    Password is never returned; use `password_set`.
     """
 
     request_id: str
     gst_registration_id: int
+    customer_id: Optional[int] = Field(
+        None,
+        description="Linked `customers.customer_id` from the GST registration row.",
+    )
     gstin: Optional[str] = None
     is_active: bool
     username: str
+    password: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="GST portal password from `gst_registration.password` (empty stored value → null).",
+    )
     password_set: bool = Field(
         ...,
         description="True when a non-empty password exists on the registration record.",
@@ -305,8 +310,6 @@ class GSTFilingYearlyIn(BaseSchema):
     def validate_logic(self):
         if not self.gst_registration_id and not self.gstin:
             raise ValueError("Provide gst_registration_id or gstin")
-        if self.gst_registration_id and self.gstin:
-            raise ValueError("Provide only one: gst_registration_id or gstin")
         if self.taxpayer_type == "COMPOSITION" and self.turnover_details == "MORE_THAN_5CR":
             raise ValueError("Invalid turnover for Composition")
         if self.filing_period:
@@ -346,10 +349,8 @@ class GSTFilingEditIn(BaseSchema):
     filing_period: Optional[str] = None
 
     # =====================================================
-    # GST LINK (ONLY ONE ALLOWED)
+    # GSTIN only — gst_registration_id is fixed on the filing (not PATCHable)
     # =====================================================
-    gst_registration_id: Optional[int] = Field(None, gt=0)
-
     gstin: Optional[
         Annotated[str, Field(
             pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
@@ -444,12 +445,6 @@ class GSTFilingEditIn(BaseSchema):
     # =====================================================
     @model_validator(mode="after")
     def validate_logic(self):
-
-        # -------------------------------------------------
-        # GST LINK VALIDATION
-        # -------------------------------------------------
-        if self.gst_registration_id and self.gstin:
-            raise ValueError("Provide only one: gst_registration_id or gstin")
 
         # -------------------------------------------------
         # CATEGORY vs FREQUENCY

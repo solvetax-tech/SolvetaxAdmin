@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import timedelta
-from typing import Optional
+from typing import Optional, Tuple
 
 from app.utils import get_db_pool, DB_SCHEMA
 from app.gst_registration_filing.gst_filing_auto_policy import (
@@ -55,7 +55,11 @@ def _next_auto_from_due_dates(*dates, lead_days: int = 7):
     return min(valid) - timedelta(days=lead_days)
 
 
-def _build_next_row_from_source(src: dict, filing_frequency: str):
+def _build_next_row_from_source(
+    src: dict,
+    filing_frequency: str,
+    parent_turnover_details: Optional[str] = None,
+):
     # Keep only applicable returns as NOT_FILED, others as NULL.
     gstr1_applicable = src.get("gstr1_status") is not None or src.get("gstr1_due_date") is not None
     gstr3b_applicable = src.get("gstr3b_status") is not None or src.get("gstr3b_due_date") is not None
@@ -84,6 +88,11 @@ def _build_next_row_from_source(src: dict, filing_frequency: str):
     cmp08_due = _shift_due(src.get("cmp08_due_date"), cadence_months)
     gstr4_due = _shift_due(src.get("gstr4_due_date"), cadence_months)
 
+    td = (parent_turnover_details or "").strip().upper() if parent_turnover_details else ""
+    if td == "MORE_THAN_5CR" and gstr9_due is not None and gstr9c_due is None:
+        gstr9c_due = gstr9_due
+        gstr9c_applicable = True
+
     lead = _lead_days_for_cadence_months(cadence_months)
     next_auto = _next_auto_from_due_dates(
         gstr1_due,
@@ -110,6 +119,99 @@ def _build_next_row_from_source(src: dict, filing_frequency: str):
         "gstr4_due_date": gstr4_due,
         "next_auto_generate_at": next_auto,
     }
+
+
+def _parse_cmd_rowcount(tag: str) -> int:
+    if not tag:
+        return 0
+    parts = tag.split()
+    if len(parts) >= 2 and parts[-1].isdigit():
+        return int(parts[-1])
+    return 0
+
+
+async def _sync_gstr9c_with_parent_turnover(conn) -> Tuple[int, int]:
+    """
+    Align YEARLY return-detail GSTR-9C with gst_filings.turnover_details (edit / data fixes).
+
+    Returns (rows_9c_added, rows_9c_cleared).
+    """
+    lim = SCHEDULER_SQL_BATCH_LIMIT
+    add_sql = f"""
+        UPDATE {DB_SCHEMA}.gst_filing_return_details AS d
+        SET
+            gstr9c_due_date = d.gstr9_due_date,
+            gstr9c_status = CASE
+                WHEN d.gstr9_due_date < NOW() THEN 'MISSED'
+                ELSE 'NOT_FILED'
+            END,
+            next_auto_generate_at = d.gstr9_due_date - INTERVAL '7 days',
+            updated_at = NOW()
+        FROM {DB_SCHEMA}.gst_filings AS f
+        WHERE f.id = d.gst_filing_id
+          AND f.is_active = TRUE
+          AND d.is_active = TRUE
+          AND d.filing_frequency = 'YEARLY'
+          AND d.gstr9_due_date IS NOT NULL
+          AND d.gstr9_status IS NOT NULL
+          AND COALESCE(UPPER(TRIM(f.turnover_details)), '') = 'MORE_THAN_5CR'
+          AND UPPER(TRIM(f.filing_category)) = 'RETURN'
+          AND UPPER(TRIM(f.taxpayer_type)) = 'REGULAR'
+          AND d.gstr9c_due_date IS NULL
+          AND (d.gstr9c_status IS NULL OR TRIM(COALESCE(d.gstr9c_status, '')) = '')
+          AND d.id IN (
+              SELECT d2.id
+              FROM {DB_SCHEMA}.gst_filing_return_details d2
+              INNER JOIN {DB_SCHEMA}.gst_filings f2 ON f2.id = d2.gst_filing_id
+              WHERE f2.is_active = TRUE
+                AND d2.is_active = TRUE
+                AND d2.filing_frequency = 'YEARLY'
+                AND d2.gstr9_due_date IS NOT NULL
+                AND COALESCE(UPPER(TRIM(f2.turnover_details)), '') = 'MORE_THAN_5CR'
+                AND UPPER(TRIM(f2.filing_category)) = 'RETURN'
+                AND UPPER(TRIM(f2.taxpayer_type)) = 'REGULAR'
+                AND d2.gstr9c_due_date IS NULL
+              ORDER BY d2.id ASC
+              LIMIT {lim}
+          )
+        """
+    clear_sql = f"""
+        UPDATE {DB_SCHEMA}.gst_filing_return_details AS d
+        SET
+            gstr9c_due_date = NULL,
+            gstr9c_status = NULL,
+            next_auto_generate_at = d.gstr9_due_date - INTERVAL '7 days',
+            updated_at = NOW()
+        FROM {DB_SCHEMA}.gst_filings AS f
+        WHERE f.id = d.gst_filing_id
+          AND f.is_active = TRUE
+          AND d.is_active = TRUE
+          AND d.filing_frequency = 'YEARLY'
+          AND d.gstr9_due_date IS NOT NULL
+          AND COALESCE(UPPER(TRIM(f.turnover_details)), '') <> 'MORE_THAN_5CR'
+          AND UPPER(TRIM(f.filing_category)) = 'RETURN'
+          AND UPPER(TRIM(f.taxpayer_type)) = 'REGULAR'
+          AND d.gstr9c_due_date IS NOT NULL
+          AND d.gstr9c_status IN ('NOT_FILED', 'MISSED')
+          AND d.id IN (
+              SELECT d2.id
+              FROM {DB_SCHEMA}.gst_filing_return_details d2
+              INNER JOIN {DB_SCHEMA}.gst_filings f2 ON f2.id = d2.gst_filing_id
+              WHERE f2.is_active = TRUE
+                AND d2.is_active = TRUE
+                AND d2.filing_frequency = 'YEARLY'
+                AND d2.gstr9c_due_date IS NOT NULL
+                AND d2.gstr9c_status IN ('NOT_FILED', 'MISSED')
+                AND COALESCE(UPPER(TRIM(f2.turnover_details)), '') <> 'MORE_THAN_5CR'
+                AND UPPER(TRIM(f2.filing_category)) = 'RETURN'
+                AND UPPER(TRIM(f2.taxpayer_type)) = 'REGULAR'
+              ORDER BY d2.id ASC
+              LIMIT {lim}
+          )
+        """
+    r1 = await conn.execute(add_sql)
+    r2 = await conn.execute(clear_sql)
+    return _parse_cmd_rowcount(r1), _parse_cmd_rowcount(r2)
 
 
 async def _run_gst_filing_auto_generation(conn):
@@ -147,7 +249,7 @@ async def _run_gst_filing_auto_generation(conn):
     async with conn.transaction():
         rows = await conn.fetch(
             f"""
-            SELECT d.*, f.filing_frequency
+            SELECT d.*, f.filing_frequency, f.turnover_details AS filing_turnover_details
             FROM {DB_SCHEMA}.gst_filing_return_details d
             JOIN {DB_SCHEMA}.gst_filings f
               ON f.id = d.gst_filing_id
@@ -174,7 +276,9 @@ async def _run_gst_filing_auto_generation(conn):
         for row in rows:
             src = dict(row)
             next_row = _build_next_row_from_source(
-                src, src.get("filing_frequency") or "MONTHLY"
+                src,
+                src.get("filing_frequency") or "MONTHLY",
+                src.get("filing_turnover_details"),
             )
             insert_args.append(
                 (
@@ -384,6 +488,15 @@ async def background_jobs():
                         "GST filings auto-disabled (MISSED threshold): count=%s ids=%s",
                         len(disabled_ids),
                         disabled_ids,
+                    )
+
+                # 6c) GSTR-9C on YEARLY rows ↔ parent filing turnover_details (post-edit / data drift)
+                n9c_add, n9c_clear = await _sync_gstr9c_with_parent_turnover(conn)
+                if n9c_add or n9c_clear:
+                    logging.info(
+                        "GST GSTR-9C turnover sync: rows_with_9c_added=%s rows_with_9c_cleared=%s",
+                        n9c_add,
+                        n9c_clear,
                     )
 
                 # 7) Auto-generate next GST filing return detail rows

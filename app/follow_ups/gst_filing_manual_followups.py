@@ -13,7 +13,13 @@ from app.follow_ups.schemas import (
     UpdateFilingFollowupResponse,
     FilingFollowupListResponse,
 )
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_customer_service_visibility
+from app.utils import (
+    get_db_pool,
+    DB_SCHEMA,
+    generate_uuid,
+    build_customer_service_visibility,
+    build_filing_followup_assignment_visibility,
+)
 from app.security.rbac import require_permission
 from app.logger import logger
 from app.redis_cache import (
@@ -35,6 +41,9 @@ async def _invalidate_filing_followup_related_cache() -> None:
     """
     tags = (
         "filing_followups:filter:index",
+        "filing_followups:query_filter:index",
+        "filing_followups:counts:index",
+        "filing_followups:alerts:index",
         "customer_services:filter:index",
         "customer_services:dashboard:index",
         "customer_services:pending:index",
@@ -165,7 +174,7 @@ async def list_filing_followups(
             values.append(created_to)
             idx += 1
 
-        visibility_sql, visibility_values, _ = build_customer_service_visibility(
+        visibility_sql, visibility_values, idx = build_filing_followup_assignment_visibility(
             role,
             emp_id,
             idx,
@@ -179,7 +188,6 @@ async def list_filing_followups(
         count_sql = f"""
             SELECT COUNT(*) AS total_count
             FROM {DB_SCHEMA}.customer_service_followups f
-            JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
             {where_clause}
         """
         data_sql = f"""
@@ -202,7 +210,6 @@ async def list_filing_followups(
                 f.reminder_count,
                 f.missed_at
             FROM {DB_SCHEMA}.customer_service_followups f
-            JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
             {where_clause}
             ORDER BY f.followup_at ASC, f.id DESC
             LIMIT ${idx} OFFSET ${idx + 1}
@@ -340,7 +347,7 @@ async def create_filing_followup(
                 visibility_sql, visibility_values, _ = build_customer_service_visibility(
                     role,
                     emp_id,
-                    1,
+                    2,
                     DB_SCHEMA,
                 )
 
@@ -562,7 +569,7 @@ async def update_filing_followup(
                 # STEP 2: ROLE VISIBILITY CHECK
                 # --------------------------------------------------
 
-                visibility_sql, visibility_values, _ = build_customer_service_visibility(
+                visibility_sql, visibility_values, _ = build_filing_followup_assignment_visibility(
                     role,
                     emp_id,
                     2,
@@ -574,11 +581,11 @@ async def update_filing_followup(
                         f"""
                         SELECT EXISTS(
                             SELECT 1
-                            FROM {DB_SCHEMA}.customer_services cs
-                            WHERE cs.id = $1 AND {visibility_sql}
+                            FROM {DB_SCHEMA}.customer_service_followups f
+                            WHERE f.id = $1 AND {visibility_sql}
                         )
                         """,
-                        row["customer_service_id"],
+                        followup_id,
                         *visibility_values,
                     )
 
@@ -765,94 +772,125 @@ async def filter_filing_followups(
         {"request_id": request_id, "emp_id": emp_id, "api": "filter_filing_followups"},
     )
 
+    statuses_key = tuple(sorted(statuses)) if statuses else None
+    cache_key = build_cache_key(
+        "filing_followups:query_filter",
+        role=role,
+        emp_id=emp_id,
+        followup_id=id,
+        customer_service_id=customer_service_id,
+        rm_id=rm_id,
+        op_id=op_id,
+        statuses=statuses_key,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+        offset=offset,
+    )
+
     try:
         pool = await get_db_pool()
-        async with pool.acquire() as conn:
-            conditions = [
-                "f.entity_type = 'GST_FILING'",
-                "f.status != 'CANCELLED'",
-            ]
-            values = []
-            idx = 1
-
-            if id:
-                conditions.append(f"f.id = ${idx}")
-                values.append(id)
-                idx += 1
-
-            if statuses:
-                conditions.append(f"f.status = ANY(${idx})")
-                values.append(statuses)
-                idx += 1
-
-            if customer_service_id:
-                conditions.append(f"f.customer_service_id = ${idx}")
-                values.append(customer_service_id)
-                idx += 1
-
-            if from_date:
-                conditions.append(f"f.followup_at >= ${idx}")
-                values.append(from_date)
-                idx += 1
-
-            if to_date:
-                conditions.append(f"f.followup_at <= ${idx}")
-                values.append(to_date)
-                idx += 1
-
-            visibility_sql, visibility_values, idx = build_customer_service_visibility(
-                role, emp_id, idx, DB_SCHEMA
-            )
-            if visibility_sql:
-                conditions.append(visibility_sql)
-                values.extend(visibility_values)
-
-            lim_idx = idx
-            off_idx = idx + 1
-            where_clause = f"WHERE {' AND '.join(conditions)}"
-
-            query = f"""
-                SELECT
-                    f.*,
-                    c.customer_id,
-                    c.full_name,
-                    c.mobile,
-                    sc.service_name,
-                    sc.service_code,
-                    cs.rm_id as service_rm_id,
-                    cs.op_id as service_op_id,
-                    e.username as assigned_to_name
-                FROM {DB_SCHEMA}.customer_service_followups f
-                JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
-                JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
-                JOIN {DB_SCHEMA}.service_config sc ON sc.id = cs.service_id
-                LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = f.assigned_to
-                {where_clause}
-                ORDER BY f.id DESC
-                LIMIT ${lim_idx} OFFSET ${off_idx}
-            """
-
-            rows = await conn.fetch(query, *values, limit, offset)
-
-            count_query = f"""
-                SELECT COUNT(*)
-                FROM {DB_SCHEMA}.customer_service_followups f
-                JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
-                {where_clause}
-            """
-            total = await conn.fetchval(count_query, *values)
-
-            return {
-                "data": [dict(r) for r in rows],
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-                "request_id": request_id,
-            }
-
     except Exception:
-        log.exception("Error filtering filing followups")
-        raise HTTPException(500, "Internal server error")
+        log.exception("DB connection failed")
+        raise HTTPException(500, "Database connection error")
+
+    async def _load_query_filter():
+        conditions = [
+            "f.entity_type = 'GST_FILING'",
+            "f.status != 'CANCELLED'",
+        ]
+        values = []
+        idx = 1
+
+        if id:
+            conditions.append(f"f.id = ${idx}")
+            values.append(id)
+            idx += 1
+
+        if statuses:
+            conditions.append(f"f.status = ANY(${idx})")
+            values.append(statuses)
+            idx += 1
+
+        if customer_service_id:
+            conditions.append(f"f.customer_service_id = ${idx}")
+            values.append(customer_service_id)
+            idx += 1
+
+        if from_date:
+            conditions.append(f"f.followup_at >= ${idx}")
+            values.append(from_date)
+            idx += 1
+
+        if to_date:
+            conditions.append(f"f.followup_at <= ${idx}")
+            values.append(to_date)
+            idx += 1
+
+        visibility_sql, visibility_values, idx = build_filing_followup_assignment_visibility(
+            role, emp_id, idx, DB_SCHEMA
+        )
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        lim_idx = idx
+        off_idx = idx + 1
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        query = f"""
+            SELECT
+                f.*,
+                c.customer_id,
+                c.full_name,
+                c.mobile,
+                sc.service_name,
+                sc.service_code,
+                cs.rm_id as service_rm_id,
+                cs.op_id as service_op_id,
+                e.username as assigned_to_name
+            FROM {DB_SCHEMA}.customer_service_followups f
+            JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+            JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+            JOIN {DB_SCHEMA}.service_config sc ON sc.id = cs.service_id
+            LEFT JOIN {DB_SCHEMA}.employees e ON e.emp_id = f.assigned_to
+            {where_clause}
+            ORDER BY f.id DESC
+            LIMIT ${lim_idx} OFFSET ${off_idx}
+        """
+
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM {DB_SCHEMA}.customer_service_followups f
+            JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+            {where_clause}
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *values, limit, offset)
+                total = await conn.fetchval(count_query, *values)
+        except asyncpg.PostgresError:
+            log.exception("DB error while query-filtering filing followups")
+            raise HTTPException(500, "Database error occurred")
+        except Exception:
+            log.exception("Unexpected error while query-filtering filing followups")
+            raise HTTPException(500, "Internal server error")
+
+        return {
+            "data": [dict(r) for r in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_query_filter,
+        ttl_seconds=300,
+        tags=["filing_followups:query_filter:index"],
+    )
 
 
 @router.get(
@@ -871,54 +909,77 @@ async def get_filing_followup_counts(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
 
+    cache_key = build_cache_key(
+        "filing_followups:counts",
+        role=role,
+        emp_id=emp_id,
+        counts_date=today_start.date().isoformat(),
+    )
+
     try:
         pool = await get_db_pool()
-        async with pool.acquire() as conn:
-            conditions = [
-                "f.entity_type = 'GST_FILING'",
-                "f.status != 'CANCELLED'",
-            ]
-            values = []
-            idx = 3
-
-            visibility_sql, visibility_values, idx = build_customer_service_visibility(
-                role, emp_id, idx, DB_SCHEMA
-            )
-            if visibility_sql:
-                conditions.append(visibility_sql)
-                values.extend(visibility_values)
-
-            where_clause = f"WHERE {' AND '.join(conditions)}"
-
-            query = f"""
-                SELECT
-                    COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2) as scheduled_today,
-                    COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2 AND (f.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' OR f.status = 'COMPLETED')) as evaluated_today,
-                    COUNT(*) FILTER (WHERE f.missed_at IS NOT NULL AND f.followup_at >= $1 AND f.followup_at < $2) as overdue_today,
-                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as completed_today,
-                    COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as successful_today,
-                    COUNT(*) FILTER (WHERE f.completed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as pending_today
-                FROM {DB_SCHEMA}.customer_service_followups f
-                JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
-                {where_clause}
-            """
-            row = await conn.fetchrow(query, today_start, today_end, *values)
-            res_data = dict(row)
-
-            evaluated = res_data.get("evaluated_today", 0)
-            successful = res_data.get("successful_today", 0)
-            res_data["success_rate"] = (
-                round((successful / evaluated) * 100) if evaluated > 0 else 100
-            )
-
-            return {
-                "data": res_data,
-                "request_id": request_id,
-            }
-
     except Exception:
-        logger.exception("Error fetching filing followup counts")
-        raise HTTPException(500, "Internal server error")
+        logger.exception("DB connection failed (filing followup counts)")
+        raise HTTPException(500, "Database connection error")
+
+    async def _load_filing_followup_counts():
+        conditions = [
+            "f.entity_type = 'GST_FILING'",
+            "f.status != 'CANCELLED'",
+        ]
+        values = []
+        idx = 3
+
+        visibility_sql, visibility_values, idx = build_filing_followup_assignment_visibility(
+            role, emp_id, idx, DB_SCHEMA
+        )
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        query = f"""
+            SELECT
+                COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2) as scheduled_today,
+                COUNT(*) FILTER (WHERE f.followup_at >= $1 AND f.followup_at < $2 AND (f.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' OR f.status = 'COMPLETED')) as evaluated_today,
+                COUNT(*) FILTER (WHERE f.missed_at IS NOT NULL AND f.followup_at >= $1 AND f.followup_at < $2) as overdue_today,
+                COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as completed_today,
+                COUNT(*) FILTER (WHERE f.status = 'COMPLETED' AND f.missed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as successful_today,
+                COUNT(*) FILTER (WHERE f.completed_at IS NULL AND f.followup_at >= $1 AND f.followup_at < $2) as pending_today
+            FROM {DB_SCHEMA}.customer_service_followups f
+            {where_clause}
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, today_start, today_end, *values)
+        except asyncpg.PostgresError:
+            logger.exception("DB error while fetching filing followup counts")
+            raise HTTPException(500, "Database error occurred")
+        except Exception:
+            logger.exception("Unexpected error while fetching filing followup counts")
+            raise HTTPException(500, "Internal server error")
+
+        res_data = dict(row)
+
+        evaluated = res_data.get("evaluated_today", 0)
+        successful = res_data.get("successful_today", 0)
+        res_data["success_rate"] = (
+            round((successful / evaluated) * 100) if evaluated > 0 else 100
+        )
+
+        return {
+            "data": res_data,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_filing_followup_counts,
+        ttl_seconds=300,
+        tags=["filing_followups:counts:index"],
+    )
 
 
 @router.get(
@@ -935,48 +996,72 @@ async def get_filing_followup_alerts(
 
     now = datetime.now(timezone.utc)
     next_24h = now + timedelta(hours=24)
+    time_bucket = int(now.timestamp() // 300)
+
+    cache_key = build_cache_key(
+        "filing_followups:alerts",
+        role=role,
+        emp_id=emp_id,
+        time_bucket=time_bucket,
+    )
 
     try:
         pool = await get_db_pool()
-        async with pool.acquire() as conn:
-            conditions = [
-                "f.entity_type = 'GST_FILING'",
-                "f.status IN ('PENDING', 'MISSED')",
-                f"(f.followup_at < ${1} OR f.followup_at < ${2})",
-            ]
-            values = [now, next_24h]
-            idx = 3
-
-            visibility_sql, visibility_values, idx = build_customer_service_visibility(
-                role, emp_id, idx, DB_SCHEMA
-            )
-            if visibility_sql:
-                conditions.append(visibility_sql)
-                values.extend(visibility_values)
-
-            where_clause = f"WHERE {' AND '.join(conditions)}"
-
-            query = f"""
-                SELECT
-                    f.*,
-                    c.customer_id,
-                    c.full_name,
-                    sc.service_name
-                FROM {DB_SCHEMA}.customer_service_followups f
-                JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
-                JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
-                JOIN {DB_SCHEMA}.service_config sc ON sc.id = cs.service_id
-                {where_clause}
-                ORDER BY f.followup_at ASC
-                LIMIT 50
-            """
-            rows = await conn.fetch(query, *values)
-
-            return {
-                "data": [dict(r) for r in rows],
-                "request_id": request_id,
-            }
-
     except Exception:
-        logger.exception("Error fetching filing followup alerts")
-        raise HTTPException(500, "Internal server error")
+        logger.exception("DB connection failed (filing followup alerts)")
+        raise HTTPException(500, "Database connection error")
+
+    async def _load_filing_followup_alerts():
+        conditions = [
+            "f.entity_type = 'GST_FILING'",
+            "f.status IN ('PENDING', 'MISSED')",
+            f"(f.followup_at < ${1} OR f.followup_at < ${2})",
+        ]
+        values = [now, next_24h]
+        idx = 3
+
+        visibility_sql, visibility_values, idx = build_filing_followup_assignment_visibility(
+            role, emp_id, idx, DB_SCHEMA
+        )
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        query = f"""
+            SELECT
+                f.*,
+                c.customer_id,
+                c.full_name,
+                sc.service_name
+            FROM {DB_SCHEMA}.customer_service_followups f
+            JOIN {DB_SCHEMA}.customer_services cs ON cs.id = f.customer_service_id
+            JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+            JOIN {DB_SCHEMA}.service_config sc ON sc.id = cs.service_id
+            {where_clause}
+            ORDER BY f.followup_at ASC
+            LIMIT 50
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *values)
+        except asyncpg.PostgresError:
+            logger.exception("DB error while fetching filing followup alerts")
+            raise HTTPException(500, "Database error occurred")
+        except Exception:
+            logger.exception("Unexpected error while fetching filing followup alerts")
+            raise HTTPException(500, "Internal server error")
+
+        return {
+            "data": [dict(r) for r in rows],
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_filing_followup_alerts,
+        ttl_seconds=120,
+        tags=["filing_followups:alerts:index"],
+    )

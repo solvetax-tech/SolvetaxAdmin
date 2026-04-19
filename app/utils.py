@@ -346,6 +346,40 @@ def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: 
 
     return None, [], idx
 
+
+def build_filing_followup_assignment_visibility(role: str, emp_id: int, idx: int, schema: str):
+    """
+    Row visibility for ``customer_service_followups`` (alias ``f``) by ``f.assigned_to`` (emp_id).
+
+    - ADMIN: no extra predicate (see all).
+    - RM / OP: only followups assigned to the current employee.
+    - SALES_MANAGER / OP_MANAGER: ``f.assigned_to`` is a member of a team they manage.
+    - Other roles: same as other visibility helpers — no predicate (full access).
+    """
+    if role == "ADMIN":
+        return None, [], idx
+
+    if role in ("RM", "OP"):
+        if emp_id is None:
+            return "1=0", [], idx
+        return f"f.assigned_to = ${idx}", [emp_id], idx + 1
+
+    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+        if emp_id is None:
+            return "1=0", [], idx
+        sql = f"""
+        f.assigned_to IN (
+            SELECT tm.emp_id
+            FROM {schema}.team_members tm
+            JOIN {schema}.team_managers mg ON tm.team_id = mg.team_id
+            WHERE mg.manager_emp_id = ${idx}
+        )
+        """
+        return sql, [emp_id], idx + 1
+
+    return None, [], idx
+
+
 async def get_user_permissions(emp_id: int, conn, DB_SCHEMA="solvetax") -> Dict[str, Any]:
     try:
         # ✅ 1) fetch role ids for this employee
