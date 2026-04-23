@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from zoneinfo import ZoneInfo
 
 import asyncpg
@@ -883,6 +883,7 @@ async def get_crm_stage_pitch_mappings(
 @router.get("/filter", summary="Filter CRM leads")
 async def filter_crm_leads(
     stage: Optional[str] = None,
+    stages: Optional[List[str]] = Query(None, description="Filter by multiple stages (OR logic)."),
     follow_up_status: Optional[str] = None,
     mobile: Optional[str] = None,
     rm_id: Optional[int] = None,
@@ -896,8 +897,25 @@ async def filter_crm_leads(
 ):
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
+    if stage and stages:
+        raise _validation_error(
+            "Provide either stage or stages.",
+            {"stage": "Use single stage or stages list, not both."},
+        )
     if stage:
         stage = _normalize_code(stage)
+    stages_norm: Optional[List[str]] = None
+    if stages:
+        stages_norm = []
+        for s in stages:
+            if not isinstance(s, str) or not s.strip():
+                raise _validation_error(
+                    "Invalid stages filter.",
+                    {"stages": "Each stage must be a non-empty string."},
+                )
+            stages_norm.append(_normalize_code(s))
+        # Preserve input order while removing duplicates.
+        stages_norm = list(dict.fromkeys(stages_norm))
     if follow_up_status:
         follow_up_status = _normalize_code(follow_up_status)
         if follow_up_status not in FOLLOWUP_STATUSES:
@@ -914,6 +932,7 @@ async def filter_crm_leads(
     cache_key = build_cache_key(
         "crm:leads:filter",
         stage=stage,
+        stages=stages_norm,
         follow_up_status=follow_up_status,
         mobile=mobile,
         rm_id=rm_id,
@@ -938,11 +957,22 @@ async def filter_crm_leads(
                             "Invalid stage filter.",
                             {"stage": "Unsupported stage value."},
                         )
+                if stages_norm:
+                    valid_stages = await _fetch_valid_stage_codes(conn, et_filter or DEFAULT_CRM_ENTITY_TYPE)
+                    invalid_stages = [s for s in stages_norm if s not in valid_stages]
+                    if invalid_stages:
+                        raise _validation_error(
+                            "Invalid stages filter.",
+                            {"stages": f"Unsupported stage values: {', '.join(invalid_stages)}"},
+                        )
                 where = ["TRUE"]
                 params = []
                 if stage:
                     params.append(stage)
                     where.append(f"l.stage = ${len(params)}")
+                elif stages_norm:
+                    params.append(stages_norm)
+                    where.append(f"l.stage = ANY(${len(params)})")
                 if follow_up_status:
                     params.append(follow_up_status)
                     where.append(f"l.follow_up_status = ${len(params)}")

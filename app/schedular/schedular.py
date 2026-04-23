@@ -151,6 +151,7 @@ async def _sync_gstr9c_with_parent_turnover(conn) -> Tuple[int, int]:
         WHERE f.id = d.gst_filing_id
           AND f.is_active = TRUE
           AND d.is_active = TRUE
+          AND d.is_current = TRUE
           AND d.filing_frequency = 'YEARLY'
           AND d.gstr9_due_date IS NOT NULL
           AND d.gstr9_status IS NOT NULL
@@ -165,6 +166,7 @@ async def _sync_gstr9c_with_parent_turnover(conn) -> Tuple[int, int]:
               INNER JOIN {DB_SCHEMA}.gst_filings f2 ON f2.id = d2.gst_filing_id
               WHERE f2.is_active = TRUE
                 AND d2.is_active = TRUE
+                AND d2.is_current = TRUE
                 AND d2.filing_frequency = 'YEARLY'
                 AND d2.gstr9_due_date IS NOT NULL
                 AND COALESCE(UPPER(TRIM(f2.turnover_details)), '') = 'MORE_THAN_5CR'
@@ -186,6 +188,7 @@ async def _sync_gstr9c_with_parent_turnover(conn) -> Tuple[int, int]:
         WHERE f.id = d.gst_filing_id
           AND f.is_active = TRUE
           AND d.is_active = TRUE
+          AND d.is_current = TRUE
           AND d.filing_frequency = 'YEARLY'
           AND d.gstr9_due_date IS NOT NULL
           AND COALESCE(UPPER(TRIM(f.turnover_details)), '') <> 'MORE_THAN_5CR'
@@ -199,6 +202,7 @@ async def _sync_gstr9c_with_parent_turnover(conn) -> Tuple[int, int]:
               INNER JOIN {DB_SCHEMA}.gst_filings f2 ON f2.id = d2.gst_filing_id
               WHERE f2.is_active = TRUE
                 AND d2.is_active = TRUE
+                AND d2.is_current = TRUE
                 AND d2.filing_frequency = 'YEARLY'
                 AND d2.gstr9c_due_date IS NOT NULL
                 AND d2.gstr9c_status IN ('NOT_FILED', 'MISSED')
@@ -229,12 +233,12 @@ async def _run_gst_filing_auto_generation(conn):
                 gst_filing_id,
                 gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                 gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
-                is_auto_generated, next_auto_generate_at
+                is_auto_generated, next_auto_generate_at, is_current
             )
             VALUES (
                 $1,$2,$3,$4,$5,$6,$7,
                 $8,$9,$10,$11,$12,$13,
-                TRUE,$14
+                TRUE,$14,TRUE
             )
             """
     update_sql = f"""
@@ -254,6 +258,7 @@ async def _run_gst_filing_auto_generation(conn):
             JOIN {DB_SCHEMA}.gst_filings f
               ON f.id = d.gst_filing_id
             WHERE d.is_active = TRUE
+              AND d.is_current = TRUE
               AND f.is_active = TRUE
               AND f.is_auto_enabled = TRUE
               AND (
@@ -351,12 +356,14 @@ async def _mark_overdue_gst_return_statuses(conn) -> str:
         WHERE f.id = d.gst_filing_id
           AND f.is_active = TRUE
           AND d.is_active = TRUE
+          AND d.is_current = TRUE
           AND d.id IN (
             SELECT d2.id
             FROM {DB_SCHEMA}.gst_filing_return_details d2
             INNER JOIN {DB_SCHEMA}.gst_filings f2 ON f2.id = d2.gst_filing_id
             WHERE f2.is_active = TRUE
               AND d2.is_active = TRUE
+              AND d2.is_current = TRUE
               AND (
                   (d2.gstr1_due_date IS NOT NULL AND d2.gstr1_due_date < NOW() AND d2.gstr1_status = 'NOT_FILED')
                   OR (d2.gstr3b_due_date IS NOT NULL AND d2.gstr3b_due_date < NOW() AND d2.gstr3b_status = 'NOT_FILED')

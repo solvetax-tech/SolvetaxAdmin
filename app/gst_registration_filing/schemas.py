@@ -345,9 +345,6 @@ class GSTFilingEditIn(BaseSchema):
         Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
     ] = None
 
-    # 🔥 Controlled but editable (with caution)
-    filing_period: Optional[str] = None
-
     # =====================================================
     # GSTIN only — gst_registration_id is fixed on the filing (not PATCHable)
     # =====================================================
@@ -406,7 +403,6 @@ class GSTFilingEditIn(BaseSchema):
         "taxpayer_type",
         "turnover_details",
         "state",
-        "filing_period",
         "gst_reg_status",
         "business_type",
         mode="before"

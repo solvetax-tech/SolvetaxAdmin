@@ -255,6 +255,38 @@ def _collect_gst_filings_only_conditions(
     WHERE fragments for ``gst_filings`` alias ``f`` only (no join to return_details).
     Due / overdue / upcoming / auto_generated use EXISTS on ``gst_filing_return_details``.
     """
+    filing_period_norm = filing_period.strip().upper() if isinstance(filing_period, str) and filing_period.strip() else None
+    status_norm = status.strip().upper() if isinstance(status, str) and status.strip() else None
+    state_norm = state.strip().upper() if isinstance(state, str) and state.strip() else None
+    filing_category_norm = (
+        filing_category.strip().upper()
+        if isinstance(filing_category, str) and filing_category.strip()
+        else None
+    )
+    filing_frequency_norm = (
+        filing_frequency.strip().upper()
+        if isinstance(filing_frequency, str) and filing_frequency.strip()
+        else None
+    )
+    taxpayer_type_norm = (
+        taxpayer_type.strip().upper()
+        if isinstance(taxpayer_type, str) and taxpayer_type.strip()
+        else None
+    )
+    turnover_details_norm = (
+        turnover_details.strip().upper()
+        if isinstance(turnover_details, str) and turnover_details.strip()
+        else None
+    )
+    email_id_norm = email_id.strip().lower() if isinstance(email_id, str) and email_id.strip() else None
+    username_norm = username.strip() if isinstance(username, str) and username.strip() else None
+    gstin_norm = gstin.strip().upper() if isinstance(gstin, str) and gstin.strip() else None
+    statuses_norm = (
+        [s.strip().upper() for s in statuses if isinstance(s, str) and s.strip()]
+        if statuses
+        else None
+    )
+
     conditions: list = []
     values: list = []
     idx = 1
@@ -274,9 +306,9 @@ def _collect_gst_filings_only_conditions(
         values.append(gst_registration_id)
         idx += 1
 
-    if gstin:
+    if gstin_norm:
         conditions.append(f"upper(f.gstin) = ${idx}")
-        values.append(gstin.upper())
+        values.append(gstin_norm)
         idx += 1
 
     if service_id:
@@ -284,44 +316,44 @@ def _collect_gst_filings_only_conditions(
         values.append(service_id)
         idx += 1
 
-    if filing_category:
+    if filing_category_norm:
         conditions.append(f"f.filing_category = ${idx}")
-        values.append(filing_category.upper())
+        values.append(filing_category_norm)
         idx += 1
 
-    if filing_period:
-        conditions.append(f"f.filing_period = ${idx}")
-        values.append(filing_period.upper())
+    if filing_period_norm:
+        conditions.append(f"upper(trim(f.filing_period)) = ${idx}")
+        values.append(filing_period_norm)
         idx += 1
 
-    if filing_frequency:
+    if filing_frequency_norm:
         conditions.append(f"f.filing_frequency = ${idx}")
-        values.append(filing_frequency.upper())
+        values.append(filing_frequency_norm)
         idx += 1
 
-    if taxpayer_type:
+    if taxpayer_type_norm:
         conditions.append(f"f.taxpayer_type = ${idx}")
-        values.append(taxpayer_type.upper())
+        values.append(taxpayer_type_norm)
         idx += 1
 
-    if turnover_details:
+    if turnover_details_norm:
         conditions.append(f"f.turnover_details = ${idx}")
-        values.append(turnover_details.upper())
+        values.append(turnover_details_norm)
         idx += 1
 
-    if state:
-        conditions.append(f"upper(f.state) = ${idx}")
-        values.append(state.upper())
+    if state_norm:
+        conditions.append(f"upper(trim(f.state)) = ${idx}")
+        values.append(state_norm)
         idx += 1
 
-    if status:
+    if status_norm:
         conditions.append(f"f.status = ${idx}")
-        values.append(status.upper())
+        values.append(status_norm)
         idx += 1
 
-    if statuses:
+    if statuses_norm:
         conditions.append(f"f.status = ANY(${idx})")
-        values.append([s.upper() for s in statuses])
+        values.append(statuses_norm)
         idx += 1
 
     if rm_id:
@@ -334,14 +366,14 @@ def _collect_gst_filings_only_conditions(
         values.append(op_id)
         idx += 1
 
-    if username:
+    if username_norm:
         conditions.append(f"f.username ILIKE ${idx}")
-        values.append(f"%{username}%")
+        values.append(f"%{username_norm}%")
         idx += 1
 
-    if email_id:
+    if email_id_norm:
         conditions.append(f"lower(f.email_id) = ${idx}")
-        values.append(email_id.lower())
+        values.append(email_id_norm)
         idx += 1
 
     if rent_min is not None:
@@ -365,6 +397,7 @@ def _collect_gst_filings_only_conditions(
             EXISTS (
                 SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details dx
                 WHERE dx.gst_filing_id = f.id
+                  AND dx.is_current = TRUE
                   AND GREATEST(
                     COALESCE(dx.gstr1_due_date, '-infinity'::timestamptz),
                     COALESCE(dx.gstr3b_due_date, '-infinity'::timestamptz),
@@ -385,6 +418,7 @@ def _collect_gst_filings_only_conditions(
             EXISTS (
                 SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details dx
                 WHERE dx.gst_filing_id = f.id
+                  AND dx.is_current = TRUE
                   AND LEAST(
                     COALESCE(dx.gstr1_due_date, 'infinity'::timestamptz),
                     COALESCE(dx.gstr3b_due_date, 'infinity'::timestamptz),
@@ -405,6 +439,7 @@ def _collect_gst_filings_only_conditions(
             EXISTS (
                 SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details dx
                 WHERE dx.gst_filing_id = f.id
+                  AND dx.is_current = TRUE
                   AND (
                     (dx.gstr1_status = 'NOT_FILED' AND dx.gstr1_due_date < NOW())
                     OR (dx.gstr3b_status = 'NOT_FILED' AND dx.gstr3b_due_date < NOW())
@@ -423,6 +458,7 @@ def _collect_gst_filings_only_conditions(
             EXISTS (
                 SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details dx
                 WHERE dx.gst_filing_id = f.id
+                  AND dx.is_current = TRUE
                   AND (
                     (dx.gstr1_status = 'NOT_FILED' AND dx.gstr1_due_date >= NOW())
                     OR (dx.gstr3b_status = 'NOT_FILED' AND dx.gstr3b_due_date >= NOW())
@@ -450,7 +486,8 @@ def _collect_gst_filings_only_conditions(
     if is_auto_generated is not None:
         conditions.append(
             f"EXISTS (SELECT 1 FROM {DB_SCHEMA}.gst_filing_return_details d_auto "
-            f"WHERE d_auto.gst_filing_id = f.id AND d_auto.is_auto_generated = ${idx})"
+            f"WHERE d_auto.gst_filing_id = f.id AND d_auto.is_current = TRUE "
+            f"AND d_auto.is_auto_generated = ${idx})"
         )
         values.append(is_auto_generated)
         idx += 1
@@ -535,6 +572,17 @@ async def list_gst_filings_table(
     except Exception:
         log.exception("DB connection failed")
         raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
+
+    if due_from and due_to and due_from > due_to:
+        raise HTTPException(400, "due_from must be <= due_to")
+    if created_from and created_to and created_from > created_to:
+        raise HTTPException(400, "created_from must be <= created_to")
+    if data_received_from and data_received_to and data_received_from > data_received_to:
+        raise HTTPException(400, "data_received_from must be <= data_received_to")
+    if status and statuses:
+        raise HTTPException(400, "Provide either status or statuses, not both")
+    if is_overdue and is_upcoming:
+        raise HTTPException(400, "is_overdue and is_upcoming cannot both be true")
 
     conditions, values, idx = _collect_gst_filings_only_conditions(
         filing_id=id,
@@ -686,6 +734,7 @@ async def list_gst_filing_return_details_table(
     filing_period: Optional[str] = None,
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
+    is_current: Optional[bool] = Query(True),
     is_auto_generated: Optional[bool] = None,
     filing_is_active: Optional[bool] = None,
     limit: int = Query(50, ge=1, le=200),
@@ -709,6 +758,12 @@ async def list_gst_filing_return_details_table(
         log.exception("DB connection failed")
         raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
 
+    filing_period_norm = (
+        filing_period.strip().upper()
+        if isinstance(filing_period, str) and filing_period.strip()
+        else None
+    )
+
     conditions: list = []
     values: list = []
     idx = 1
@@ -728,9 +783,9 @@ async def list_gst_filing_return_details_table(
         values.append(customer_id)
         idx += 1
 
-    if filing_period:
+    if filing_period_norm:
         conditions.append(f"f.filing_period = ${idx}")
-        values.append(filing_period.upper())
+        values.append(filing_period_norm)
         idx += 1
 
     if is_active is not None:
@@ -739,6 +794,11 @@ async def list_gst_filing_return_details_table(
         idx += 1
     elif not include_inactive:
         conditions.append("d.is_active = TRUE")
+
+    if is_current is not None:
+        conditions.append(f"d.is_current = ${idx}")
+        values.append(is_current)
+        idx += 1
 
     if is_auto_generated is not None:
         conditions.append(f"d.is_auto_generated = ${idx}")
@@ -787,6 +847,7 @@ async def list_gst_filing_return_details_table(
         filing_period=(filing_period or "").strip().upper() or None,
         is_active=is_active,
         include_inactive=include_inactive,
+        is_current=is_current,
         is_auto_generated=is_auto_generated,
         filing_is_active=filing_is_active,
         limit=limit,
@@ -1199,6 +1260,8 @@ async def create_gst_filing(
                     ist=IST,
                     now=now,
                     explicit_filing_period=explicit_filing_period,
+                    is_auto_enabled=is_auto_enabled,
+                    supersede_with_is_current=False,
                 )
 
                 # ================= CUSTOMER SERVICE =================
@@ -1359,10 +1422,6 @@ async def update_gst_filing(
                 if not update_data:
                     raise HTTPException(400, GstFilingApiMessages.UPDATE_NO_CHANGES)
 
-                # JSON null means "omit" — do not clear DB filing_period or pass None into rebuild.
-                if "filing_period" in update_data and update_data["filing_period"] is None:
-                    del update_data["filing_period"]
-
                 # =====================================================
                 # NORMALIZATION
                 # =====================================================
@@ -1372,7 +1431,6 @@ async def update_gst_filing(
                     "taxpayer_type",
                     "turnover_details",
                     "state",
-                    "filing_period",
                 ]:
                     if key in update_data and update_data[key]:
                         update_data[key] = update_data[key].upper()
@@ -1412,14 +1470,13 @@ async def update_gst_filing(
                 taxpayer_type = update_data.get("taxpayer_type", old["taxpayer_type"])
                 turnover_details = update_data.get("turnover_details", old["turnover_details"])
                 state = update_data.get("state", old["state"])
-                filing_period = update_data.get("filing_period", old["filing_period"])
+                filing_period = old["filing_period"]
 
                 _edit_rule_keys = {
                     "filing_category",
                     "filing_frequency",
                     "taxpayer_type",
                     "turnover_details",
-                    "filing_period",
                 }
                 if update_data.keys() & _edit_rule_keys:
                     validate_merged_filing_business_rules(
@@ -1441,7 +1498,6 @@ async def update_gst_filing(
                         "taxpayer_type",
                         "turnover_details",
                         "state",
-                        "filing_period",
                     ]
                 )
 
@@ -1487,10 +1543,51 @@ async def update_gst_filing(
                     *values,
                 )
 
+                # Keep shared GST registration fields in sync when this filing is linked.
+                if new_reg:
+                    filing_to_registration = {
+                        "gstin": "gstin",
+                        "taxpayer_type": "taxpayer_type",
+                        "turnover_details": "turnover_details",
+                        "filing_frequency": "filing_preference",
+                        "state": "state",
+                        "gst_reg_status": "registration_status",
+                        "username": "username",
+                        "password": "password",
+                        "business_name": "business_name",
+                        "business_type": "business_type",
+                        "business_description": "business_description",
+                    }
+                    reg_fields = []
+                    reg_values = []
+                    reg_idx = 1
+                    for filing_key, reg_col in filing_to_registration.items():
+                        if filing_key in update_data:
+                            reg_fields.append(f"{reg_col}=${reg_idx}")
+                            reg_values.append(update_data[filing_key])
+                            reg_idx += 1
+                    if reg_fields:
+                        reg_fields.append(f"updated_at=${reg_idx}")
+                        reg_values.append(now)
+                        reg_idx += 1
+                        reg_values.append(new_reg)
+                        await conn.execute(
+                            f"""
+                            UPDATE {DB_SCHEMA}.gst_registration
+                            SET {', '.join(reg_fields)}
+                            WHERE id=${reg_idx}
+                              AND is_active = TRUE
+                            """,
+                            *reg_values,
+                        )
+
                 # =====================================================
                 # 🔥 REBUILD RETURN DETAILS (IF REQUIRED)
                 # =====================================================
                 if recalc_required:
+                    supersede_with_is_current = any(
+                        k in update_data for k in ["turnover_details", "filing_frequency"]
+                    )
                     prior_n = await count_active_return_details(conn, filing_id)
                     explicit_template = infer_explicit_template_from_prior_row_count(
                         prior_n,
@@ -1512,6 +1609,8 @@ async def update_gst_filing(
                         ist=IST,
                         now=now,
                         explicit_filing_period=explicit_template,
+                        is_auto_enabled=bool(new["is_auto_enabled"]),
+                        supersede_with_is_current=supersede_with_is_current,
                     )
 
                 # =====================================================

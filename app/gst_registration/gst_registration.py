@@ -16,6 +16,11 @@ from app.redis_cache import (
     get_or_set_json as redis_get_or_set_json,
     invalidate_tag as redis_invalidate_tag,
 )
+from app.gst_registration_filing.gst_return_details_rebuild import (
+    rebuild_return_details_for_filing,
+    count_active_return_details,
+    infer_explicit_template_from_prior_row_count,
+)
 from zoneinfo import ZoneInfo
 import json
 import uuid
@@ -1415,6 +1420,97 @@ async def edit_gst_registration(
                         status_code=409,
                         detail="GST state changed. Please retry.",
                     )
+
+                # Keep shared GST filing fields synced for active filings linked to this registration.
+                registration_to_filing = {
+                    "gstin": "gstin",
+                    "taxpayer_type": "taxpayer_type",
+                    "turnover_details": "turnover_details",
+                    "filing_preference": "filing_frequency",
+                    "state": "state",
+                    "registration_status": "gst_reg_status",
+                    "username": "username",
+                    "password": "password",
+                    "business_name": "business_name",
+                    "business_type": "business_type",
+                    "business_description": "business_description",
+                }
+                filing_fields = []
+                filing_values = []
+                filing_idx = 1
+                for reg_key, filing_col in registration_to_filing.items():
+                    if reg_key in update_data:
+                        filing_fields.append(f"{filing_col} = ${filing_idx}")
+                        filing_values.append(update_data[reg_key])
+                        filing_idx += 1
+                if filing_fields:
+                    if "filing_preference" in update_data and update_data["filing_preference"]:
+                        filing_fields.append(
+                            f"service_id = CASE WHEN ${filing_idx} = 'MONTHLY' THEN 4 "
+                            f"WHEN ${filing_idx} = 'QUARTERLY' THEN 5 ELSE service_id END"
+                        )
+                        filing_values.append(update_data["filing_preference"])
+                        filing_idx += 1
+                    filing_fields.append("updated_at = NOW()")
+                    filing_values.append(gst_id)
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.gst_filings
+                        SET {', '.join(filing_fields)}
+                        WHERE gst_registration_id = ${filing_idx}
+                          AND is_active = TRUE
+                        """,
+                        *filing_values,
+                    )
+
+                # If GST edit changes filing-driving fields, rebuild linked filing return schedules.
+                if ("turnover_details" in update_data) or (
+                    "filing_preference" in update_data and update_data.get("filing_preference")
+                ):
+                    IST = ZoneInfo("Asia/Kolkata")
+                    now_ist = datetime.now(IST)
+                    group_2_states = {
+                        "DELHI", "UTTAR_PRADESH", "BIHAR", "WEST_BENGAL", "ODISHA",
+                        "JHARKHAND", "CHHATTISGARH", "MADHYA_PRADESH", "RAJASTHAN",
+                        "HARYANA", "PUNJAB", "HIMACHAL_PRADESH", "UTTARAKHAND",
+                        "JAMMU_AND_KASHMIR", "LADAKH", "SIKKIM", "ARUNACHAL_PRADESH",
+                        "NAGALAND", "MANIPUR", "MIZORAM", "TRIPURA", "MEGHALAYA",
+                        "ASSAM", "CHANDIGARH",
+                    }
+                    linked_filings = await conn.fetch(
+                        f"""
+                        SELECT *
+                        FROM {DB_SCHEMA}.gst_filings
+                        WHERE gst_registration_id = $1
+                          AND is_active = TRUE
+                        FOR UPDATE
+                        """,
+                        gst_id,
+                    )
+                    for filing in linked_filings:
+                        prior_n = await count_active_return_details(conn, filing["id"])
+                        explicit_template = infer_explicit_template_from_prior_row_count(
+                            prior_n,
+                            filing["filing_category"],
+                            filing["taxpayer_type"],
+                            filing["filing_frequency"],
+                        )
+                        await rebuild_return_details_for_filing(
+                            conn,
+                            filing_id=filing["id"],
+                            filing_category=filing["filing_category"],
+                            filing_frequency=filing["filing_frequency"],
+                            taxpayer_type=filing["taxpayer_type"],
+                            turnover_details=filing["turnover_details"],
+                            state=filing["state"],
+                            filing_period=filing["filing_period"] or "",
+                            group_2_states=group_2_states,
+                            ist=IST,
+                            now=now_ist,
+                            explicit_filing_period=explicit_template,
+                            is_auto_enabled=bool(filing["is_auto_enabled"]),
+                            supersede_with_is_current=True,
+                        )
 
                 # --------------------------------------------------
                 # 4️⃣ Version Audit

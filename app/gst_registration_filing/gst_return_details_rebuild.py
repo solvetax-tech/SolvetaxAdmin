@@ -117,24 +117,40 @@ async def rebuild_return_details_for_filing(
     ist: ZoneInfo,
     now: datetime,
     explicit_filing_period: bool,
+    is_auto_enabled: bool = True,
+    supersede_with_is_current: bool = False,
 ) -> None:
     """
-    Deactivate prior return-detail rows for this filing (soft supersede), then insert new seeds.
+    Supersede prior return-detail rows for this filing, then insert new seeds.
 
-    Previous rows stay in the table with ``is_active = FALSE`` and ``next_auto_generate_at`` cleared
-    so the scheduler and other queries that filter ``is_active = TRUE`` only see the new chain.
+    - Legacy mode: old active rows are marked ``is_active = FALSE``.
+    - Current-chain mode: old rows stay active, but become ``is_current = FALSE``.
     """
-    await conn.execute(
-        f"""
-        UPDATE {DB_SCHEMA}.gst_filing_return_details
-        SET is_active = FALSE,
-            next_auto_generate_at = NULL,
-            updated_at = NOW()
-        WHERE gst_filing_id = $1
-          AND is_active = TRUE
-        """,
-        filing_id,
-    )
+    if supersede_with_is_current:
+        await conn.execute(
+            f"""
+            UPDATE {DB_SCHEMA}.gst_filing_return_details
+            SET is_current = FALSE,
+                next_auto_generate_at = NULL,
+                updated_at = NOW()
+            WHERE gst_filing_id = $1
+              AND is_active = TRUE
+              AND is_current = TRUE
+            """,
+            filing_id,
+        )
+    else:
+        await conn.execute(
+            f"""
+            UPDATE {DB_SCHEMA}.gst_filing_return_details
+            SET is_active = FALSE,
+                next_auto_generate_at = NULL,
+                updated_at = NOW()
+            WHERE gst_filing_id = $1
+              AND is_active = TRUE
+            """,
+            filing_id,
+        )
 
     filing_category = (filing_category or "").strip().upper()
     filing_frequency = (filing_frequency or "").strip().upper()
@@ -152,6 +168,12 @@ async def rebuild_return_details_for_filing(
 
     def _get_status(due):
         return "MISSED" if due and due < now else "NOT_FILED"
+
+    # Explicit one-off filing + auto disabled => do not seed scheduler chain.
+    suppress_next_auto = explicit_filing_period and (not bool(is_auto_enabled))
+
+    def _next_auto_or_none(next_auto):
+        return None if suppress_next_auto else next_auto
 
     if filing_category == "ANNUAL" and filing_frequency == "YEARLY":
         if taxpayer_type == "REGULAR":
@@ -171,9 +193,9 @@ async def rebuild_return_details_for_filing(
                     filing_frequency,
                     gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                     gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
-                    is_auto_generated, next_auto_generate_at
+                    is_auto_generated, next_auto_generate_at, is_current
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
                 filing_id,
                 "YEARLY",
                 None,
@@ -189,7 +211,8 @@ async def rebuild_return_details_for_filing(
                 None,
                 None,
                 False,
-                next_auto,
+                _next_auto_or_none(next_auto),
+                True,
             )
         elif taxpayer_type == "COMPOSITION":
             gstr4_due = build_due_date_safe(base_date, 9, 30)
@@ -204,9 +227,9 @@ async def rebuild_return_details_for_filing(
                     filing_frequency,
                     gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                     gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
-                    is_auto_generated, next_auto_generate_at
+                    is_auto_generated, next_auto_generate_at, is_current
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
                 filing_id,
                 "YEARLY",
                 None,
@@ -222,7 +245,8 @@ async def rebuild_return_details_for_filing(
                 None,
                 gstr4_due,
                 False,
-                next_auto,
+                _next_auto_or_none(next_auto),
+                True,
             )
         else:
             raise HTTPException(400, _ERR_TAXPAYER_RECALC)
@@ -252,9 +276,9 @@ async def rebuild_return_details_for_filing(
                 filing_frequency,
                 gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                 gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
-                is_auto_generated, next_auto_generate_at
+                is_auto_generated, next_auto_generate_at, is_current
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
             filing_id,
             filing_frequency,
             gstr1_status,
@@ -270,7 +294,8 @@ async def rebuild_return_details_for_filing(
             None,
             None,
             False,
-            next_auto_periodic,
+            _next_auto_or_none(next_auto_periodic),
+            True,
         )
 
         if not explicit_filing_period:
@@ -290,9 +315,9 @@ async def rebuild_return_details_for_filing(
                     filing_frequency,
                     gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                     gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
-                    is_auto_generated, next_auto_generate_at
+                    is_auto_generated, next_auto_generate_at, is_current
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
                 filing_id,
                 "YEARLY",
                 None,
@@ -308,7 +333,8 @@ async def rebuild_return_details_for_filing(
                 None,
                 None,
                 False,
-                next_auto_annual,
+                _next_auto_or_none(next_auto_annual),
+                True,
             )
         return
 
@@ -326,9 +352,9 @@ async def rebuild_return_details_for_filing(
                     filing_frequency,
                     gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                     gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
-                    is_auto_generated, next_auto_generate_at
+                    is_auto_generated, next_auto_generate_at, is_current
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
                 filing_id,
                 "QUARTERLY",
                 None,
@@ -344,7 +370,8 @@ async def rebuild_return_details_for_filing(
                 cmp08_due,
                 None,
                 False,
-                next_auto_cmp,
+                _next_auto_or_none(next_auto_cmp),
+                True,
             )
         if (not explicit_filing_period) or filing_frequency == "YEARLY":
             gstr4_due = build_due_date_safe(base_date, 9, 30)
@@ -359,9 +386,9 @@ async def rebuild_return_details_for_filing(
                     filing_frequency,
                     gstr1_status, gstr3b_status, gstr9_status, gstr9c_status, cmp08_status, gstr4_status,
                     gstr1_due_date, gstr3b_due_date, gstr9_due_date, gstr9c_due_date, cmp08_due_date, gstr4_due_date,
-                    is_auto_generated, next_auto_generate_at
+                    is_auto_generated, next_auto_generate_at, is_current
                 )
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
                 filing_id,
                 "YEARLY",
                 None,
@@ -377,7 +404,8 @@ async def rebuild_return_details_for_filing(
                 None,
                 gstr4_due,
                 False,
-                next_auto_g4,
+                _next_auto_or_none(next_auto_g4),
+                True,
             )
         return
 

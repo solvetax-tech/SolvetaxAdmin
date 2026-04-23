@@ -116,7 +116,7 @@ async def missed_bucket_counts_for_filing(
                 0
             )::int AS annual_missed
         FROM {DB_SCHEMA}.gst_filing_return_details d
-        WHERE d.gst_filing_id = $1 AND d.is_active = TRUE
+        WHERE d.gst_filing_id = $1 AND d.is_active = TRUE AND d.is_current = TRUE
         """,
         filing_id,
         ttype,
@@ -157,6 +157,7 @@ async def disable_gst_filings_auto_over_missed_threshold(conn, limit: int) -> li
             WHERE f.is_active = TRUE
               AND f.is_auto_enabled = TRUE
               AND d.is_active = TRUE
+              AND d.is_current = TRUE
               AND (
                   d.gstr1_status = 'MISSED'
                   OR d.gstr3b_status = 'MISSED'
@@ -172,6 +173,7 @@ async def disable_gst_filings_auto_over_missed_threshold(conn, limit: int) -> li
                 COALESCE(
                     COUNT(*) FILTER (
                         WHERE d.is_active = TRUE
+                          AND d.is_current = TRUE
                           AND CASE
                               WHEN f.taxpayer_type = 'REGULAR'
                                    AND f.filing_category = 'RETURN'
@@ -188,6 +190,7 @@ async def disable_gst_filings_auto_over_missed_threshold(conn, limit: int) -> li
                 COALESCE(
                     COUNT(*) FILTER (
                         WHERE d.is_active = TRUE
+                          AND d.is_current = TRUE
                           AND CASE
                               WHEN f.taxpayer_type = 'REGULAR'
                                    AND f.filing_category = 'RETURN'
