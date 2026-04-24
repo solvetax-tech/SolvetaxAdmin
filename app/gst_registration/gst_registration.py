@@ -326,6 +326,9 @@ async def create_gst_registration(
                         ownership_category,
                         business_type,
                         state,
+                        language,
+                        referral_id,
+                        referral_entity,
                         turnover_details,
                         registration_status,
                         suspension_reason,
@@ -345,7 +348,7 @@ async def create_gst_registration(
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
                         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                        $21,$22,$23,$24,$25
+                        $21,$22,$23,$24,$25,$26,$27,$28
                     )
                     RETURNING *
                 """
@@ -362,6 +365,9 @@ async def create_gst_registration(
                     payload.ownership_category,
                     payload.business_type,
                     payload.state,
+                    payload.language,
+                    payload.referral_id,
+                    payload.referral_entity,
                     payload.turnover_details,
                     payload.registration_status,
                     payload.suspension_reason,
@@ -551,6 +557,9 @@ async def list_gst_registrations(
     registration_status: Optional[str] = None,
     ownership_category: Optional[str] = None,
     state: Optional[str] = None,
+    language: Optional[str] = None,
+    referral_id: Optional[int] = None,
+    referral_entity: Optional[str] = None,
     filing_preference: Optional[str] = None,  # ✅ ADDED
     has_service: Optional[bool] = None,       # ✅ ADDED
     is_active: Optional[bool] = None,
@@ -623,6 +632,10 @@ async def list_gst_registrations(
     registration_status_norm = registration_status.strip().upper() if registration_status and registration_status.strip() else None
     ownership_category_norm = ownership_category.strip().upper() if ownership_category and ownership_category.strip() else None
     state_norm = state.strip().upper() if state and state.strip() else None
+    language_norm = language.strip().upper() if language and language.strip() else None
+    referral_entity_norm = (
+        referral_entity.strip().upper() if referral_entity and referral_entity.strip() else None
+    )
     filing_preference_norm = filing_preference.strip().upper() if filing_preference and filing_preference.strip() else None
     cache_key = build_cache_key(
         "gst_registration:filter",
@@ -644,6 +657,9 @@ async def list_gst_registrations(
         registration_status=registration_status_norm,
         ownership_category=ownership_category_norm,
         state=state_norm,
+        language=language_norm,
+        referral_id=referral_id,
+        referral_entity=referral_entity_norm,
         filing_preference=filing_preference_norm,
         has_service=has_service,
         is_active=is_active,
@@ -756,6 +772,21 @@ async def list_gst_registrations(
         if state_norm:
             conditions.append(f"g.state = ${param_index}")
             values.append(state_norm)
+            param_index += 1
+
+        if language_norm:
+            conditions.append(f"g.language = ${param_index}")
+            values.append(language_norm)
+            param_index += 1
+
+        if referral_id is not None:
+            conditions.append(f"g.referral_id = ${param_index}")
+            values.append(referral_id)
+            param_index += 1
+
+        if referral_entity_norm:
+            conditions.append(f"g.referral_entity = ${param_index}")
+            values.append(referral_entity_norm)
             param_index += 1
 
         if filing_preference_norm:
@@ -1077,7 +1108,7 @@ async def get_customer_fields_for_gst(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
-    Returns `business_name`, `business_type`, `state`, `op_id`, `rm_id`, `mobile`
+    Returns `business_name`, `business_type`, `state`, `language`, `op_id`, `rm_id`, `mobile`
     from `customers` where `customers.customer_id` = `customer_id`.
     Visibility matches customer list (RM/OP/manager scoping).
     """
@@ -1110,6 +1141,7 @@ async def get_customer_fields_for_gst(
                c.business_name,
                c.business_type,
                c.state,
+               c.language,
                c.op_id,
                c.rm_id,
                c.mobile,
@@ -1148,6 +1180,7 @@ async def get_customer_fields_for_gst(
             "business_name": row["business_name"],
             "business_type": row["business_type"],
             "state": row["state"],
+            "language": row["language"],
             "op_id": row["op_id"],
             "rm_id": row["rm_id"],
             "mobile": row["mobile"],
@@ -1428,6 +1461,7 @@ async def edit_gst_registration(
                     "turnover_details": "turnover_details",
                     "filing_preference": "filing_frequency",
                     "state": "state",
+                    "language": "language",
                     "registration_status": "gst_reg_status",
                     "username": "username",
                     "password": "password",

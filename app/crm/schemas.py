@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -30,6 +30,33 @@ class CRMLeadEditIn(CRMBaseSchema):
     rm_id: Optional[int] = Field(default=None, gt=0)
     op_id: Optional[int] = Field(default=None, gt=0)
     remarks: Optional[str] = Field(default=None, max_length=2000)
+    lead_type: Optional[str] = Field(default=None, max_length=50)
+    tag: Optional[str] = Field(default=None, max_length=100)
+    lead_source: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("lead_type", mode="before")
+    @classmethod
+    def normalize_lead_type(cls, v):
+        if isinstance(v, str):
+            s = v.strip()
+            return s.upper() if s else None
+        return v
+
+    @field_validator("tag", mode="before")
+    @classmethod
+    def normalize_tag(cls, v):
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else None
+        return v
+
+    @field_validator("lead_source", mode="before")
+    @classmethod
+    def normalize_lead_source(cls, v):
+        if isinstance(v, str):
+            s = v.strip()
+            return s.upper() if s else None
+        return v
 
     @model_validator(mode="after")
     def validate_has_any_field(self):
@@ -39,6 +66,9 @@ class CRMLeadEditIn(CRMBaseSchema):
             and self.rm_id is None
             and self.op_id is None
             and self.remarks is None
+            and self.lead_type is None
+            and self.tag is None
+            and self.lead_source is None
         ):
             raise ValueError("At least one field must be provided.")
         return self
@@ -99,3 +129,81 @@ class CRMLeadStageItem(CRMBaseSchema):
 class CRMLeadStagesOut(CRMBaseSchema):
     entity_type: str
     stages: list[CRMLeadStageItem]
+
+
+class CRMBulkImportRowIn(CRMBaseSchema):
+    mobile: str = Field(..., min_length=10, max_length=20)
+    stage: Optional[str] = Field(default=None, max_length=40)
+    followup_at: Optional[datetime] = None
+    rm_id: Optional[int] = Field(default=None, gt=0)
+    op_id: Optional[int] = Field(default=None, gt=0)
+    remarks: Optional[str] = Field(default=None, max_length=2000)
+    is_active: Optional[bool] = True
+    follow_up_status: Optional[Literal["PENDING", "COMPLETED", "MISSED"]] = "PENDING"
+    entity_type: Optional[str] = Field(default=None, max_length=64)
+    entity_id: Optional[int] = Field(default=None, gt=0)
+    lead_type: Optional[str] = Field(default=None, max_length=50)
+    tag: Optional[str] = Field(default=None, max_length=100)
+    lead_source: Optional[str] = Field(default=None, max_length=100)
+
+    @field_validator("mobile", mode="before")
+    @classmethod
+    def normalize_mobile(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @field_validator("stage", "entity_type", "lead_type", "lead_source", mode="before")
+    @classmethod
+    def normalize_upper_codes(cls, v):
+        if isinstance(v, str):
+            s = v.strip()
+            return s.upper() if s else None
+        return v
+
+    @field_validator("tag", mode="before")
+    @classmethod
+    def normalize_tag(cls, v):
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else None
+        return v
+
+    @model_validator(mode="after")
+    def validate_entity_pair(self):
+        # Keep both optional and independent at schema level.
+        return self
+
+
+class CRMBulkImportIn(CRMBaseSchema):
+    rows: List[CRMBulkImportRowIn] = Field(..., min_length=1, max_length=5000)
+    update_if_exists: bool = True
+    validate_only: bool = False
+
+
+class CRMBulkAssignFiltersIn(CRMBaseSchema):
+    stage: Optional[str] = None
+    stages: Optional[List[str]] = None
+    follow_up_status: Optional[Literal["PENDING", "COMPLETED", "MISSED"]] = None
+    mobile: Optional[str] = None
+    rm_id: Optional[int] = Field(default=None, gt=0)
+    op_id: Optional[int] = Field(default=None, gt=0)
+    lead_type: Optional[str] = None
+    tag: Optional[str] = None
+    lead_source: Optional[str] = None
+    is_active: Optional[bool] = None
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_stage_filters(self):
+        if self.stage and self.stages:
+            raise ValueError("Provide either stage or stages, not both")
+        return self
+
+
+class CRMBulkAssignIn(CRMBaseSchema):
+    filters: CRMBulkAssignFiltersIn
+    selected_employee_ids: List[int] = Field(..., min_length=1, max_length=500)
+    assignment_role: Literal["RM", "OP"]
+    limit: int = Field(default=2000, ge=1, le=10000)

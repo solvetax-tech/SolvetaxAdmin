@@ -26,6 +26,7 @@ class CustomerIn(BaseSchema):
     business_type: Optional[str] = Field(None, max_length=50)
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
+    language: Optional[str] = Field(None, max_length=50)
     remark: Optional[str] = None
     rm_id: Optional[int] = Field(
         None,
@@ -72,6 +73,7 @@ class CustomerIn(BaseSchema):
         "business_type",
         "state",
         "city",
+        "language",
         "remark",
         mode="before",
     )
@@ -128,6 +130,7 @@ class CustomerOut(BaseSchema):
     business_type: Optional[str]
     state: Optional[str]
     city: Optional[str]
+    language: Optional[str]
     remark: Optional[str]
     rm_id: Optional[int]
     rm_name: Optional[str] = None
@@ -161,6 +164,7 @@ class CustomerEditIn(BaseSchema):
     business_type: Optional[str] = Field(None, max_length=50)
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
+    language: Optional[str] = Field(None, max_length=50)
     remark: Optional[str] = None
     rm_id: Optional[int] = Field(
         None,
@@ -211,6 +215,7 @@ class CustomerEditIn(BaseSchema):
         "business_type",
         "state",
         "city",
+        "language",
         "remark",
         mode="before",
     )

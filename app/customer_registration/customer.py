@@ -477,6 +477,7 @@ async def create_customer(
                         business_type,
                         state,
                         city,
+                        language,
                         remark,
                         rm_id,
                         op_id,
@@ -485,7 +486,7 @@ async def create_customer(
                         service_provided
                     )
                     VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
                     )
                     RETURNING *
                 """
@@ -503,6 +504,7 @@ async def create_customer(
                     payload.business_type,
                     payload.state,
                     payload.city,
+                    payload.language,
                     payload.remark,
                     rm_id,
                     op_id,
@@ -968,8 +970,10 @@ STANDARD_FILTERS = {
     "business_type": ("business_type =", lambda v: v),
     "state": ("state =", lambda v: v),
     "city": ("city =", lambda v: v),
+    "language": ("language =", lambda v: v),
     "rm_id": ("rm_id =", lambda v: v),
     "op_id": ("op_id =", lambda v: v),
+    "referral_id": ("referral_id =", lambda v: v),
 }
 
 ARRAY_FILTERS = {
@@ -1003,8 +1007,10 @@ async def filter_customers(
     business_type: Optional[str] = None,
     state: Optional[str] = None,
     city: Optional[str] = None,
+    language: Optional[str] = None,
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
+    referral_id: Optional[int] = None,
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
 
@@ -1068,8 +1074,10 @@ async def filter_customers(
         business_type=business_type,
         state=state,
         city=city,
+        language=language,
         rm_id=rm_id,
         op_id=op_id,
+        referral_id=referral_id,
         is_active=is_active,
         include_inactive=include_inactive,
         service_required=service_required,
@@ -1112,8 +1120,10 @@ async def filter_customers(
                     "business_type": business_type,
                     "state": state,
                     "city": city,
+                    "language": language,
                     "rm_id": rm_id,
                     "op_id": op_id,
+                    "referral_id": referral_id,
                 }.get(key)
 
                 if value is not None:

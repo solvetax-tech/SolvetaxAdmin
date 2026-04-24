@@ -229,6 +229,9 @@ def _collect_gst_filings_only_conditions(
     taxpayer_type: Optional[str] = None,
     turnover_details: Optional[str] = None,
     state: Optional[str] = None,
+    language: Optional[str] = None,
+    referral_id: Optional[int] = None,
+    referral_entity: Optional[str] = None,
     status: Optional[str] = None,
     statuses: Optional[List[str]] = None,
     rm_id: Optional[int] = None,
@@ -258,6 +261,10 @@ def _collect_gst_filings_only_conditions(
     filing_period_norm = filing_period.strip().upper() if isinstance(filing_period, str) and filing_period.strip() else None
     status_norm = status.strip().upper() if isinstance(status, str) and status.strip() else None
     state_norm = state.strip().upper() if isinstance(state, str) and state.strip() else None
+    language_norm = language.strip().upper() if isinstance(language, str) and language.strip() else None
+    referral_entity_norm = (
+        referral_entity.strip().upper() if isinstance(referral_entity, str) and referral_entity.strip() else None
+    )
     filing_category_norm = (
         filing_category.strip().upper()
         if isinstance(filing_category, str) and filing_category.strip()
@@ -344,6 +351,21 @@ def _collect_gst_filings_only_conditions(
     if state_norm:
         conditions.append(f"upper(trim(f.state)) = ${idx}")
         values.append(state_norm)
+        idx += 1
+
+    if language_norm:
+        conditions.append(f"upper(trim(f.language)) = ${idx}")
+        values.append(language_norm)
+        idx += 1
+
+    if referral_id is not None:
+        conditions.append(f"f.referral_id = ${idx}")
+        values.append(referral_id)
+        idx += 1
+
+    if referral_entity_norm:
+        conditions.append(f"upper(trim(f.referral_entity)) = ${idx}")
+        values.append(referral_entity_norm)
         idx += 1
 
     if status_norm:
@@ -531,6 +553,9 @@ async def list_gst_filings_table(
     taxpayer_type: Optional[str] = None,
     turnover_details: Optional[str] = None,
     state: Optional[str] = None,
+    language: Optional[str] = None,
+    referral_id: Optional[int] = None,
+    referral_entity: Optional[str] = None,
     status: Optional[str] = None,
     statuses: Optional[List[str]] = Query(None),
     rm_id: Optional[int] = None,
@@ -596,6 +621,9 @@ async def list_gst_filings_table(
         taxpayer_type=taxpayer_type,
         turnover_details=turnover_details,
         state=state,
+        language=language,
+        referral_id=referral_id,
+        referral_entity=referral_entity,
         status=status,
         statuses=statuses,
         rm_id=rm_id,
@@ -635,7 +663,8 @@ async def list_gst_filings_table(
         SELECT f.*,
                COALESCE(f.business_name, r.business_name) AS business_name,
                COALESCE(f.business_type, r.business_type) AS business_type,
-               COALESCE(f.state, r.state) AS state
+               COALESCE(f.state, r.state) AS state,
+               COALESCE(f.language, r.language) AS language
         FROM {DB_SCHEMA}.gst_filings f
         LEFT JOIN {DB_SCHEMA}.gst_registration r
             ON r.id = f.gst_registration_id
@@ -664,6 +693,9 @@ async def list_gst_filings_table(
         taxpayer_type=(taxpayer_type or "").strip().upper() or None,
         turnover_details=(turnover_details or "").strip().upper() or None,
         state=(state or "").strip().upper() or None,
+        language=(language or "").strip().upper() or None,
+        referral_id=referral_id,
+        referral_entity=(referral_entity or "").strip().upper() or None,
         status=(status or "").strip().upper() or None,
         statuses=[s.upper() for s in statuses] if statuses else None,
         rm_id=rm_id,
@@ -1028,6 +1060,7 @@ async def get_gst_registration_prefill_for_filing(
             "filing_frequency": filing_frequency,
             "turnover_details": _upper_or_none(r.get("turnover_details")),
             "state": _upper_or_none(r.get("state")),
+            "language": _upper_or_none(r.get("language")),
             "gst_reg_status": _upper_or_none(r.get("registration_status")),
             "business_name": final_business_name or None,
             "business_type": final_business_type,
@@ -1101,6 +1134,8 @@ async def create_gst_filing(
     filing_frequency = payload.filing_frequency.upper()
     filing_category = payload.filing_category.upper()
     state = payload.state.strip().upper() if payload.state else None
+    language = payload.language.strip().upper() if payload.language else None
+    referral_entity = payload.referral_entity.strip().upper() if payload.referral_entity else None
     gst_reg_status = payload.gst_reg_status.strip().upper() if payload.gst_reg_status else None
     is_auto_enabled = True if payload.is_auto_enabled is None else bool(payload.is_auto_enabled)
 
@@ -1204,7 +1239,7 @@ async def create_gst_filing(
                         rm_id, op_id,
                         is_auto_enabled,
                         taxpayer_type, filing_frequency,
-                        turnover_details, state, gst_reg_status,
+                        turnover_details, state, language, referral_id, referral_entity, gst_reg_status,
                         username, password, email_id, rent, rule14a,
                         business_name, business_type, business_description,
                         created_at, updated_at
@@ -1212,8 +1247,8 @@ async def create_gst_filing(
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
                         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                        $21,$22,$23,$24,$25,
-                        $26,$27
+                        $21,$22,$23,$24,$25,$26,$27,$28,
+                        $29,$30
                     )
                     RETURNING *""",
                     payload.customer_id,
@@ -1232,6 +1267,9 @@ async def create_gst_filing(
                     filing_frequency,
                     payload.turnover_details,
                     state,
+                    language,
+                    payload.referral_id,
+                    referral_entity,
                     gst_reg_status,
                     username,
                     password,
@@ -1345,6 +1383,9 @@ async def create_gst_filing_yearly(
         filing_frequency="YEARLY",
         turnover_details=payload.turnover_details,
         state=payload.state,
+        language=payload.language,
+        referral_id=payload.referral_id,
+        referral_entity=payload.referral_entity,
         filing_period=payload.filing_period,
         rm_id=payload.rm_id,
         op_id=payload.op_id,
@@ -1431,6 +1472,8 @@ async def update_gst_filing(
                     "taxpayer_type",
                     "turnover_details",
                     "state",
+                    "language",
+                    "referral_entity",
                 ]:
                     if key in update_data and update_data[key]:
                         update_data[key] = update_data[key].upper()
@@ -1551,6 +1594,7 @@ async def update_gst_filing(
                         "turnover_details": "turnover_details",
                         "filing_frequency": "filing_preference",
                         "state": "state",
+                        "language": "language",
                         "gst_reg_status": "registration_status",
                         "username": "username",
                         "password": "password",

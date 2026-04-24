@@ -52,6 +52,9 @@ class GSTFilingIn(BaseSchema):
     ] = None
 
     state: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
+    language: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
+    referral_id: Optional[int] = Field(None, gt=0)
+    referral_entity: Optional[Annotated[str, Field(min_length=2, max_length=100)]] = None
     gst_reg_status: Optional[
         Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
     ] = None
@@ -109,6 +112,8 @@ class GSTFilingIn(BaseSchema):
         "turnover_details",
         "filing_period",
         "state",
+        "language",
+        "referral_entity",
         "gst_reg_status",
         "business_type",
         mode="before"
@@ -228,6 +233,7 @@ class GSTRegistrationFilingPrefillOut(BaseSchema):
     )
     turnover_details: Optional[str] = None
     state: Optional[str] = None
+    language: Optional[str] = None
     gst_reg_status: Optional[str] = None
     business_name: Optional[str] = None
     business_type: Optional[str] = None
@@ -255,6 +261,9 @@ class GSTFilingYearlyIn(BaseSchema):
     ]
 
     state: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
+    language: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
+    referral_id: Optional[int] = Field(None, gt=0)
+    referral_entity: Optional[Annotated[str, Field(min_length=2, max_length=100)]] = None
     filing_period: Optional[str] = None
 
     rm_id: Optional[int] = Field(
@@ -286,6 +295,7 @@ class GSTFilingYearlyIn(BaseSchema):
         "turnover_details",
         "filing_period",
         "state",
+        "referral_entity",
         mode="before",
     )
     @classmethod
@@ -341,6 +351,9 @@ class GSTFilingEditIn(BaseSchema):
     ] = None
 
     state: Optional[str] = Field(None, max_length=50)
+    language: Optional[str] = Field(None, max_length=50)
+    referral_id: Optional[int] = Field(None, gt=0)
+    referral_entity: Optional[str] = Field(None, max_length=100)
     gst_reg_status: Optional[
         Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
     ] = None
@@ -403,6 +416,8 @@ class GSTFilingEditIn(BaseSchema):
         "taxpayer_type",
         "turnover_details",
         "state",
+        "language",
+        "referral_entity",
         "gst_reg_status",
         "business_type",
         mode="before"

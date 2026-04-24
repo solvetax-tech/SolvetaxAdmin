@@ -37,6 +37,7 @@ class CustomerSnapshotForGstOut(BaseModel):
     business_name: Optional[str] = None
     business_type: Optional[str] = None
     state: Optional[str] = None
+    language: Optional[str] = None
     op_id: Optional[int] = None
     rm_id: Optional[int] = None
     mobile: Optional[str] = None
@@ -69,6 +70,9 @@ class GSTRegistrationIn(BaseModel):
     ownership_category: Annotated[str, Field(..., max_length=100)]
     business_type: Optional[str] = Field(None, max_length=100)
     state: Annotated[str, Field(..., max_length=100)]
+    language: Optional[str] = Field(None, max_length=50)
+    referral_id: Optional[int] = Field(None, gt=0)
+    referral_entity: Optional[str] = Field(None, max_length=100)
     turnover_details: Annotated[str, Field(..., max_length=50)]
 
     # ----------------------------
@@ -154,6 +158,8 @@ class GSTRegistrationIn(BaseModel):
         "ownership_category",
         "business_type",
         "state",
+        "language",
+        "referral_entity",
         "turnover_details",
         mode="before",
     )
@@ -229,6 +235,9 @@ class GSTRegistrationEditIn(BaseModel):
     ownership_category: Optional[str] = Field(None, max_length=100)
     business_type: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=100)
+    language: Optional[str] = Field(None, max_length=50)
+    referral_id: Optional[int] = Field(None, gt=0)
+    referral_entity: Optional[str] = Field(None, max_length=100)
     turnover_details: Optional[str] = Field(None, max_length=50)
 
     registration_status: Optional[
@@ -300,6 +309,8 @@ class GSTRegistrationEditIn(BaseModel):
         "ownership_category",
         "business_type",
         "state",
+        "language",
+        "referral_entity",
         "turnover_details",
         mode="before",
     )
@@ -378,6 +389,9 @@ class GSTRegistrationOut(BaseSchema):
     ownership_category: Optional[str]
     business_type: Optional[str]
     state: Optional[str]
+    language: Optional[str]
+    referral_id: Optional[int]
+    referral_entity: Optional[str]
     turnover_details: Optional[str]
     registration_status: Optional[str]
     suspension_reason: Optional[str]

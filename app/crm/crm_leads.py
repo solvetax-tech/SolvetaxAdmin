@@ -4,11 +4,15 @@ import logging
 from datetime import datetime
 from typing import Optional, List
 from zoneinfo import ZoneInfo
+import io
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import pandas as pd
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 
 from app.crm.schemas import (
+    CRMBulkAssignIn,
+    CRMBulkImportIn,
     CRMCallUpdateIn,
     CRMFollowupStatusUpdateIn,
     CRMLeadEditIn,
@@ -18,6 +22,7 @@ from app.crm.schemas import (
     CRMUIPitchStatusItem,
     CRMUIStagePitchItem,
 )
+from pydantic import ValidationError
 from app.logger import logger
 from app.redis_cache import (
     build_cache_key,
@@ -284,6 +289,37 @@ async def _fetch_valid_stage_codes(
         if rows:
             return {r["code"] for r in rows}
     return set(ALL_STAGES)
+
+
+def _normalize_optional_upper(value: Optional[str]) -> Optional[str]:
+    if isinstance(value, str):
+        s = value.strip()
+        return s.upper() if s else None
+    return None
+
+
+def _parse_optional_bool(v):
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if s in {"", "none", "null", "na", "nan"}:
+        return None
+    if s in {"true", "1", "yes", "y"}:
+        return True
+    if s in {"false", "0", "no", "n"}:
+        return False
+    raise ValueError(f"Invalid boolean value: {v}")
+
+
+def _parse_optional_int(v):
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s == "" or s.lower() in {"none", "null", "na", "nan"}:
+        return None
+    return int(s)
 
 
 def _transition_stage(current_stage: str, call_type_code: str, call_status_code: str) -> Optional[str]:
@@ -888,6 +924,9 @@ async def filter_crm_leads(
     mobile: Optional[str] = None,
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
+    lead_type: Optional[str] = None,
+    tag: Optional[str] = None,
+    lead_source: Optional[str] = None,
     is_active: Optional[bool] = None,
     entity_type: Optional[str] = Query(None, description="Filter by crm_leads.entity_type (e.g. GST_REGISTRATION)."),
     entity_id: Optional[int] = Query(None, ge=1, description="Filter by crm_leads.entity_id."),
@@ -928,6 +967,9 @@ async def filter_crm_leads(
         if not m.isdigit() or len(m) != 10:
             raise _validation_error("Invalid mobile filter.", {"mobile": "Must be a 10-digit number."})
         mobile = m
+    lead_type_norm = _normalize_code(lead_type) if isinstance(lead_type, str) and lead_type.strip() else None
+    tag_norm = tag.strip() if isinstance(tag, str) and tag.strip() else None
+    lead_source_norm = _normalize_code(lead_source) if isinstance(lead_source, str) and lead_source.strip() else None
     et_filter = _entity_type_query(entity_type) if (entity_type is not None or entity_id is not None) else None
     cache_key = build_cache_key(
         "crm:leads:filter",
@@ -937,6 +979,9 @@ async def filter_crm_leads(
         mobile=mobile,
         rm_id=rm_id,
         op_id=op_id,
+        lead_type=lead_type_norm,
+        tag=tag_norm,
+        lead_source=lead_source_norm,
         is_active=is_active,
         entity_type=et_filter or _entity_type_query(entity_type) if entity_type is not None else None,
         entity_id=entity_id,
@@ -985,6 +1030,15 @@ async def filter_crm_leads(
                 if op_id is not None:
                     params.append(op_id)
                     where.append(f"l.op_id = ${len(params)}")
+                if lead_type_norm:
+                    params.append(lead_type_norm)
+                    where.append(f"upper(trim(l.lead_type)) = ${len(params)}")
+                if tag_norm:
+                    params.append(f"%{tag_norm}%")
+                    where.append(f"l.tag ILIKE ${len(params)}")
+                if lead_source_norm:
+                    params.append(lead_source_norm)
+                    where.append(f"upper(trim(l.lead_source)) = ${len(params)}")
                 if is_active is not None:
                     params.append(is_active)
                     where.append(f"l.is_active = ${len(params)}")
@@ -1025,6 +1079,411 @@ async def filter_crm_leads(
         ttl_seconds=300,
         tags=[_crm_leads_filter_tag()],
     )
+
+
+async def _bulk_import_crm_leads(
+    payload: CRMBulkImportIn,
+    current_user,
+):
+    role, emp_id = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can bulk import leads.")
+
+    pool = await get_db_pool()
+    request_id = generate_uuid()
+    inserted_count = 0
+    updated_count = 0
+    skipped_count = 0
+    failed_count = 0
+    errors = []
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                active_emp_ids = await conn.fetch(
+                    f"SELECT emp_id FROM {DB_SCHEMA}.employees WHERE is_active = TRUE"
+                )
+                active_emp_id_set = {int(r["emp_id"]) for r in active_emp_ids}
+
+                valid_stages_by_entity: dict[str, set[str]] = {}
+
+                for i, row in enumerate(payload.rows, start=1):
+                    try:
+                        mobile = (row.mobile or "").strip()
+                        if not mobile.isdigit() or len(mobile) != 10:
+                            raise _validation_error("Invalid mobile.", {"mobile": "Must be a 10-digit number."})
+
+                        entity_type = _entity_type_query(row.entity_type) if row.entity_type else None
+                        stage = _normalize_optional_upper(row.stage) or "FRESH_LEAD"
+                        lead_type = _normalize_optional_upper(row.lead_type)
+                        tag = row.tag.strip() if isinstance(row.tag, str) and row.tag.strip() else None
+                        lead_source = _normalize_optional_upper(row.lead_source)
+
+                        if row.followup_at is not None and row.followup_at <= datetime.now(IST):
+                            raise _validation_error(
+                                "Invalid followup datetime.",
+                                {"followup_at": "Must be a future datetime."},
+                            )
+
+                        if row.rm_id is not None and row.rm_id not in active_emp_id_set:
+                            raise _validation_error("Invalid rm_id.", {"rm_id": "Employee not found/active."})
+                        if row.op_id is not None and row.op_id not in active_emp_id_set:
+                            raise _validation_error("Invalid op_id.", {"op_id": "Employee not found/active."})
+
+                        stage_scope = entity_type or DEFAULT_CRM_ENTITY_TYPE
+                        if stage_scope not in valid_stages_by_entity:
+                            valid_stages_by_entity[stage_scope] = await _fetch_valid_stage_codes(conn, stage_scope)
+                        if stage not in valid_stages_by_entity[stage_scope]:
+                            raise _validation_error(
+                                "Invalid stage value.",
+                                {"stage": f"{stage} is not supported for {stage_scope}."},
+                            )
+
+                        existing = await conn.fetchrow(
+                            f"""
+                            SELECT *
+                            FROM {DB_SCHEMA}.crm_leads
+                            WHERE trim(mobile) = trim($1)
+                              AND entity_id IS NOT DISTINCT FROM $2
+                              AND entity_type IS NOT DISTINCT FROM $3
+                            ORDER BY id DESC
+                            LIMIT 1
+                            FOR UPDATE
+                            """,
+                            mobile,
+                            row.entity_id,
+                            entity_type,
+                        )
+
+                        if existing:
+                            if payload.update_if_exists:
+                                if not payload.validate_only:
+                                    await conn.execute(
+                                        f"""
+                                        UPDATE {DB_SCHEMA}.crm_leads
+                                        SET stage = $1,
+                                            followup_at = $2,
+                                            rm_id = $3,
+                                            op_id = $4,
+                                            remarks = $5,
+                                            is_active = COALESCE($6, is_active),
+                                            follow_up_status = COALESCE($7, follow_up_status),
+                                            lead_type = $8,
+                                            tag = $9,
+                                            lead_source = $10,
+                                            updated_at = NOW()
+                                        WHERE id = $11
+                                        """,
+                                        stage,
+                                        row.followup_at,
+                                        row.rm_id,
+                                        row.op_id,
+                                        row.remarks,
+                                        row.is_active,
+                                        row.follow_up_status,
+                                        lead_type,
+                                        tag,
+                                        lead_source,
+                                        existing["id"],
+                                    )
+                                updated_count += 1
+                            else:
+                                skipped_count += 1
+                        else:
+                            if not payload.validate_only:
+                                await conn.fetchval(
+                                    f"""
+                                    INSERT INTO {DB_SCHEMA}.crm_leads (
+                                        mobile, entity_id, stage, followup_at, rm_id, op_id, remarks,
+                                        is_active, follow_up_status, entity_type, lead_type, tag, lead_source, created_at, updated_at
+                                    ) VALUES (
+                                        $1, $2, $3, $4, $5, $6, $7, COALESCE($8, TRUE), COALESCE($9, 'PENDING'),
+                                        $10, $11, $12, $13, NOW(), NOW()
+                                    )
+                                    RETURNING id
+                                    """,
+                                    mobile,
+                                    row.entity_id,
+                                    stage,
+                                    row.followup_at,
+                                    row.rm_id,
+                                    row.op_id,
+                                    row.remarks,
+                                    row.is_active,
+                                    row.follow_up_status,
+                                    entity_type,
+                                    lead_type,
+                                    tag,
+                                    lead_source,
+                                )
+                            inserted_count += 1
+                    except HTTPException as ex:
+                        failed_count += 1
+                        errors.append({"row_number": i, "detail": ex.detail})
+                    except Exception as ex:
+                        failed_count += 1
+                        errors.append({"row_number": i, "detail": str(ex)})
+
+        await _invalidate_crm_cache()
+        return {
+            "message": "CRM bulk import processed.",
+            "request_id": request_id,
+            "validate_only": payload.validate_only,
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+            "failed_count": failed_count,
+            "errors": errors,
+        }
+    except asyncpg.PostgresError:
+        logger.exception("Database error during CRM bulk import")
+        raise HTTPException(status_code=500, detail="Database error.")
+
+
+@router.post("/bulk-import/file", summary="Bulk import CRM leads by CSV/XLSX upload")
+async def bulk_import_crm_leads_file(
+    file: UploadFile = File(...),
+    update_if_exists: bool = Form(True),
+    validate_only: bool = Form(False),
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    filename = (file.filename or "").lower()
+    if not filename:
+        raise _validation_error("Invalid file.", {"file": "Filename is required."})
+
+    raw = await file.read()
+    if not raw:
+        raise _validation_error("Invalid file.", {"file": "Uploaded file is empty."})
+
+    is_csv = filename.endswith(".csv")
+    is_xlsx = filename.endswith(".xlsx")
+    is_pdf = filename.endswith(".pdf")
+
+    if is_pdf:
+        raise _validation_error(
+            "PDF import is not supported yet.",
+            {"file": "Please convert PDF table to CSV/XLSX and re-upload."},
+        )
+    if not (is_csv or is_xlsx):
+        raise _validation_error(
+            "Unsupported file format.",
+            {"file": "Only .csv and .xlsx files are supported."},
+        )
+
+    try:
+        if is_csv:
+            df = pd.read_csv(io.BytesIO(raw))
+        else:
+            df = pd.read_excel(io.BytesIO(raw))
+    except Exception as ex:
+        raise _validation_error("Failed to parse file.", {"file": str(ex)})
+
+    if df.empty:
+        raise _validation_error("No rows found.", {"file": "Sheet has no data rows."})
+
+    # Normalize headers: lowercase + strip + spaces to underscore
+    normalized_cols = {
+        str(c).strip().lower().replace(" ", "_"): c
+        for c in df.columns
+    }
+    df = df.rename(columns={orig: norm for norm, orig in normalized_cols.items()})
+
+    required = {"mobile"}
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise _validation_error(
+            "Missing required sheet columns.",
+            {"columns": f"Missing: {', '.join(missing)}"},
+        )
+
+    allowed = {
+        "mobile",
+        "stage",
+        "followup_at",
+        "rm_id",
+        "op_id",
+        "remarks",
+        "is_active",
+        "follow_up_status",
+        "entity_type",
+        "entity_id",
+        "lead_type",
+        "tag",
+        "lead_source",
+    }
+
+    rows = []
+    for idx, rec in enumerate(df.to_dict(orient="records"), start=1):
+        try:
+            row = {}
+            for k, v in rec.items():
+                if k not in allowed:
+                    continue
+                if isinstance(v, float) and pd.isna(v):
+                    v = None
+                elif pd.isna(v):
+                    v = None
+                row[k] = v
+
+            row["mobile"] = None if row.get("mobile") is None else str(row["mobile"]).strip()
+            row["stage"] = None if row.get("stage") is None else str(row["stage"]).strip()
+            row["followup_at"] = None if row.get("followup_at") in (None, "") else row["followup_at"]
+            row["rm_id"] = _parse_optional_int(row.get("rm_id"))
+            row["op_id"] = _parse_optional_int(row.get("op_id"))
+            row["remarks"] = None if row.get("remarks") is None else str(row["remarks"]).strip()
+            row["is_active"] = _parse_optional_bool(row.get("is_active"))
+            row["follow_up_status"] = None if row.get("follow_up_status") is None else str(row["follow_up_status"]).strip()
+            row["entity_type"] = None if row.get("entity_type") is None else str(row["entity_type"]).strip()
+            row["entity_id"] = _parse_optional_int(row.get("entity_id"))
+            row["lead_type"] = None if row.get("lead_type") is None else str(row["lead_type"]).strip()
+            row["tag"] = None if row.get("tag") is None else str(row["tag"]).strip()
+            row["lead_source"] = None if row.get("lead_source") is None else str(row["lead_source"]).strip()
+            rows.append(row)
+        except Exception as ex:
+            raise _validation_error(
+                "Invalid sheet row format.",
+                {"row": f"Row {idx}: {str(ex)}"},
+            )
+
+    try:
+        payload = CRMBulkImportIn(
+            rows=rows,
+            update_if_exists=update_if_exists,
+            validate_only=validate_only,
+        )
+    except ValidationError as ex:
+        raise _validation_error(
+            "Invalid sheet data.",
+            {"rows": ex.errors()},
+        )
+    return await _bulk_import_crm_leads(payload, current_user)
+
+
+@router.post("/bulk-assign", summary="Bulk assign CRM leads to selected employees")
+async def bulk_assign_crm_leads(
+    payload: CRMBulkAssignIn,
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    role, emp_id = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can bulk assign leads.")
+
+    filters = payload.filters
+    stage = _normalize_optional_upper(filters.stage)
+    stages_norm = [_normalize_optional_upper(s) for s in (filters.stages or []) if _normalize_optional_upper(s)]
+    follow_up_status = _normalize_optional_upper(filters.follow_up_status)
+    mobile = filters.mobile.strip() if isinstance(filters.mobile, str) and filters.mobile.strip() else None
+    lead_type = _normalize_optional_upper(filters.lead_type)
+    tag = filters.tag.strip() if isinstance(filters.tag, str) and filters.tag.strip() else None
+    lead_source = _normalize_optional_upper(filters.lead_source)
+    entity_type = _entity_type_query(filters.entity_type) if (filters.entity_type is not None or filters.entity_id is not None) else None
+
+    if mobile and (not mobile.isdigit() or len(mobile) != 10):
+        raise _validation_error("Invalid mobile filter.", {"mobile": "Must be a 10-digit number."})
+
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                valid_rows = await conn.fetch(
+                    f"SELECT emp_id FROM {DB_SCHEMA}.employees WHERE is_active = TRUE AND emp_id = ANY($1::bigint[])",
+                    payload.selected_employee_ids,
+                )
+                valid_emp_ids = [int(r["emp_id"]) for r in valid_rows]
+                if len(valid_emp_ids) != len(set(payload.selected_employee_ids)):
+                    raise _validation_error(
+                        "Invalid selected_employee_ids.",
+                        {"selected_employee_ids": "One or more employees are invalid/inactive."},
+                    )
+
+                where = ["TRUE"]
+                params: list = []
+                if stage:
+                    params.append(stage)
+                    where.append(f"l.stage = ${len(params)}")
+                elif stages_norm:
+                    params.append(stages_norm)
+                    where.append(f"l.stage = ANY(${len(params)})")
+                if follow_up_status:
+                    params.append(follow_up_status)
+                    where.append(f"l.follow_up_status = ${len(params)}")
+                if mobile:
+                    params.append(mobile)
+                    where.append(f"l.mobile = ${len(params)}")
+                if filters.rm_id is not None:
+                    params.append(filters.rm_id)
+                    where.append(f"l.rm_id = ${len(params)}")
+                if filters.op_id is not None:
+                    params.append(filters.op_id)
+                    where.append(f"l.op_id = ${len(params)}")
+                if lead_type:
+                    params.append(lead_type)
+                    where.append(f"upper(trim(l.lead_type)) = ${len(params)}")
+                if tag:
+                    params.append(f"%{tag}%")
+                    where.append(f"l.tag ILIKE ${len(params)}")
+                if lead_source:
+                    params.append(lead_source)
+                    where.append(f"upper(trim(l.lead_source)) = ${len(params)}")
+                if filters.is_active is not None:
+                    params.append(filters.is_active)
+                    where.append(f"l.is_active = ${len(params)}")
+                if filters.entity_id is not None:
+                    params.append(filters.entity_id)
+                    where.append(f"l.entity_id = ${len(params)}")
+                    params.append(entity_type)
+                    where.append(f"l.entity_type = ${len(params)}")
+                elif filters.entity_type is not None:
+                    params.append(entity_type)
+                    where.append(f"l.entity_type = ${len(params)}")
+
+                vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
+                if vis_sql:
+                    where.append(vis_sql)
+                    params.extend(vis_vals)
+
+                params.append(payload.limit)
+                lead_rows = await conn.fetch(
+                    f"""
+                    SELECT l.id
+                    FROM {DB_SCHEMA}.crm_leads l
+                    WHERE {' AND '.join(where)}
+                    ORDER BY l.updated_at DESC, l.id DESC
+                    LIMIT ${len(params)}
+                    FOR UPDATE SKIP LOCKED
+                    """,
+                    *params,
+                )
+                lead_ids = [int(r["id"]) for r in lead_rows]
+
+                per_employee_counts = {eid: 0 for eid in valid_emp_ids}
+                for idx, lead_id in enumerate(lead_ids):
+                    assignee = valid_emp_ids[idx % len(valid_emp_ids)]
+                    if payload.assignment_role == "RM":
+                        await conn.execute(
+                            f"UPDATE {DB_SCHEMA}.crm_leads SET rm_id = $1, updated_at = NOW() WHERE id = $2",
+                            assignee,
+                            lead_id,
+                        )
+                    else:
+                        await conn.execute(
+                            f"UPDATE {DB_SCHEMA}.crm_leads SET op_id = $1, updated_at = NOW() WHERE id = $2",
+                            assignee,
+                            lead_id,
+                        )
+                    per_employee_counts[assignee] += 1
+
+        await _invalidate_crm_cache()
+        return {
+            "message": "CRM bulk assignment completed.",
+            "assignment_role": payload.assignment_role,
+            "total_assigned": len(lead_ids),
+            "per_employee_counts": per_employee_counts,
+            "lead_ids": lead_ids,
+        }
+    except asyncpg.PostgresError:
+        logger.exception("Database error during CRM bulk assignment")
+        raise HTTPException(status_code=500, detail="Database error.")
 
 
 @router.get("/activities/filter", summary="Filter CRM activities (visible leads only)")
