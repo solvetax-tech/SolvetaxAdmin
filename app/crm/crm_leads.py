@@ -11,7 +11,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 
 from app.crm.schemas import (
-    CRMBulkAssignIn,
+    CRMBulkAssignExecuteIn,
     CRMBulkImportIn,
     CRMCallUpdateIn,
     CRMFollowupStatusUpdateIn,
@@ -1359,130 +1359,221 @@ async def bulk_import_crm_leads_file(
     return await _bulk_import_crm_leads(payload, current_user)
 
 
-@router.post("/bulk-assign", summary="Bulk assign CRM leads to selected employees")
-async def bulk_assign_crm_leads(
-    payload: CRMBulkAssignIn,
+@router.get("/bulk-assign/candidates", summary="Get lead candidates for bulk assignment")
+async def get_bulk_assign_candidates(
+    stages: Optional[List[str]] = Query(None),
+    rm_ids: Optional[List[int]] = Query(None),
+    op_ids: Optional[List[int]] = Query(None),
+    lead_types: Optional[List[str]] = Query(None),
+    tags: Optional[List[str]] = Query(None),
+    lead_sources: Optional[List[str]] = Query(None),
+    entity_types: Optional[List[str]] = Query(None),
+    follow_up_statuses: Optional[List[str]] = Query(None),
+    is_active: Optional[bool] = None,
+    match_mode: str = Query("AND", description="AND or OR across provided filters."),
+    filter_mode: str = Query("IN", description="IN or NOT_IN for provided filter values."),
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+    mode = _normalize_code(match_mode)
+    if mode not in {"AND", "OR"}:
+        raise _validation_error("Invalid match_mode.", {"match_mode": "Use AND or OR."})
+    filter_mode_norm = _normalize_code(filter_mode)
+    if filter_mode_norm not in {"IN", "NOT_IN"}:
+        raise _validation_error("Invalid filter_mode.", {"filter_mode": "Use IN or NOT_IN."})
+
+    norm_str_list = lambda vals: list(dict.fromkeys([_normalize_code(v) for v in (vals or []) if isinstance(v, str) and v.strip()]))
+    stages_n = norm_str_list(stages)
+    lead_types_n = norm_str_list(lead_types)
+    tags_n = norm_str_list(tags)
+    lead_sources_n = norm_str_list(lead_sources)
+    entity_types_n = norm_str_list(entity_types)
+    follow_up_statuses_n = norm_str_list(follow_up_statuses)
+
+    for s in follow_up_statuses_n:
+        if s not in FOLLOWUP_STATUSES:
+            raise _validation_error("Invalid follow_up_statuses.", {"follow_up_statuses": f"{s} is not allowed."})
+
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            clauses = []
+            params: list = []
+            if stages_n:
+                params.append(stages_n)
+                clauses.append(
+                    f"l.stage = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (l.stage = ANY(${len(params)}))"
+                )
+            if rm_ids:
+                params.append(rm_ids)
+                clauses.append(
+                    f"l.rm_id = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (l.rm_id = ANY(${len(params)}))"
+                )
+            if op_ids:
+                params.append(op_ids)
+                clauses.append(
+                    f"l.op_id = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (l.op_id = ANY(${len(params)}))"
+                )
+            if lead_types_n:
+                params.append(lead_types_n)
+                clauses.append(
+                    f"upper(trim(l.lead_type)) = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (upper(trim(l.lead_type)) = ANY(${len(params)}))"
+                )
+            if tags_n:
+                params.append(tags_n)
+                clauses.append(
+                    f"upper(trim(l.tag)) = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (upper(trim(l.tag)) = ANY(${len(params)}))"
+                )
+            if lead_sources_n:
+                params.append(lead_sources_n)
+                clauses.append(
+                    f"upper(trim(l.lead_source)) = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (upper(trim(l.lead_source)) = ANY(${len(params)}))"
+                )
+            if entity_types_n:
+                params.append(entity_types_n)
+                clauses.append(
+                    f"upper(trim(l.entity_type)) = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (upper(trim(l.entity_type)) = ANY(${len(params)}))"
+                )
+            if follow_up_statuses_n:
+                params.append(follow_up_statuses_n)
+                clauses.append(
+                    f"l.follow_up_status = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (l.follow_up_status = ANY(${len(params)}))"
+                )
+            if is_active is not None:
+                params.append(is_active)
+                clauses.append(f"l.is_active = ${len(params)}")
+
+            where_parts = []
+            if clauses:
+                where_parts.append(f"({' OR '.join(clauses)})" if mode == "OR" else f"({' AND '.join(clauses)})")
+            vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
+            if vis_sql:
+                where_parts.append(vis_sql)
+                params.extend(vis_vals)
+            where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+            count_sql = f"SELECT COUNT(*) FROM {DB_SCHEMA}.crm_leads l {where_sql}"
+            params_with_page = list(params) + [limit, offset]
+            list_sql = f"""
+                SELECT l.*
+                FROM {DB_SCHEMA}.crm_leads l
+                {where_sql}
+                ORDER BY l.updated_at DESC, l.id DESC
+                LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
+            """
+            total = await conn.fetchval(count_sql, *params)
+            rows = await conn.fetch(list_sql, *params_with_page)
+            return {
+                "items": [dict(r) for r in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "match_mode": mode,
+                "filter_mode": filter_mode_norm,
+            }
+    except asyncpg.PostgresError:
+        logger.exception("Database error while fetching bulk assign candidates")
+        raise HTTPException(status_code=500, detail="Database error.")
+
+
+@router.post("/bulk-assign/execute", summary="Assign selected leads to employees in round robin")
+async def execute_bulk_assign(
+    payload: CRMBulkAssignExecuteIn,
     current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
 ):
     role, emp_id = _get_user_context(current_user)
     if role not in {"ADMIN"}:
         raise HTTPException(status_code=403, detail="Only ADMIN can bulk assign leads.")
 
-    filters = payload.filters
-    stage = _normalize_optional_upper(filters.stage)
-    stages_norm = [_normalize_optional_upper(s) for s in (filters.stages or []) if _normalize_optional_upper(s)]
-    follow_up_status = _normalize_optional_upper(filters.follow_up_status)
-    mobile = filters.mobile.strip() if isinstance(filters.mobile, str) and filters.mobile.strip() else None
-    lead_type = _normalize_optional_upper(filters.lead_type)
-    tag = filters.tag.strip() if isinstance(filters.tag, str) and filters.tag.strip() else None
-    lead_source = _normalize_optional_upper(filters.lead_source)
-    entity_type = _entity_type_query(filters.entity_type) if (filters.entity_type is not None or filters.entity_id is not None) else None
-
-    if mobile and (not mobile.isdigit() or len(mobile) != 10):
-        raise _validation_error("Invalid mobile filter.", {"mobile": "Must be a 10-digit number."})
-
+    unique_lead_ids = list(dict.fromkeys(payload.lead_ids))
+    unique_emp_ids = list(dict.fromkeys(payload.selected_employee_ids))
     pool = await get_db_pool()
+
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
                 valid_rows = await conn.fetch(
                     f"SELECT emp_id FROM {DB_SCHEMA}.employees WHERE is_active = TRUE AND emp_id = ANY($1::bigint[])",
-                    payload.selected_employee_ids,
+                    unique_emp_ids,
                 )
                 valid_emp_ids = [int(r["emp_id"]) for r in valid_rows]
-                if len(valid_emp_ids) != len(set(payload.selected_employee_ids)):
+                if len(valid_emp_ids) != len(unique_emp_ids):
                     raise _validation_error(
                         "Invalid selected_employee_ids.",
                         {"selected_employee_ids": "One or more employees are invalid/inactive."},
                     )
 
-                where = ["TRUE"]
-                params: list = []
-                if stage:
-                    params.append(stage)
-                    where.append(f"l.stage = ${len(params)}")
-                elif stages_norm:
-                    params.append(stages_norm)
-                    where.append(f"l.stage = ANY(${len(params)})")
-                if follow_up_status:
-                    params.append(follow_up_status)
-                    where.append(f"l.follow_up_status = ${len(params)}")
-                if mobile:
-                    params.append(mobile)
-                    where.append(f"l.mobile = ${len(params)}")
-                if filters.rm_id is not None:
-                    params.append(filters.rm_id)
-                    where.append(f"l.rm_id = ${len(params)}")
-                if filters.op_id is not None:
-                    params.append(filters.op_id)
-                    where.append(f"l.op_id = ${len(params)}")
-                if lead_type:
-                    params.append(lead_type)
-                    where.append(f"upper(trim(l.lead_type)) = ${len(params)}")
-                if tag:
-                    params.append(f"%{tag}%")
-                    where.append(f"l.tag ILIKE ${len(params)}")
-                if lead_source:
-                    params.append(lead_source)
-                    where.append(f"upper(trim(l.lead_source)) = ${len(params)}")
-                if filters.is_active is not None:
-                    params.append(filters.is_active)
-                    where.append(f"l.is_active = ${len(params)}")
-                if filters.entity_id is not None:
-                    params.append(filters.entity_id)
-                    where.append(f"l.entity_id = ${len(params)}")
-                    params.append(entity_type)
-                    where.append(f"l.entity_type = ${len(params)}")
-                elif filters.entity_type is not None:
-                    params.append(entity_type)
-                    where.append(f"l.entity_type = ${len(params)}")
-
-                vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
-                if vis_sql:
-                    where.append(vis_sql)
-                    params.extend(vis_vals)
-
-                params.append(payload.limit)
+                vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, 2)
+                vis_clause = f" AND {vis_sql}" if vis_sql else ""
                 lead_rows = await conn.fetch(
                     f"""
                     SELECT l.id
                     FROM {DB_SCHEMA}.crm_leads l
-                    WHERE {' AND '.join(where)}
-                    ORDER BY l.updated_at DESC, l.id DESC
-                    LIMIT ${len(params)}
+                    WHERE l.id = ANY($1::bigint[])
+                    {vis_clause}
                     FOR UPDATE SKIP LOCKED
                     """,
-                    *params,
+                    unique_lead_ids,
+                    *vis_vals,
                 )
                 lead_ids = [int(r["id"]) for r in lead_rows]
-
                 per_employee_counts = {eid: 0 for eid in valid_emp_ids}
-                for idx, lead_id in enumerate(lead_ids):
-                    assignee = valid_emp_ids[idx % len(valid_emp_ids)]
-                    if payload.assignment_role == "RM":
-                        await conn.execute(
-                            f"UPDATE {DB_SCHEMA}.crm_leads SET rm_id = $1, updated_at = NOW() WHERE id = $2",
-                            assignee,
-                            lead_id,
-                        )
-                    else:
-                        await conn.execute(
-                            f"UPDATE {DB_SCHEMA}.crm_leads SET op_id = $1, updated_at = NOW() WHERE id = $2",
-                            assignee,
-                            lead_id,
-                        )
-                    per_employee_counts[assignee] += 1
+                emp_cursor = 0
+
+                for lead_id in lead_ids:
+                    assigned = False
+                    for _ in range(len(valid_emp_ids)):
+                        assignee = valid_emp_ids[emp_cursor % len(valid_emp_ids)]
+                        emp_cursor += 1
+                        if payload.per_employee_limit is not None and per_employee_counts[assignee] >= payload.per_employee_limit:
+                            continue
+                        if payload.assignment_role == "RM":
+                            await conn.execute(
+                                f"UPDATE {DB_SCHEMA}.crm_leads SET rm_id = $1, updated_at = NOW() WHERE id = $2",
+                                assignee,
+                                lead_id,
+                            )
+                        else:
+                            await conn.execute(
+                                f"UPDATE {DB_SCHEMA}.crm_leads SET op_id = $1, updated_at = NOW() WHERE id = $2",
+                                assignee,
+                                lead_id,
+                            )
+                        per_employee_counts[assignee] += 1
+                        assigned = True
+                        break
+                    if not assigned:
+                        break
 
         await _invalidate_crm_cache()
         return {
             "message": "CRM bulk assignment completed.",
             "assignment_role": payload.assignment_role,
-            "total_assigned": len(lead_ids),
+            "total_selected": len(unique_lead_ids),
+            "total_assigned": sum(per_employee_counts.values()),
             "per_employee_counts": per_employee_counts,
-            "lead_ids": lead_ids,
         }
     except asyncpg.PostgresError:
-        logger.exception("Database error during CRM bulk assignment")
+        logger.exception("Database error during CRM bulk assign execute")
         raise HTTPException(status_code=500, detail="Database error.")
 
 

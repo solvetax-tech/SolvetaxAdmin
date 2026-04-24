@@ -181,29 +181,8 @@ class CRMBulkImportIn(CRMBaseSchema):
     validate_only: bool = False
 
 
-class CRMBulkAssignFiltersIn(CRMBaseSchema):
-    stage: Optional[str] = None
-    stages: Optional[List[str]] = None
-    follow_up_status: Optional[Literal["PENDING", "COMPLETED", "MISSED"]] = None
-    mobile: Optional[str] = None
-    rm_id: Optional[int] = Field(default=None, gt=0)
-    op_id: Optional[int] = Field(default=None, gt=0)
-    lead_type: Optional[str] = None
-    tag: Optional[str] = None
-    lead_source: Optional[str] = None
-    is_active: Optional[bool] = None
-    entity_type: Optional[str] = None
-    entity_id: Optional[int] = Field(default=None, gt=0)
-
-    @model_validator(mode="after")
-    def validate_stage_filters(self):
-        if self.stage and self.stages:
-            raise ValueError("Provide either stage or stages, not both")
-        return self
-
-
-class CRMBulkAssignIn(CRMBaseSchema):
-    filters: CRMBulkAssignFiltersIn
+class CRMBulkAssignExecuteIn(CRMBaseSchema):
+    lead_ids: List[int] = Field(..., min_length=1, max_length=10000)
     selected_employee_ids: List[int] = Field(..., min_length=1, max_length=500)
     assignment_role: Literal["RM", "OP"]
-    limit: int = Field(default=2000, ge=1, le=10000)
+    per_employee_limit: Optional[int] = Field(default=None, ge=1, le=10000)
