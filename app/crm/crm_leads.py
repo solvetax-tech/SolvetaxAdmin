@@ -1369,6 +1369,14 @@ async def get_bulk_assign_candidates(
     lead_sources: Optional[List[str]] = Query(None),
     entity_types: Optional[List[str]] = Query(None),
     follow_up_statuses: Optional[List[str]] = Query(None),
+    null_fields: Optional[List[str]] = Query(
+        None,
+        description="Columns that must be NULL. Supported: stage, rm_id, op_id, lead_type, tag, lead_source, entity_type, follow_up_status",
+    ),
+    not_null_fields: Optional[List[str]] = Query(
+        None,
+        description="Columns that must be NOT NULL. Supported: stage, rm_id, op_id, lead_type, tag, lead_source, entity_type, follow_up_status",
+    ),
     is_active: Optional[bool] = None,
     match_mode: str = Query("AND", description="AND or OR across provided filters."),
     filter_mode: str = Query("IN", description="IN or NOT_IN for provided filter values."),
@@ -1392,6 +1400,40 @@ async def get_bulk_assign_candidates(
     lead_sources_n = norm_str_list(lead_sources)
     entity_types_n = norm_str_list(entity_types)
     follow_up_statuses_n = norm_str_list(follow_up_statuses)
+    null_fields_n = norm_str_list(null_fields)
+    not_null_fields_n = norm_str_list(not_null_fields)
+
+    null_field_sql = {
+        "STAGE": "l.stage",
+        "RM_ID": "l.rm_id",
+        "OP_ID": "l.op_id",
+        "LEAD_TYPE": "l.lead_type",
+        "TAG": "l.tag",
+        "LEAD_SOURCE": "l.lead_source",
+        "ENTITY_TYPE": "l.entity_type",
+        "FOLLOW_UP_STATUS": "l.follow_up_status",
+    }
+    allowed_null_fields = set(null_field_sql.keys())
+
+    invalid_null_fields = [f for f in null_fields_n if f not in allowed_null_fields]
+    if invalid_null_fields:
+        raise _validation_error(
+            "Invalid null_fields.",
+            {"null_fields": f"Unsupported values: {', '.join(invalid_null_fields)}"},
+        )
+    invalid_not_null_fields = [f for f in not_null_fields_n if f not in allowed_null_fields]
+    if invalid_not_null_fields:
+        raise _validation_error(
+            "Invalid not_null_fields.",
+            {"not_null_fields": f"Unsupported values: {', '.join(invalid_not_null_fields)}"},
+        )
+
+    overlap = sorted(set(null_fields_n) & set(not_null_fields_n))
+    if overlap:
+        raise _validation_error(
+            "Conflicting NULL filters.",
+            {"null_fields": f"Conflicts with not_null_fields: {', '.join(overlap)}"},
+        )
 
     for s in follow_up_statuses_n:
         if s not in FOLLOWUP_STATUSES:
@@ -1458,6 +1500,10 @@ async def get_bulk_assign_candidates(
                     if filter_mode_norm == "IN"
                     else f"NOT (l.follow_up_status = ANY(${len(params)}))"
                 )
+            for key in null_fields_n:
+                clauses.append(f"{null_field_sql[key]} IS NULL")
+            for key in not_null_fields_n:
+                clauses.append(f"{null_field_sql[key]} IS NOT NULL")
             if is_active is not None:
                 params.append(is_active)
                 clauses.append(f"l.is_active = ${len(params)}")
@@ -1489,6 +1535,8 @@ async def get_bulk_assign_candidates(
                 "offset": offset,
                 "match_mode": mode,
                 "filter_mode": filter_mode_norm,
+                "null_fields": null_fields_n,
+                "not_null_fields": not_null_fields_n,
             }
     except asyncpg.PostgresError:
         logger.exception("Database error while fetching bulk assign candidates")

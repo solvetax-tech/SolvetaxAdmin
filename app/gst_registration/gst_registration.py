@@ -72,58 +72,29 @@ async def _sync_crm_lead_with_gst(
         if not mobile:
             return
 
-        existing = await conn.fetchrow(
+        existing_lead_id = await conn.fetchval(
             f"""
-            SELECT *
+            SELECT id
             FROM {DB_SCHEMA}.crm_leads
             WHERE entity_type = $1
-              AND entity_id = $2
-              AND is_active = TRUE
+              AND mobile = $2
             ORDER BY id DESC
             LIMIT 1
             FOR UPDATE
             """,
             CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-            gst_row["id"],
+            mobile,
         )
-
-        # Fallback: reuse latest active lead by mobile if GST link is missing.
-        if not existing:
-            existing = await conn.fetchrow(
-                f"""
-                SELECT *
-                FROM {DB_SCHEMA}.crm_leads
-                WHERE mobile = $1
-                  AND is_active = TRUE
-                ORDER BY id DESC
-                LIMIT 1
-                FOR UPDATE
-                """,
-                mobile,
-            )
-
-        remarks = "Auto synced from GST registration create/edit."
-
-        if existing:
+        if existing_lead_id:
             await conn.execute(
                 f"""
                 UPDATE {DB_SCHEMA}.crm_leads
-                SET mobile = $1,
-                    entity_id = $2,
-                    entity_type = $3,
-                    rm_id = $4,
-                    op_id = $5,
-                    is_active = $6,
+                SET entity_id = $1,
                     updated_at = NOW()
-                WHERE id = $7
+                WHERE id = $2
                 """,
-                mobile,
                 gst_row["id"],
-                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-                gst_row.get("rm_id"),
-                gst_row.get("created_by"),
-                gst_row.get("is_active"),
-                existing["id"],
+                existing_lead_id,
             )
         else:
             await conn.fetchval(
@@ -141,7 +112,7 @@ async def _sync_crm_lead_with_gst(
                 gst_row.get("rm_id"),
                 gst_row.get("created_by"),
                 gst_row.get("is_active"),
-                remarks,
+                "Auto synced from GST registration create/edit.",
             )
     except asyncpg.UndefinedTableError:
         logger.warning("CRM tables not found; skipping CRM sync.")
@@ -2079,4 +2050,3 @@ async def activate_gst_registration(
 
         except Exception:
             log.exception("Unexpected error during GST activation")
-            raise HTTPException(status_code=500, detail="Internal server error.")

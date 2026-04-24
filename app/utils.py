@@ -305,6 +305,47 @@ def build_gst_filing_visibility(role: str, emp_id: int, idx: int, schema: str):
         return sql, [emp_id], idx + 1
 
     return None, [], idx
+
+
+def build_income_tax_visibility(
+    role: str,
+    emp_id: int,
+    idx: int,
+    schema: str,
+    alias: str = "i",
+):
+    if role == "ADMIN":
+        return None, [], idx
+
+    if role == "RM":
+        return f"{alias}.rm_id = ${idx}", [emp_id], idx + 1
+
+    if role == "OP":
+        return f"{alias}.op_id = ${idx}", [emp_id], idx + 1
+
+    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+        sql = f"""
+        (
+            {alias}.rm_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+            OR
+            {alias}.op_id IN (
+                SELECT tm.emp_id
+                FROM {schema}.team_members tm
+                JOIN {schema}.team_managers mg
+                ON tm.team_id = mg.team_id
+                WHERE mg.manager_emp_id = ${idx}
+            )
+        )
+        """
+        return sql, [emp_id], idx + 1
+
+    return None, [], idx
 def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: str):
 
     # ADMIN → Full access
