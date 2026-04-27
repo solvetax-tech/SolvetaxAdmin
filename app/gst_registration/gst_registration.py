@@ -2,7 +2,7 @@ import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from app.gst_registration.schemas import (
     GSTRegistrationIn,
     GSTRegistrationEditIn,
@@ -24,7 +24,6 @@ from app.gst_registration_filing.gst_return_details_rebuild import (
 from zoneinfo import ZoneInfo
 import json
 import uuid
-from datetime import datetime
 import re
 
 router = APIRouter(
@@ -72,29 +71,61 @@ async def _sync_crm_lead_with_gst(
         if not mobile:
             return
 
-        existing_lead_id = await conn.fetchval(
+        existing = await conn.fetchrow(
             f"""
-            SELECT id
+            SELECT *
             FROM {DB_SCHEMA}.crm_leads
             WHERE entity_type = $1
-              AND mobile = $2
+              AND entity_id = $2
+              AND is_active = TRUE
             ORDER BY id DESC
             LIMIT 1
             FOR UPDATE
             """,
             CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-            mobile,
+            gst_row["id"],
         )
-        if existing_lead_id:
+
+        # Fallback: reuse latest active GST lead by entity_type + mobile
+        # (typically pre-created from bulk import with null entity_id).
+        if not existing:
+            existing = await conn.fetchrow(
+                f"""
+                SELECT *
+                FROM {DB_SCHEMA}.crm_leads
+                WHERE entity_type = $1
+                  AND mobile = $2
+                  AND is_active = TRUE
+                ORDER BY id DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
+                mobile,
+            )
+
+        remarks = "Auto synced from GST registration create/edit."
+
+        if existing:
             await conn.execute(
                 f"""
                 UPDATE {DB_SCHEMA}.crm_leads
-                SET entity_id = $1,
+                SET mobile = $1,
+                    entity_id = $2,
+                    entity_type = $3,
+                    rm_id = $4,
+                    op_id = $5,
+                    is_active = $6,
                     updated_at = NOW()
-                WHERE id = $2
+                WHERE id = $7
                 """,
+                mobile,
                 gst_row["id"],
-                existing_lead_id,
+                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
+                gst_row.get("rm_id"),
+                gst_row.get("created_by"),
+                gst_row.get("is_active"),
+                existing["id"],
             )
         else:
             await conn.fetchval(
@@ -112,7 +143,7 @@ async def _sync_crm_lead_with_gst(
                 gst_row.get("rm_id"),
                 gst_row.get("created_by"),
                 gst_row.get("is_active"),
-                "Auto synced from GST registration create/edit.",
+                remarks,
             )
     except asyncpg.UndefinedTableError:
         logger.warning("CRM tables not found; skipping CRM sync.")

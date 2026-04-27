@@ -191,6 +191,25 @@ async def get_payment_amount(
                     display_name = f"GST Filing ({filing_row['filing_frequency']})"
                     ownership_category = filing_row["filing_frequency"]
 
+                elif entity_type_norm == "INCOME_TAX":
+                    income_tax_row = await conn.fetchrow(
+                        f"""
+                        SELECT id, customer_id, financial_year, is_active
+                        FROM {DB_SCHEMA}.income_tax
+                        WHERE id = $1
+                        LIMIT 1
+                        """,
+                        entity_id,
+                    )
+                    if not income_tax_row:
+                        raise HTTPException(404, "Income tax record not found.")
+                    if not income_tax_row["is_active"]:
+                        raise HTTPException(400, "Income tax record is inactive.")
+
+                    customer_id = income_tax_row["customer_id"]
+                    display_name = f"Income Tax ({income_tax_row['financial_year']})"
+                    ownership_category = income_tax_row["financial_year"] or "N/A"
+
                 else:
                     raise HTTPException(
                         400,

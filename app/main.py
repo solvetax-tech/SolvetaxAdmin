@@ -94,6 +94,7 @@ from app.Dashboard.dashboard import router as dashboard_router
 from app.version.version import router as version_router
 from app.payments.registration_payments import router as registration_payments_router
 from app.payments.filing_payments import router as filing_payments_router
+from app.payments.income_tax_payments import router as income_tax_payments_router
 from app.payments.payments_config import router as payments_config
 from app.gst_registration.gst_blob import router as gst_blob
 from app.gst_registration.document_config import router as document_config
@@ -106,6 +107,8 @@ from app.gst_registration_filing.gst_filing_config import router as gst_filing_c
 from app.gst_registration_filing.gst_registration_filing import router as gst_registration_filing
 from app.gst_registration_filing.gst_filing_document import router as gst_filing_document_router
 from app.crm.crm_leads import router as crm_leads_router
+from app.crm.crm_leads_common import router as crm_leads_common_router
+from app.crm.crm_leads_itr import router as crm_leads_itr_router
 from app.gst_registration_filing.gst_filing_rule_engine import router as gst_filing_rule_engine_router
 from app.Income_tax.income_tax import router as income_tax_router
 from app.Income_tax.income_tax_documents import router as income_tax_documents_router
@@ -147,6 +150,8 @@ if registration_payments_router:
     app.include_router(registration_payments_router)
 if filing_payments_router:
     app.include_router(filing_payments_router)
+if income_tax_payments_router:
+    app.include_router(income_tax_payments_router)
 if payments_config:
     app.include_router(payments_config)
 if gst_blob:
@@ -165,6 +170,10 @@ if entity_types_router:
     app.include_router(entity_types_router)
 if crm_leads_router:
     app.include_router(crm_leads_router)
+if crm_leads_common_router:
+    app.include_router(crm_leads_common_router)
+if crm_leads_itr_router:
+    app.include_router(crm_leads_itr_router)
 if gst_filing_rule_engine_router:
     app.include_router(gst_filing_rule_engine_router)
 if income_tax_router:

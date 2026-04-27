@@ -32,7 +32,7 @@ from app.redis_cache import (
 from app.security.rbac import require_permission
 from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
 
-router = APIRouter(prefix="/api/v1/crm/leads", tags=["CRM Leads"])
+router = APIRouter(prefix="/api/v1/crm/leads", tags=["CRM Leads GST"])
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -244,6 +244,7 @@ async def _fetch_crm_lead_visible(
     lead_id: int,
     *,
     for_update: bool = False,
+    entity_type: Optional[str] = None,
 ) -> Optional[asyncpg.Record]:
     """Single-lead fetch with the same visibility rules as list/filter (404 if not visible)."""
     params: list = [lead_id]
@@ -252,6 +253,9 @@ async def _fetch_crm_lead_visible(
     if vis_sql:
         where.append(vis_sql)
         params.extend(vis_vals)
+    if entity_type:
+        params.append(_normalize_code(entity_type))
+        where.append(f"upper(trim(l.entity_type)) = ${len(params)}")
     lock = " FOR UPDATE" if for_update else ""
     return await conn.fetchrow(
         f"SELECT l.* FROM {DB_SCHEMA}.crm_leads l WHERE {' AND '.join(where)}{lock}",
@@ -808,7 +812,6 @@ async def _crm_apply_followup_status(
     }
 
 
-@router.get("/ui-mappings", summary="CRM stage/pitch and pitch/status mappings for UI")
 async def get_crm_stage_pitch_mappings(
     entity_type: Optional[str] = Query(
         None,
@@ -916,7 +919,6 @@ async def get_crm_stage_pitch_mappings(
     )
 
 
-@router.get("/filter", summary="Filter CRM leads")
 async def filter_crm_leads(
     stage: Optional[str] = None,
     stages: Optional[List[str]] = Query(None, description="Filter by multiple stages (OR logic)."),
@@ -1240,7 +1242,6 @@ async def _bulk_import_crm_leads(
         raise HTTPException(status_code=500, detail="Database error.")
 
 
-@router.post("/bulk-import/file", summary="Bulk import CRM leads by CSV/XLSX upload")
 async def bulk_import_crm_leads_file(
     file: UploadFile = File(...),
     update_if_exists: bool = Form(True),
@@ -1359,7 +1360,6 @@ async def bulk_import_crm_leads_file(
     return await _bulk_import_crm_leads(payload, current_user)
 
 
-@router.get("/bulk-assign/candidates", summary="Get lead candidates for bulk assignment")
 async def get_bulk_assign_candidates(
     stages: Optional[List[str]] = Query(None),
     rm_ids: Optional[List[int]] = Query(None),
@@ -1543,7 +1543,6 @@ async def get_bulk_assign_candidates(
         raise HTTPException(status_code=500, detail="Database error.")
 
 
-@router.post("/bulk-assign/execute", summary="Assign selected leads to employees in round robin")
 async def execute_bulk_assign(
     payload: CRMBulkAssignExecuteIn,
     current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
@@ -1625,7 +1624,6 @@ async def execute_bulk_assign(
         raise HTTPException(status_code=500, detail="Database error.")
 
 
-@router.get("/activities/filter", summary="Filter CRM activities (visible leads only)")
 async def filter_crm_activities(
     lead_id: Optional[int] = Query(None, ge=1),
     activity_type: Optional[str] = None,
@@ -1825,7 +1823,6 @@ async def filter_crm_activities(
     )
 
 
-@router.get("/stages", summary="CRM lead pipeline stages for UI")
 async def get_crm_lead_stages(
     entity_type: Optional[str] = Query(None, description="Defaults to GST_REGISTRATION."),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -1886,7 +1883,6 @@ async def get_crm_lead_stages(
     )
 
 
-@router.get("/by-entity", summary="Get CRM lead by entity_type + entity_id (visible to caller)")
 async def get_crm_lead_by_entity(
     entity_id: int = Query(..., ge=1),
     entity_type: Optional[str] = Query(None, description="Defaults to GST_REGISTRATION."),
@@ -2016,14 +2012,11 @@ async def edit_crm_lead(
         raise HTTPException(status_code=500, detail="Database error.")
 
 
-@router.get(
-    "/{lead_id:int}/activities/calls",
-    summary="Call log for a lead (dial/connect timestamps + outcome + stage at time of call)",
-)
 async def list_crm_lead_call_activities(
     lead_id: int,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    entity_type: Optional[str] = None,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """CALL rows only: last_dailed_at, last_connected_at, call_status_code, call_type_code, old/new stage."""
@@ -2034,6 +2027,7 @@ async def list_crm_lead_call_activities(
         lead_id=lead_id,
         limit=limit,
         offset=offset,
+        entity_type=_entity_type_query(entity_type) if entity_type else None,
         role=role,
         emp_id=emp_id,
     )
@@ -2041,7 +2035,13 @@ async def list_crm_lead_call_activities(
     async def _load_crm_lead_call_activities():
         try:
             async with pool.acquire() as conn:
-                lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                lead = await _fetch_crm_lead_visible(
+                    conn,
+                    role,
+                    emp_id,
+                    lead_id,
+                    entity_type=entity_type,
+                )
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
 
@@ -2120,14 +2120,11 @@ async def list_crm_lead_call_activities(
     )
 
 
-@router.get(
-    "/{lead_id:int}/activities/stage-history",
-    summary="Stage change timeline for a lead (from activities)",
-)
 async def list_crm_lead_stage_activity_history(
     lead_id: int,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    entity_type: Optional[str] = None,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """Rows where old_stage and new_stage differ (calls that moved stage, SYSTEM moves, etc.)."""
@@ -2138,6 +2135,7 @@ async def list_crm_lead_stage_activity_history(
         lead_id=lead_id,
         limit=limit,
         offset=offset,
+        entity_type=_entity_type_query(entity_type) if entity_type else None,
         role=role,
         emp_id=emp_id,
     )
@@ -2145,7 +2143,13 @@ async def list_crm_lead_stage_activity_history(
     async def _load_crm_lead_stage_history():
         try:
             async with pool.acquire() as conn:
-                lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                lead = await _fetch_crm_lead_visible(
+                    conn,
+                    role,
+                    emp_id,
+                    lead_id,
+                    entity_type=entity_type,
+                )
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
 
@@ -2224,11 +2228,11 @@ async def list_crm_lead_stage_activity_history(
     )
 
 
-@router.get("/{lead_id:int}/activities", summary="Get CRM lead activities")
 async def list_crm_activities(
     lead_id: int,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    entity_type: Optional[str] = None,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     role, emp_id = _get_user_context(current_user)
@@ -2238,6 +2242,7 @@ async def list_crm_activities(
         lead_id=lead_id,
         limit=limit,
         offset=offset,
+        entity_type=_entity_type_query(entity_type) if entity_type else None,
         role=role,
         emp_id=emp_id,
     )
@@ -2245,7 +2250,13 @@ async def list_crm_activities(
     async def _load_crm_activities():
         try:
             async with pool.acquire() as conn:
-                lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                lead = await _fetch_crm_lead_visible(
+                    conn,
+                    role,
+                    emp_id,
+                    lead_id,
+                    entity_type=entity_type,
+                )
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
 

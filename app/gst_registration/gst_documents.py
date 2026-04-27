@@ -543,6 +543,8 @@ async def edit_registration_document(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
 
     log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id})
 

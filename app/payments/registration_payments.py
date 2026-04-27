@@ -329,7 +329,8 @@ async def create_registration_payment(
     summary="Filter payments (unified ledger)",
     description=(
         "Lists rows from `registration_payments` with the same filters and joins for all flows. "
-        "Pass `entity_type=GST_REGISTRATION` or `entity_type=GST_FILING` to match the old scoped lists; "
+        "Pass `entity_type=GST_REGISTRATION`, `entity_type=GST_FILING`, or `entity_type=INCOME_TAX` "
+        "to match scoped lists; "
         "omit `entity_type` to return every payment type."
     ),
     responses={
@@ -777,6 +778,12 @@ async def soft_delete_registration_payment(
                         detail="Registration payment not found.",
                     )
 
+                if row["entity_type"] != "GST_REGISTRATION":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This payment does not belong to GST registration.",
+                    )
+
                 if not row["is_active"]:
                     raise HTTPException(
                         status_code=400,
@@ -911,6 +918,12 @@ async def activate_registration_payment(
                     raise HTTPException(
                         status_code=404,
                         detail="Registration payment not found.",
+                    )
+
+                if payment_row["entity_type"] != "GST_REGISTRATION":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This payment does not belong to GST registration.",
                     )
 
                 if payment_row["is_active"]:
