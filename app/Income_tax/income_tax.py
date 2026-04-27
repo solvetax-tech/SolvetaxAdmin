@@ -27,10 +27,15 @@ def _income_tax_detail_tag(income_tax_id: int) -> str:
     return f"income_tax:detail:index:{income_tax_id}"
 
 
+def _income_tax_full_tag(income_tax_id: int) -> str:
+    return f"income_tax:full:index:{income_tax_id}"
+
+
 async def _invalidate_income_tax_cache(income_tax_id: Optional[int] = None) -> None:
     await redis_invalidate_tag(_income_tax_filter_tag())
     if income_tax_id is not None:
         await redis_invalidate_tag(_income_tax_detail_tag(income_tax_id))
+        await redis_invalidate_tag(_income_tax_full_tag(income_tax_id))
 
 
 def _raise_income_tax_validation_error(fields: dict, status_code: int = 400) -> None:
@@ -403,6 +408,75 @@ async def get_income_tax(
         loader=_loader,
         ttl_seconds=300,
         tags=[_income_tax_detail_tag(income_tax_id)],
+    )
+
+
+@router.get("/{income_tax_id}/full", summary="Get full income tax details")
+async def get_income_tax_full(
+    income_tax_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else ""
+
+    cache_key = build_cache_key(
+        "income_tax_full_detail",
+        income_tax_id=income_tax_id,
+        role=role_norm,
+        emp_id=emp_id,
+    )
+
+    async def _loader():
+        try:
+            pool = await get_db_pool()
+            async with pool.acquire() as conn:
+                visibility_sql, visibility_values, _next = build_income_tax_visibility(
+                    role_norm,
+                    emp_id,
+                    2,
+                    DB_SCHEMA,
+                )
+                conditions = ["i.id = $1"]
+                args = [income_tax_id]
+                if visibility_sql:
+                    conditions.append(f"({visibility_sql})")
+                    args.extend(visibility_values)
+
+                income_tax_row = await conn.fetchrow(
+                    f"""
+                    SELECT i.*
+                    FROM {DB_SCHEMA}.income_tax i
+                    WHERE {' AND '.join(conditions)}
+                    """,
+                    *args,
+                )
+                if not income_tax_row:
+                    raise HTTPException(status_code=404, detail="Income tax record not found.")
+
+                documents = await conn.fetch(
+                    f"""
+                    SELECT d.*
+                    FROM {DB_SCHEMA}.income_tax_documents d
+                    WHERE d.income_tax_id = $1
+                    ORDER BY d.updated_at DESC, d.id DESC
+                    """,
+                    income_tax_id,
+                )
+
+            return {
+                "income_tax": dict(income_tax_row),
+                "documents": [dict(r) for r in documents],
+            }
+        except asyncpg.PostgresError:
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key=cache_key,
+        loader=_loader,
+        ttl_seconds=300,
+        tags=[_income_tax_full_tag(income_tax_id)],
     )
 
 
