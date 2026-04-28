@@ -3,7 +3,7 @@ import json
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.Income_tax.schemas import IncomeTaxIn, IncomeTaxEditIn
 from app.logger import logger
@@ -12,6 +12,7 @@ from app.redis_cache import (
     get_or_set_json as redis_get_or_set_json,
     invalidate_tag as redis_invalidate_tag,
 )
+from app.security.public_security import enforce_public_security
 from app.security.rbac import require_permission
 from app.utils import DB_SCHEMA, build_income_tax_visibility, generate_uuid, get_db_pool
 
@@ -115,14 +116,19 @@ async def _upsert_income_tax_lead_by_mobile_entity_type(
 
 @router.post("", status_code=status.HTTP_201_CREATED, summary="Create income tax record")
 async def create_income_tax(
+    request: Request,
     payload: IncomeTaxIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
+    await enforce_public_security(
+        request=request,
+        bucket="public:create_income_tax",
+        max_requests=15,
+        window_seconds=60,
+        block_seconds=300,
+    )
     request_id = generate_uuid()
-    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
-    role_norm = str(role).strip().upper() if role is not None else ""
+    emp_id = None
+    role_norm = ""
     rm_id = payload.rm_id
     if role_norm == "RM" and rm_id is None:
         rm_id = emp_id

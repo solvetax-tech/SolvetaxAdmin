@@ -26,6 +26,11 @@ PUBLIC_PATHS = [
     "/app/v1/forgot-password/verify",
 ]
 
+PUBLIC_EXACT_ENDPOINTS = {
+    ("POST", "/api/v1/income-tax"),
+    ("POST", "/api/v1/customers"),
+}
+
 def _get_client_ip(request: Request | None) -> str:
     """Get client IP from request (same logic as login.py)."""
     if request is None:
@@ -177,8 +182,9 @@ class TokenValidatorMiddleware(BaseHTTPMiddleware):
         
         # Check if path matches any public path pattern
         request_path = request.url.path
-        is_public = any(request_path == path or request_path.startswith(path) for path in PUBLIC_PATHS)
-        if is_public:
+        is_public_prefix = any(request_path == path or request_path.startswith(path) for path in PUBLIC_PATHS)
+        is_public_exact = (request.method.upper(), request_path) in PUBLIC_EXACT_ENDPOINTS
+        if is_public_prefix or is_public_exact:
             return await call_next(request)
         auth = request.headers.get("Authorization")
         request_id = request.headers.get("X-Request-ID", "N/A")

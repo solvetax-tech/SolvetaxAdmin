@@ -3,7 +3,7 @@ import uuid
 import asyncpg
 import httpx
 from difflib import SequenceMatcher
-from fastapi import APIRouter, HTTPException, Query, Depends, status, UploadFile, File
+from fastapi import APIRouter, HTTPException, Query, Depends, Request, status, UploadFile, File
 from pydantic import constr, validator
 from typing import Optional, List
 from datetime import datetime
@@ -15,6 +15,7 @@ from app.customer_registration.schemas import (
 )
 from app.utils import get_db_pool, DB_SCHEMA, is_business_description_ai_configured
 from app.security.rbac import require_permission
+from app.security.public_security import enforce_public_security
 from app.logger import logger
 from app.utils import (
     mask_sensitive_data,
@@ -321,9 +322,16 @@ async def lookup_location_by_name(
     },
 )
 async def create_customer(
+    request: Request,
     payload: CustomerIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
+    await enforce_public_security(
+        request=request,
+        bucket="public:create_customer",
+        max_requests=15,
+        window_seconds=60,
+        block_seconds=300,
+    )
 
     # --------------------------------------------------
     # Request Context
@@ -331,9 +339,8 @@ async def create_customer(
 
     request_id = generate_uuid()
 
-    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    emp_id = None
+    role = None
 
     log = logging.LoggerAdapter(
         logger,

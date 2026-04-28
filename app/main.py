@@ -17,7 +17,6 @@ import multiprocessing
 logging.basicConfig(level=logging.INFO)
 
 from fastapi.openapi.utils import get_openapi
-from fastapi.security import HTTPBearer
 
 app = FastAPI(title="Slove Tax", version="1.0.0")
 
@@ -66,12 +65,30 @@ def custom_openapi():
         "BearerAuth": {
             "type": "http",
             "scheme": "bearer",
-            "bearerFormat": "JWT"
-        }
+            "bearerFormat": "JWT",
+        },
+        "PublicApiKey": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Public-Api-Key",
+        },
     }
-    for path in openapi_schema["paths"].values():
-        for method in path.values():
-            method.setdefault("security", []).append({"BearerAuth": []})
+
+    public_post_paths = {
+        "/api/v1/customers",
+        "/api/v1/income-tax",
+    }
+
+    for path_key, path_item in openapi_schema["paths"].items():
+        for method_name, operation in path_item.items():
+            if method_name.lower() != "post":
+                operation.setdefault("security", []).append({"BearerAuth": []})
+                continue
+
+            if path_key in public_post_paths:
+                operation["security"] = [{"PublicApiKey": []}]
+            else:
+                operation.setdefault("security", []).append({"BearerAuth": []})
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
@@ -112,6 +129,7 @@ from app.crm.crm_leads_itr import router as crm_leads_itr_router
 from app.gst_registration_filing.gst_filing_rule_engine import router as gst_filing_rule_engine_router
 from app.Income_tax.income_tax import router as income_tax_router
 from app.Income_tax.income_tax_documents import router as income_tax_documents_router
+from app.Income_tax.income_tax_config import router as income_tax_config_router
 
 
 if email_verification:
@@ -180,6 +198,8 @@ if income_tax_router:
     app.include_router(income_tax_router)
 if income_tax_documents_router:
     app.include_router(income_tax_documents_router)
+if income_tax_config_router:
+    app.include_router(income_tax_config_router)
 
 @app.get("/health")
 async def health_check():
