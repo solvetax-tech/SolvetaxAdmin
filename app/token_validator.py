@@ -29,6 +29,7 @@ PUBLIC_PATHS = [
 PUBLIC_EXACT_ENDPOINTS = {
     ("POST", "/api/v1/income-tax"),
     ("POST", "/api/v1/customers"),
+    ("POST", "/api/v1/contact-support"),
 }
 
 def _get_client_ip(request: Request | None) -> str:

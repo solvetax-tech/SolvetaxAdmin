@@ -39,13 +39,13 @@ async def _invalidate_income_tax_cache(income_tax_id: Optional[int] = None) -> N
         await redis_invalidate_tag(_income_tax_full_tag(income_tax_id))
 
 
-def _raise_income_tax_validation_error(fields: dict, status_code: int = 400) -> None:
+def _raise_income_tax_validation_error(fields: dict, status_code: int = 400, message: str = "Validation failed") -> None:
     raise HTTPException(
         status_code=status_code,
         detail={
             "error": {
                 "type": "validation_error",
-                "message": "Validation failed",
+                "message": message,
                 "fields": fields,
             }
         },
@@ -150,20 +150,41 @@ async def create_income_tax(
                         SELECT 1
                         FROM {DB_SCHEMA}.income_tax
                         WHERE is_active = TRUE
+                          AND $1::text IS NOT NULL
                           AND upper(trim(pan_number)) = upper(trim($1::text))
                           AND trim(financial_year) = trim($2::text)
-                    ) AS pan_fy_match
+                    ) AS pan_fy_match,
+                    EXISTS(
+                        SELECT 1
+                        FROM {DB_SCHEMA}.income_tax
+                        WHERE is_active = TRUE
+                          AND $1::text IS NULL
+                          AND pan_number IS NULL
+                          AND trim(mobile) = trim($3::text)
+                          AND trim(financial_year) = trim($2::text)
+                    ) AS mobile_fy_no_pan_match
                     """,
                     payload.pan_number,
                     payload.financial_year,
+                    payload.mobile,
                 )
                 if duplicate_row and duplicate_row["pan_fy_match"]:
                     _raise_income_tax_validation_error(
                         {
-                            "pan_number": "PAN + financial year already exists for an active record.",
-                            "financial_year": "PAN + financial year already exists for an active record.",
+                            "pan_number": "A record already exists for this PAN and financial year.",
+                            "financial_year": "A record already exists for this PAN and financial year.",
                         },
                         status_code=409,
+                        message="Income tax request already exists for this financial year.",
+                    )
+                if duplicate_row and duplicate_row["mobile_fy_no_pan_match"]:
+                    _raise_income_tax_validation_error(
+                        {
+                            "mobile": "A record already exists for this mobile and financial year (without PAN).",
+                            "financial_year": "A record already exists for this mobile and financial year (without PAN).",
+                        },
+                        status_code=409,
+                        message="Income tax request already exists for this financial year.",
                     )
 
                 row = await conn.fetchrow(
@@ -222,18 +243,26 @@ async def create_income_tax(
             unique_map = {
                 "uq_income_tax_pan_financial_year_active": (
                     "pan_number",
-                    "Duplicate PAN + financial year for active record.",
+                    "A record already exists for this PAN and financial year.",
                 ),
                 "income_tax_pan_number_financial_year_key": (
                     "pan_number",
-                    "Duplicate PAN + financial year for active record.",
+                    "A record already exists for this PAN and financial year.",
+                ),
+                "uq_income_tax_mobile_fy_no_pan": (
+                    "mobile",
+                    "A record already exists for this mobile and financial year (without PAN).",
                 ),
             }
             field, message = unique_map.get(
                 constraint,
                 ("non_field_error", "Duplicate value violates unique constraint."),
             )
-            _raise_income_tax_validation_error({field: message}, status_code=409)
+            _raise_income_tax_validation_error(
+                {field: message},
+                status_code=409,
+                message="Income tax request already exists for this financial year.",
+            )
         except asyncpg.exceptions.ForeignKeyViolationError:
             _raise_income_tax_validation_error(
                 {"non_field_error": "Invalid rm_id or op_id reference."},

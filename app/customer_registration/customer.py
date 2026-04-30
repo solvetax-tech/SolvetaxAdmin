@@ -73,6 +73,67 @@ def _customer_pincode_lookup_cache_key(pincode: str) -> str:
     return build_cache_key("customer:pincode_lookup", pincode=pincode)
 
 
+async def _sync_crm_lead_from_customer(
+    conn: asyncpg.Connection,
+    customer_row: asyncpg.Record,
+) -> None:
+    """
+    Ensure a base CRM lead exists from customer create.
+    Intentionally does not set entity_type/entity_id so downstream modules
+    (GST / ITR) can bind the same lead later by mobile.
+    """
+    try:
+        mobile = customer_row.get("mobile")
+        if not mobile:
+            return
+
+        existing = await conn.fetchrow(
+            f"""
+            SELECT id
+            FROM {DB_SCHEMA}.crm_leads
+            WHERE trim(mobile) = trim($1::text)
+              AND is_active = TRUE
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            mobile,
+        )
+        if existing:
+            await conn.execute(
+                f"""
+                UPDATE {DB_SCHEMA}.crm_leads
+                SET rm_id = COALESCE(rm_id, $1),
+                    op_id = COALESCE(op_id, $2),
+                    updated_at = NOW()
+                WHERE id = $3
+                """,
+                customer_row.get("rm_id"),
+                customer_row.get("op_id"),
+                existing["id"],
+            )
+            return
+
+        await conn.fetchval(
+            f"""
+            INSERT INTO {DB_SCHEMA}.crm_leads
+                (mobile, stage, rm_id, op_id, is_active, remarks, created_at, updated_at)
+            VALUES
+                ($1, $2, $3, $4, TRUE, $5, NOW(), NOW())
+            RETURNING id
+            """,
+            mobile,
+            "FRESH_LEAD",
+            customer_row.get("rm_id"),
+            customer_row.get("op_id"),
+            "Auto synced from customer create.",
+        )
+    except asyncpg.UndefinedTableError:
+        logger.warning("CRM tables not found; skipping CRM sync from customer.")
+    except asyncpg.PostgresError:
+        logger.exception("CRM sync failed from customer; continuing customer flow.")
+
+
 @router.get(
     "/pincode/{pincode}",
     summary="Lookup city/state by pincode",
@@ -537,8 +598,11 @@ async def create_customer(
 
                 customer_id = customer_row["customer_id"]
 
+                # 2️⃣ Sync base CRM lead from customer (mobile-based, no entity binding yet)
+                await _sync_crm_lead_from_customer(conn, customer_row)
+
                 # --------------------------------------------------
-                # 2️⃣ Version Audit
+                # 3️⃣ Version Audit
                 # --------------------------------------------------
 
                 await conn.execute(

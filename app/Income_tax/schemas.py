@@ -20,7 +20,7 @@ class IncomeTaxIn(BaseSchema):
     state: Optional[str] = Field(None, max_length=100)
     priority: Literal["LOW", "NORMAL", "HIGH"] = "NORMAL"
     remarks: Optional[str] = None
-    pan_number: str = Field(..., pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+    pan_number: Optional[str] = Field(None, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
     password: Optional[str] = None
     financial_year: str = Field(..., pattern=r"^[0-9]{4}-[0-9]{2}$")
     filed_status: Literal["FILED", "NOT_FILED"] = "NOT_FILED"
@@ -35,6 +35,19 @@ class IncomeTaxIn(BaseSchema):
     @field_validator("pan_number", mode="before")
     @classmethod
     def normalize_pan(cls, v):
+        if isinstance(v, str):
+            v = v.strip().upper()
+            return v or None
+        return v
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def normalize_priority(cls, v):
+        return v.strip().upper() if isinstance(v, str) else v
+
+    @field_validator("filed_status", mode="before")
+    @classmethod
+    def normalize_filed_status(cls, v):
         return v.strip().upper() if isinstance(v, str) else v
 
     @field_validator("language", "state", "source_of_income", "referral_entity", mode="before")
@@ -46,6 +59,22 @@ class IncomeTaxIn(BaseSchema):
     @classmethod
     def normalize_mobile(cls, v):
         return v.strip() if isinstance(v, str) else v
+
+    @field_validator("password", "remarks", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
+    @field_validator("email_id", mode="before")
+    @classmethod
+    def normalize_email_optional(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower()
+            return v or None
+        return v
 
 
 class IncomeTaxEditIn(BaseSchema):

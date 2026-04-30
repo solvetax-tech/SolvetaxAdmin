@@ -77,6 +77,7 @@ def custom_openapi():
     public_post_paths = {
         "/api/v1/customers",
         "/api/v1/income-tax",
+        "/api/v1/contact-support",
     }
 
     for path_key, path_item in openapi_schema["paths"].items():
@@ -130,6 +131,7 @@ from app.gst_registration_filing.gst_filing_rule_engine import router as gst_fil
 from app.Income_tax.income_tax import router as income_tax_router
 from app.Income_tax.income_tax_documents import router as income_tax_documents_router
 from app.Income_tax.income_tax_config import router as income_tax_config_router
+from app.contact_support.contact_support import router as contact_support_router
 
 
 if email_verification:
@@ -200,6 +202,8 @@ if income_tax_documents_router:
     app.include_router(income_tax_documents_router)
 if income_tax_config_router:
     app.include_router(income_tax_config_router)
+if contact_support_router:
+    app.include_router(contact_support_router)
 
 @app.get("/health")
 async def health_check():

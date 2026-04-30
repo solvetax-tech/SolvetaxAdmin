@@ -86,27 +86,37 @@ async def _sync_crm_lead_with_gst(
             gst_row["id"],
         )
 
-        # Fallback: reuse latest active GST lead by entity_type + mobile
-        # (typically pre-created from bulk import with null entity_id).
+        # Fallback: look up latest active lead by mobile.
         if not existing:
             existing = await conn.fetchrow(
                 f"""
                 SELECT *
                 FROM {DB_SCHEMA}.crm_leads
-                WHERE entity_type = $1
-                  AND mobile = $2
+                WHERE mobile = $1
                   AND is_active = TRUE
                 ORDER BY id DESC
                 LIMIT 1
                 FOR UPDATE
                 """,
-                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
                 mobile,
             )
 
         remarks = "Auto synced from GST registration create/edit."
 
-        if existing:
+        # Update existing lead only when:
+        # - lead is already GST_REGISTRATION, OR
+        # - lead has no entity_type yet (base customer/bulk lead)
+        # If lead belongs to any other entity type, create a fresh GST lead row.
+        existing_entity_type = (existing.get("entity_type") or "").strip().upper() if existing else ""
+        can_update_existing = bool(
+            existing
+            and (
+                existing_entity_type == ""
+                or existing_entity_type == CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION
+            )
+        )
+
+        if can_update_existing:
             await conn.execute(
                 f"""
                 UPDATE {DB_SCHEMA}.crm_leads
