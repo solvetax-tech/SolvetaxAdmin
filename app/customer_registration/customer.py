@@ -76,6 +76,7 @@ def _customer_pincode_lookup_cache_key(pincode: str) -> str:
 async def _sync_crm_lead_from_customer(
     conn: asyncpg.Connection,
     customer_row: asyncpg.Record,
+    tag: Optional[str] = None,
 ) -> None:
     """
     Ensure a base CRM lead exists from customer create.
@@ -86,6 +87,7 @@ async def _sync_crm_lead_from_customer(
         mobile = customer_row.get("mobile")
         if not mobile:
             return
+        tag_value = (tag or "").strip() or None
 
         existing = await conn.fetchrow(
             f"""
@@ -105,21 +107,23 @@ async def _sync_crm_lead_from_customer(
                 UPDATE {DB_SCHEMA}.crm_leads
                 SET rm_id = COALESCE(rm_id, $1),
                     op_id = COALESCE(op_id, $2),
+                    tag = COALESCE($4, tag),
                     updated_at = NOW()
                 WHERE id = $3
                 """,
                 customer_row.get("rm_id"),
                 customer_row.get("op_id"),
                 existing["id"],
+                tag_value,
             )
             return
 
         await conn.fetchval(
             f"""
             INSERT INTO {DB_SCHEMA}.crm_leads
-                (mobile, stage, rm_id, op_id, is_active, remarks, created_at, updated_at)
+                (mobile, stage, rm_id, op_id, is_active, remarks, tag, created_at, updated_at)
             VALUES
-                ($1, $2, $3, $4, TRUE, $5, NOW(), NOW())
+                ($1, $2, $3, $4, TRUE, $5, $6, NOW(), NOW())
             RETURNING id
             """,
             mobile,
@@ -127,6 +131,7 @@ async def _sync_crm_lead_from_customer(
             customer_row.get("rm_id"),
             customer_row.get("op_id"),
             "Auto synced from customer create.",
+            tag_value,
         )
     except asyncpg.UndefinedTableError:
         logger.warning("CRM tables not found; skipping CRM sync from customer.")
@@ -599,7 +604,7 @@ async def create_customer(
                 customer_id = customer_row["customer_id"]
 
                 # 2️⃣ Sync base CRM lead from customer (mobile-based, no entity binding yet)
-                await _sync_crm_lead_from_customer(conn, customer_row)
+                await _sync_crm_lead_from_customer(conn, customer_row, payload.tag)
 
                 # --------------------------------------------------
                 # 3️⃣ Version Audit

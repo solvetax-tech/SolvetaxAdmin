@@ -55,6 +55,7 @@ def _raise_income_tax_validation_error(fields: dict, status_code: int = 400, mes
 async def _upsert_income_tax_lead_by_mobile_entity_type(
     conn: asyncpg.Connection,
     income_tax_row: asyncpg.Record,
+    tag: Optional[str] = None,
 ):
     """
     For INCOME_TAX leads, match by entity_type + mobile.
@@ -64,6 +65,7 @@ async def _upsert_income_tax_lead_by_mobile_entity_type(
         mobile = income_tax_row.get("mobile")
         if not mobile:
             return
+        tag_value = (tag or "").strip() or None
 
         existing_lead_id = await conn.fetchval(
             f"""
@@ -83,20 +85,22 @@ async def _upsert_income_tax_lead_by_mobile_entity_type(
                 f"""
                 UPDATE {DB_SCHEMA}.crm_leads
                 SET entity_id = $1,
+                    tag = COALESCE($3, tag),
                     updated_at = NOW()
                 WHERE id = $2
                 """,
                 income_tax_row["id"],
                 existing_lead_id,
+                tag_value,
             )
             return
 
         await conn.fetchval(
             f"""
             INSERT INTO {DB_SCHEMA}.crm_leads (
-                mobile, entity_id, entity_type, stage, rm_id, op_id, is_active, remarks, created_at, updated_at
+                mobile, entity_id, entity_type, stage, rm_id, op_id, is_active, remarks, tag, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
             RETURNING id
             """,
             mobile,
@@ -107,6 +111,7 @@ async def _upsert_income_tax_lead_by_mobile_entity_type(
             income_tax_row.get("op_id"),
             income_tax_row.get("is_active"),
             "Auto synced from income tax create.",
+            tag_value,
         )
     except asyncpg.UndefinedTableError:
         logger.warning("CRM tables not found; skipping income tax CRM sync.")
@@ -220,7 +225,7 @@ async def create_income_tax(
                 if not row:
                     raise HTTPException(status_code=500, detail="Income tax record creation failed.")
 
-                await _upsert_income_tax_lead_by_mobile_entity_type(conn, row)
+                await _upsert_income_tax_lead_by_mobile_entity_type(conn, row, payload.tag)
 
                 await conn.execute(
                     f"""

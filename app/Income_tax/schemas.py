@@ -31,6 +31,7 @@ class IncomeTaxIn(BaseSchema):
     refund_amount: Optional[float] = Field(None, ge=0)
     rm_id: Optional[int] = Field(None, gt=0)
     op_id: Optional[int] = Field(None, gt=0)
+    tag: Optional[str] = Field(None, max_length=100)
 
     @field_validator("pan_number", mode="before")
     @classmethod
@@ -54,6 +55,14 @@ class IncomeTaxIn(BaseSchema):
     @classmethod
     def normalize_upper_fields(cls, v):
         return v.strip().upper() if isinstance(v, str) and v.strip() else None
+
+    @field_validator("tag", mode="before")
+    @classmethod
+    def normalize_tag(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
 
     @field_validator("mobile", mode="before")
     @classmethod

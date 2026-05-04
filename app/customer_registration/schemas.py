@@ -46,6 +46,7 @@ class CustomerIn(BaseSchema):
 
     service_required: List[str] = Field(default_factory=list)
     service_provided: List[str] = Field(default_factory=list)
+    tag: Optional[str] = Field(None, max_length=100)
 
     # -----------------------------------------------------
     # Normalize email
@@ -75,6 +76,7 @@ class CustomerIn(BaseSchema):
         "city",
         "language",
         "remark",
+        "tag",
         mode="before",
     )
     @classmethod
