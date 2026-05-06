@@ -378,6 +378,24 @@ async def _mark_overdue_gst_return_statuses(conn) -> str:
     )
 
 
+async def _expire_client_otps(conn) -> str:
+    lim = SCHEDULER_SQL_BATCH_LIMIT
+    return await conn.execute(
+        f"""
+        UPDATE {DB_SCHEMA}.client_otp_verify
+        SET is_active = FALSE
+        WHERE id IN (
+            SELECT id
+            FROM {DB_SCHEMA}.client_otp_verify
+            WHERE is_active = TRUE
+              AND expires_at IS NOT NULL
+              AND expires_at < NOW()
+            LIMIT {lim}
+        )
+        """
+    )
+
+
 async def background_jobs():
     pool = await get_db_pool()
 
@@ -478,6 +496,12 @@ async def background_jobs():
                     )
                     """
                 )
+
+                # 5b) Expire client OTPs
+                otp_expired = await _expire_client_otps(conn)
+                _otp_n = otp_expired.split()[-1] if otp_expired else "0"
+                if _otp_n.isdigit() and int(_otp_n) > 0:
+                    logging.info("Client OTPs expired by scheduler: %s", otp_expired)
 
                 # 6) GST return-detail: NOT_FILED -> MISSED when due date has passed
                 overdue_status = await _mark_overdue_gst_return_statuses(conn)

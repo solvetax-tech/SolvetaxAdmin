@@ -76,76 +76,63 @@ def _customer_pincode_lookup_cache_key(pincode: str) -> str:
 async def _sync_crm_lead_from_customer(
     conn: asyncpg.Connection,
     customer_row: asyncpg.Record,
-    service_required: Optional[List[str]] = None,
     tag: Optional[str] = None,
 ) -> None:
     """
-    Ensure CRM lead(s) exist from customer create, one per selected service.
-    Creates/updates by (mobile + entity_type) so multiple services can coexist.
+    Ensure a base CRM lead exists from customer create.
+    Intentionally does not set entity_type/entity_id so downstream modules
+    (GST / ITR) can bind the same lead later by mobile.
     """
     try:
         mobile = customer_row.get("mobile")
         if not mobile:
             return
         tag_value = (tag or "").strip() or None
-        selected_services = []
-        for s in (service_required or []):
-            if isinstance(s, str):
-                code = s.strip().upper()
-                if code:
-                    selected_services.append(code)
-        selected_services = list(dict.fromkeys(selected_services))
-        if not selected_services:
-            return
 
-        for entity_type in selected_services:
-            existing = await conn.fetchrow(
+        existing = await conn.fetchrow(
+            f"""
+            SELECT id
+            FROM {DB_SCHEMA}.crm_leads
+            WHERE trim(mobile) = trim($1::text)
+              AND is_active = TRUE
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            mobile,
+        )
+        if existing:
+            await conn.execute(
                 f"""
-                SELECT id
-                FROM {DB_SCHEMA}.crm_leads
-                WHERE trim(mobile) = trim($1::text)
-                  AND upper(trim(coalesce(entity_type, ''))) = $2
-                  AND is_active = TRUE
-                ORDER BY id DESC
-                LIMIT 1
-                FOR UPDATE
+                UPDATE {DB_SCHEMA}.crm_leads
+                SET rm_id = COALESCE(rm_id, $1),
+                    op_id = COALESCE(op_id, $2),
+                    tag = COALESCE($4, tag),
+                    updated_at = NOW()
+                WHERE id = $3
                 """,
-                mobile,
-                entity_type,
-            )
-            if existing:
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.crm_leads
-                    SET rm_id = COALESCE(rm_id, $1),
-                        op_id = COALESCE(op_id, $2),
-                        tag = COALESCE($4, tag),
-                        updated_at = NOW()
-                    WHERE id = $3
-                    """,
-                    customer_row.get("rm_id"),
-                    customer_row.get("op_id"),
-                    existing["id"],
-                    tag_value,
-                )
-                continue
-
-            await conn.fetchval(
-                f"""
-                INSERT INTO {DB_SCHEMA}.crm_leads
-                    (mobile, entity_type, stage, rm_id, op_id, is_active, remarks, tag, created_at, updated_at)
-                VALUES
-                    ($1, $2, $3, $4, $5, TRUE, $6, $7, NOW(), NOW())
-                RETURNING id
-                """,
-                mobile,
-                entity_type,
-                "FRESH_LEAD",
                 customer_row.get("rm_id"),
                 customer_row.get("op_id"),
-                "Auto synced from customer create.",
+                existing["id"],
                 tag_value,
             )
+            return
+
+        await conn.fetchval(
+            f"""
+            INSERT INTO {DB_SCHEMA}.crm_leads
+                (mobile, stage, rm_id, op_id, is_active, remarks, tag, created_at, updated_at)
+            VALUES
+                ($1, $2, $3, $4, TRUE, $5, $6, NOW(), NOW())
+            RETURNING id
+            """,
+            mobile,
+            "FRESH_LEAD",
+            customer_row.get("rm_id"),
+            customer_row.get("op_id"),
+            "Auto synced from customer create.",
+            tag_value,
+        )
     except asyncpg.UndefinedTableError:
         logger.warning("CRM tables not found; skipping CRM sync from customer.")
     except asyncpg.PostgresError:
@@ -617,12 +604,7 @@ async def create_customer(
                 customer_id = customer_row["customer_id"]
 
                 # 2️⃣ Sync base CRM lead from customer (mobile-based, no entity binding yet)
-                await _sync_crm_lead_from_customer(
-                    conn,
-                    customer_row,
-                    service_required=service_required,
-                    tag=payload.tag,
-                )
+                await _sync_crm_lead_from_customer(conn, customer_row, payload.tag)
 
                 # --------------------------------------------------
                 # 3️⃣ Version Audit

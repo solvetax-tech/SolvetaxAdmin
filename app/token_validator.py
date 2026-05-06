@@ -30,6 +30,10 @@ PUBLIC_EXACT_ENDPOINTS = {
     ("POST", "/api/v1/income-tax"),
     ("POST", "/api/v1/customers"),
     ("POST", "/api/v1/contact-support"),
+    ("POST", "/api/v1/event-logs"),
+    ("POST", "/api/v1/event-logs/debug/smoke"),
+    ("POST", "/app/v1/client-otp/request"),
+    ("POST", "/app/v1/client-otp/verify"),
 }
 
 def _get_client_ip(request: Request | None) -> str:

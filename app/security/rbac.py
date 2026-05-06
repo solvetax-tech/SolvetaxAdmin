@@ -42,3 +42,20 @@ def require_permission(feature: str, permission: str):
         return payload
 
     return checker
+
+
+def require_admin():
+    """
+    Restrict route to employees whose JWT role is ADMIN.
+    """
+    async def checker(request: Request):
+        payload = get_current_user_payload(request)
+        role = str(payload.get("role") or "").strip().upper()
+        if role != "ADMIN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: admin only",
+            )
+        return payload
+
+    return checker

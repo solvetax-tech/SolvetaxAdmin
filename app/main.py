@@ -74,19 +74,19 @@ def custom_openapi():
         },
     }
 
-    public_post_paths = {
+    public_api_key_paths = {
         "/api/v1/customers",
         "/api/v1/income-tax",
         "/api/v1/contact-support",
+        "/api/v1/event-logs",
+        "/api/v1/event-logs/debug/smoke",
+        "/app/v1/client-otp/request",
+        "/app/v1/client-otp/verify",
     }
 
     for path_key, path_item in openapi_schema["paths"].items():
         for method_name, operation in path_item.items():
-            if method_name.lower() != "post":
-                operation.setdefault("security", []).append({"BearerAuth": []})
-                continue
-
-            if path_key in public_post_paths:
+            if path_key in public_api_key_paths:
                 operation["security"] = [{"PublicApiKey": []}]
             else:
                 operation.setdefault("security", []).append({"BearerAuth": []})
@@ -101,6 +101,7 @@ from app.sign_up.email_verification import router as email_verification
 from app.sign_up.signup import router as signup_router
 from app.sign_up.login import router as login_router
 from app.sign_up.forgot import router as forgot_password_router
+from app.sign_up.verify_client_otp import router as verify_client_otp_router
 from app.security.teams_api import router as teams_api
 from app.sign_up.employee_edit import router as employee_edit_router
 from app.customer_registration.customer import router as customer_router
@@ -132,6 +133,7 @@ from app.Income_tax.income_tax import router as income_tax_router
 from app.Income_tax.income_tax_documents import router as income_tax_documents_router
 from app.Income_tax.income_tax_config import router as income_tax_config_router
 from app.contact_support.contact_support import router as contact_support_router
+from app.customer_logs.customer_logs import router as customer_logs_router
 
 
 if email_verification:
@@ -142,6 +144,8 @@ if login_router:
     app.include_router(login_router)
 if forgot_password_router:
     app.include_router(forgot_password_router)
+if verify_client_otp_router:
+    app.include_router(verify_client_otp_router)
 if teams_api:
     app.include_router(teams_api)
 if customer_router:
@@ -204,6 +208,8 @@ if income_tax_config_router:
     app.include_router(income_tax_config_router)
 if contact_support_router:
     app.include_router(contact_support_router)
+if customer_logs_router:
+    app.include_router(customer_logs_router)
 
 @app.get("/health")
 async def health_check():
