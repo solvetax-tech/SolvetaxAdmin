@@ -58,6 +58,106 @@ async def _invalidate_gst_registration_cache(
         await redis_invalidate_tag(_gst_detail_tag(registration_id))
 
 
+def _normalize_crm_lead_source_value(lead_source: Optional[str]) -> Optional[str]:
+    if lead_source is None:
+        return None
+    s = str(lead_source).strip().upper()
+    return s[:120] if s else None
+
+
+async def _upsert_gst_registration_crm_lead_from_customer_intent(
+    conn: asyncpg.Connection,
+    customer_row: asyncpg.Record,
+    tag: Optional[str] = None,
+    lead_source: Optional[str] = None,
+) -> None:
+    """
+    Customer signup listed GST_REGISTRATION in service_required: ensure a CRM row exists with
+    entity_type GST_REGISTRATION, lead_source, and entity_id NULL until gst_registration is created.
+    _sync_crm_lead_with_gst later attaches entity_id to this row (or promotes a bare mobile lead).
+    """
+    try:
+        mobile = customer_row.get("mobile")
+        if not mobile:
+            return
+        tag_value = (tag or "").strip() or None
+        lead_src = _normalize_crm_lead_source_value(lead_source)
+
+        existing_lead_id = await conn.fetchval(
+            f"""
+            SELECT id
+            FROM {DB_SCHEMA}.crm_leads
+            WHERE entity_type = $1
+              AND trim(mobile) = trim($2::text)
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
+            mobile,
+        )
+        if existing_lead_id:
+            await conn.execute(
+                f"""
+                UPDATE {DB_SCHEMA}.crm_leads
+                SET rm_id = COALESCE(rm_id, $1),
+                    op_id = COALESCE(op_id, $2),
+                    tag = COALESCE($4, tag),
+                    lead_source = CASE
+                        WHEN $5::text IS NOT NULL AND btrim($5::text) <> '' THEN upper(btrim($5::text))
+                        ELSE lead_source
+                    END,
+                    updated_at = NOW()
+                WHERE id = $3
+                """,
+                customer_row.get("rm_id"),
+                customer_row.get("op_id"),
+                existing_lead_id,
+                tag_value,
+                lead_src,
+            )
+            return
+
+        await conn.fetchval(
+            f"""
+            INSERT INTO {DB_SCHEMA}.crm_leads (
+                mobile, entity_id, entity_type, stage, rm_id, op_id, is_active,
+                remarks, tag, lead_source, created_at, updated_at
+            )
+            VALUES (
+                trim($1::text),
+                NULL,
+                $2,
+                $3,
+                $4,
+                $5,
+                COALESCE($6, TRUE),
+                $7,
+                $8,
+                $9,
+                NOW(),
+                NOW()
+            )
+            RETURNING id
+            """,
+            mobile,
+            CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
+            "FRESH_LEAD",
+            customer_row.get("rm_id"),
+            customer_row.get("op_id"),
+            customer_row.get("is_active"),
+            "GST intent from customer signup; entity_id set when GST registration is created.",
+            tag_value,
+            lead_src,
+        )
+    except asyncpg.UndefinedTableError:
+        logger.warning("CRM tables not found; skipping GST intent CRM upsert from customer.")
+    except asyncpg.UndefinedColumnError:
+        logger.warning("crm_leads column missing; skipping GST intent CRM upsert from customer.")
+    except asyncpg.PostgresError:
+        logger.exception("GST intent CRM upsert from customer failed; continuing customer flow.")
+
+
 async def _sync_crm_lead_with_gst(
     conn: asyncpg.Connection,
     gst_row: asyncpg.Record,
@@ -86,19 +186,26 @@ async def _sync_crm_lead_with_gst(
             gst_row["id"],
         )
 
-        # Fallback: look up latest active lead by mobile.
+        # Fallback: latest active lead by mobile; prefer GST_REGISTRATION intent rows over generic
+        # mobile-only leads so customer signup + later GST create still binds correctly.
         if not existing:
             existing = await conn.fetchrow(
                 f"""
                 SELECT *
                 FROM {DB_SCHEMA}.crm_leads
-                WHERE mobile = $1
+                WHERE trim(mobile) = trim($1::text)
                   AND is_active = TRUE
-                ORDER BY id DESC
+                ORDER BY
+                    CASE
+                        WHEN upper(trim(coalesce(entity_type::text, ''))) = upper(trim($2::text))
+                        THEN 0 ELSE 1
+                    END,
+                    id DESC
                 LIMIT 1
                 FOR UPDATE
                 """,
                 mobile,
+                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
             )
 
         remarks = "Auto synced from GST registration create/edit."

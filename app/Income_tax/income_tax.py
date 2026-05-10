@@ -15,6 +15,7 @@ from app.redis_cache import (
 from app.security.public_security import enforce_public_security
 from app.security.rbac import require_permission
 from app.utils import DB_SCHEMA, build_income_tax_visibility, generate_uuid, get_db_pool
+from app.campaign.campaign import insert_campaign_capture_for_public_create
 
 router = APIRouter(prefix="/api/v1/income-tax", tags=["Income Tax"])
 CRM_LEAD_ENTITY_TYPE_INCOME_TAX = "INCOME_TAX"
@@ -52,10 +53,19 @@ def _raise_income_tax_validation_error(fields: dict, status_code: int = 400, mes
     )
 
 
+def _crm_lead_source_value(lead_source: Optional[str]) -> Optional[str]:
+    """Normalize for crm_leads.lead_source (upper, trimmed, max 120)."""
+    if lead_source is None:
+        return None
+    s = str(lead_source).strip().upper()
+    return s[:120] if s else None
+
+
 async def _upsert_income_tax_lead_by_mobile_entity_type(
     conn: asyncpg.Connection,
     income_tax_row: asyncpg.Record,
     tag: Optional[str] = None,
+    lead_source: Optional[str] = None,
 ):
     """
     For INCOME_TAX leads, match by entity_type + mobile.
@@ -66,6 +76,7 @@ async def _upsert_income_tax_lead_by_mobile_entity_type(
         if not mobile:
             return
         tag_value = (tag or "").strip() or None
+        lead_src = _crm_lead_source_value(lead_source)
 
         existing_lead_id = await conn.fetchval(
             f"""
@@ -86,21 +97,26 @@ async def _upsert_income_tax_lead_by_mobile_entity_type(
                 UPDATE {DB_SCHEMA}.crm_leads
                 SET entity_id = $1,
                     tag = COALESCE($3, tag),
+                    lead_source = CASE
+                        WHEN $4::text IS NOT NULL AND btrim($4::text) <> '' THEN upper(btrim($4::text))
+                        ELSE lead_source
+                    END,
                     updated_at = NOW()
                 WHERE id = $2
                 """,
                 income_tax_row["id"],
                 existing_lead_id,
                 tag_value,
+                lead_src,
             )
             return
 
         await conn.fetchval(
             f"""
             INSERT INTO {DB_SCHEMA}.crm_leads (
-                mobile, entity_id, entity_type, stage, rm_id, op_id, is_active, remarks, tag, created_at, updated_at
+                mobile, entity_id, entity_type, stage, rm_id, op_id, is_active, remarks, tag, lead_source, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
             RETURNING id
             """,
             mobile,
@@ -112,9 +128,12 @@ async def _upsert_income_tax_lead_by_mobile_entity_type(
             income_tax_row.get("is_active"),
             "Auto synced from income tax create.",
             tag_value,
+            lead_src,
         )
     except asyncpg.UndefinedTableError:
         logger.warning("CRM tables not found; skipping income tax CRM sync.")
+    except asyncpg.UndefinedColumnError:
+        logger.warning("crm_leads.lead_source column missing; skip lead_source in income tax CRM sync.")
     except asyncpg.PostgresError:
         logger.exception("Income tax CRM sync failed; continuing income tax flow.")
 
@@ -225,7 +244,16 @@ async def create_income_tax(
                 if not row:
                     raise HTTPException(status_code=500, detail="Income tax record creation failed.")
 
-                await _upsert_income_tax_lead_by_mobile_entity_type(conn, row, payload.tag)
+                await _upsert_income_tax_lead_by_mobile_entity_type(
+                    conn, row, tag=payload.tag, lead_source=payload.lead_source
+                )
+
+                await insert_campaign_capture_for_public_create(
+                    conn,
+                    mobile=payload.mobile,
+                    entity_type="INCOME_TAX",
+                    payload_model=payload,
+                )
 
                 await conn.execute(
                     f"""

@@ -1,8 +1,9 @@
 import logging
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Depends, status
+from fastapi import APIRouter, HTTPException, Query, Depends, status, Request
 from typing import Optional, List
 from app.security.rbac import require_permission
+from app.security.public_security import enforce_public_security
 from app.payments.schemas import RegistrationPaymentIn
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
 from app.logger import logger
@@ -15,6 +16,66 @@ router = APIRouter(
     prefix="/api/v1/payments_config",
     tags=["Payments Config"]
 )
+
+
+def _normalize_optional_filter(filter_value: Optional[str]) -> Optional[str]:
+    if filter_value is None:
+        return None
+    s = filter_value.strip()
+    return s if s else None
+
+
+SERVICE_PRICE_SPECS = [
+    {"code": "ITR_FILING", "mode": "first", "queries": [
+        {"entity_type": "INCOME_TAX", "value": "DEFAULT"},
+        {"entity_type": "INCOME_TAX", "value": "SALARY"},
+        {"entity_type": "INCOME_TAX", "value": "BUSINESS"},
+        {"entity_type": "INCOME_TAX", "value": "PROFESSION"},
+        {"entity_type": "INCOME_TAX", "value": "HOUSE_PROPERTY"},
+        {"entity_type": "INCOME_TAX", "value": "CAPITAL_GAINS"},
+        {"entity_type": "INCOME_TAX", "value": "OTHER_SOURCES"},
+        {"entity_type": "INCOME_TAX", "value": "MULTIPLE_SOURCES"},
+    ]},
+    {"code": "ITR_NOTICE", "mode": "first", "queries": [{"entity_type": "INCOME_TAX", "value": "ITR_NOTICE"}]},
+    {"code": "ADVANCE_TAX", "mode": "first", "queries": [{"entity_type": "INCOME_TAX", "value": "ADVANCE_TAX"}]},
+    {"code": "CAPITAL_GAINS", "mode": "first", "queries": [
+        {"entity_type": "INCOME_TAX", "value": "CAPITAL_GAINS_CALC"},
+        {"entity_type": "INCOME_TAX", "value": "CAPITAL_GAINS"},
+    ]},
+    {"code": "GST_REGISTRATION", "mode": "first", "queries": [
+        {"entity_type": "GST_REGISTRATION", "value": "DEFAULT"},
+        {"entity_type": "GST_REGISTRATION", "value": "PROPRIETARY"},
+        {"entity_type": "GST_REGISTRATION", "value": "PARTNERSHIP_FIRM"},
+        {"entity_type": "GST_REGISTRATION", "value": "COMPANY"},
+    ]},
+    {"code": "GST_AMENDMENT", "mode": "first", "queries": [{"entity_type": "GST", "value": "GST_AMENDMENT"}]},
+    {"code": "GST_CANCELLATION", "mode": "first", "queries": [{"entity_type": "GST", "value": "GST_CANCELLATION"}]},
+    {"code": "GST_FILING", "mode": "first", "queries": [{"entity_type": "GST_FILING", "value": "GST_FILING"}]},
+    {"code": "GST_Q_FILING", "mode": "first", "queries": [{"entity_type": "GST_FILING", "value": "GST_Q_FILING"}]},
+    {"code": "GST_ANNUAL_RETURN", "mode": "first", "queries": [{"entity_type": "GST_FILING", "value": "GST_ANNUAL_RETURN"}]},
+    {"code": "GST_LUT", "mode": "first", "queries": [{"entity_type": "GST", "value": "GST_LUT"}]},
+    {"code": "GST_REFUND", "mode": "first", "queries": [{"entity_type": "GST", "value": "GST_REFUND"}]},
+    {"code": "GST_NOTICE_REPLY", "mode": "first", "queries": [{"entity_type": "GST", "value": "GST_NOTICE_REPLY"}]},
+    {"code": "PVT_LTD_REG", "mode": "first", "queries": [{"entity_type": "COMPANY", "value": "PVT_LTD_REG"}]},
+    {"code": "LLP_REG", "mode": "first", "queries": [{"entity_type": "COMPANY", "value": "LLP_REG"}]},
+    {"code": "OPC_REG", "mode": "first", "queries": [{"entity_type": "COMPANY", "value": "OPC_REG"}]},
+    {"code": "PARTNERSHIP_REG", "mode": "first", "queries": [{"entity_type": "COMPANY", "value": "PARTNERSHIP_REG"}]},
+    {"code": "ROC_ANNUAL", "mode": "first", "queries": [{"entity_type": "MCA", "value": "ROC_ANNUAL"}]},
+    {"code": "DIR3_KYC", "mode": "first", "queries": [{"entity_type": "MCA", "value": "DIR3_KYC"}]},
+    {"code": "DIRECTOR_CHANGE", "mode": "first", "queries": [{"entity_type": "MCA", "value": "DIRECTOR_CHANGE"}]},
+    {"code": "MONTHLY_ACCOUNTING", "mode": "first", "queries": [{"entity_type": "ACCOUNTING", "value": "MONTHLY_ACCOUNTING"}]},
+    {"code": "YEAR_END_FINALIZATION", "mode": "first", "queries": [{"entity_type": "ACCOUNTING", "value": "YEAR_END_FINALIZATION"}]},
+    {"code": "PAYROLL_PROCESSING", "mode": "first", "queries": [{"entity_type": "PAYROLL", "value": "PAYROLL_PROCESSING"}]},
+    {"code": "PF_FILING", "mode": "first", "queries": [{"entity_type": "PAYROLL", "value": "PF_FILING"}]},
+    {"code": "ESI_FILING", "mode": "first", "queries": [{"entity_type": "PAYROLL", "value": "ESI_FILING"}]},
+    {"code": "TRADEMARK_REG", "mode": "first", "queries": [{"entity_type": "TRADEMARK", "value": "TRADEMARK_REG"}]},
+    {"code": "TRADEMARK_RENEWAL", "mode": "first", "queries": [{"entity_type": "TRADEMARK", "value": "TRADEMARK_RENEWAL"}]},
+    {"code": "MSME_REG", "mode": "first", "queries": [{"entity_type": "LICENSE", "value": "MSME_REG"}]},
+    {"code": "FSSAI_LICENSE", "mode": "first", "queries": [{"entity_type": "LICENSE", "value": "FSSAI_LICENSE"}]},
+    {"code": "IEC_REG", "mode": "first", "queries": [{"entity_type": "LICENSE", "value": "IEC_REG"}]},
+]
+
+
 # -------------------------------------------------------------------
 # GET PAYMENT CONFIG (UI DROPDOWN)
 # -------------------------------------------------------------------
@@ -78,6 +139,7 @@ async def get_payment_configs(
                         entity_type,
                         config_type,
                         value,
+                        filter,
                         display_name,
                         amount,
                         description,
@@ -120,6 +182,283 @@ async def get_payment_configs(
         loader=_load_payment_configs,
         ttl_seconds=300,
         tags=["payments_config:get_configs:index"],
+    )
+
+
+@router.get(
+    "/payment-config/public",
+    summary="Resolve one payment price (Public)",
+    responses={
+        200: {"description": "Payment config row or not found."},
+        500: {"description": "Database error."},
+    },
+)
+async def get_payment_configs_public(
+    request: Request,
+    entity_type: str = Query(..., min_length=1, description="Config bucket, e.g. INCOME_TAX, GST, GST_REGISTRATION"),
+    value: str = Query(..., min_length=1, description="Row key, e.g. SALARY, GST_FILING, PROPRIETARY"),
+    price_filter: Optional[str] = Query(
+        None,
+        alias="filter",
+        description="Optional variant (e.g. NULL_RETURNS / NOT_NULL_RETURNS). Omit to prefer unfiltered row, else lowest sort_order.",
+    ),
+):
+    """
+    Requires entity_type + value every time. Optional filter:
+    - If provided: exact filter match first, else falls back to rows with NULL filter.
+    - If omitted: prefers rows where filter IS NULL; else first row by sort_order (e.g. salary variants).
+    """
+    await enforce_public_security(
+        request=request,
+        bucket="public:payments_config",
+        max_requests=600,
+        window_seconds=60,
+        block_seconds=60,
+    )
+
+    request_id = generate_uuid()
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": "-", "api": "get_payment_configs_public"},
+    )
+
+    entity_type_norm = entity_type.strip().upper()
+    value_norm = value.strip().upper()
+    filter_norm = _normalize_optional_filter(price_filter)
+
+    log.info(
+        "PUBLIC payment resolve | entity_type=%s value=%s filter=%s",
+        entity_type_norm,
+        value_norm,
+        filter_norm,
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection error.",
+        )
+
+    async def _resolve_payment_config_public():
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT
+                        id,
+                        entity_type,
+                        config_type,
+                        value,
+                        filter,
+                        display_name,
+                        amount,
+                        description,
+                        sort_order
+                    FROM {DB_SCHEMA}.payment_config
+                    WHERE upper(trim(entity_type)) = $1
+                      AND upper(trim(value)) = $2
+                      AND upper(trim(config_type)) = 'PRICE'
+                      AND is_active = TRUE
+                      AND (
+                        $3::text IS NULL
+                        OR filter IS NULL
+                        OR upper(trim(filter)) = upper(trim($3::text))
+                      )
+                    ORDER BY
+                      CASE
+                        WHEN $3::text IS NOT NULL AND filter IS NOT NULL
+                          AND upper(trim(filter)) = upper(trim($3::text)) THEN 0
+                        WHEN $3::text IS NULL AND filter IS NULL THEN 0
+                        ELSE 1
+                      END,
+                      sort_order ASC NULLS LAST,
+                      amount ASC NULLS LAST
+                    LIMIT 1
+                    """,
+                    entity_type_norm,
+                    value_norm,
+                    filter_norm,
+                )
+
+            found = row is not None
+            log.info(
+                "PUBLIC payment resolve result | found=%s",
+                found,
+            )
+
+            return {
+                "data": dict(row) if row else None,
+                "found": found,
+                "request_id": request_id,
+            }
+
+        except asyncpg.PostgresError:
+            log.exception("Database error during public payment resolve")
+            raise HTTPException(
+                status_code=500,
+                detail="Database error occurred.",
+            )
+
+        except Exception:
+            log.exception("Unexpected error during public payment resolve")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal server error.",
+            )
+
+    cache_key = build_cache_key(
+        "payments_config:resolve_public",
+        entity_type=entity_type_norm,
+        value=value_norm,
+        filter=filter_norm or "",
+    )
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_resolve_payment_config_public,
+        ttl_seconds=90,
+        tags=["payments_config:resolve_public:index"],
+    )
+
+
+@router.get(
+    "/payment-config/public/service-prices",
+    summary="Get all UI service prices (Public, cached)",
+    responses={
+        200: {"description": "Service prices fetched."},
+        500: {"description": "Database error."},
+    },
+)
+async def get_public_service_prices(request: Request):
+    await enforce_public_security(
+        request=request,
+        bucket="public:payments_config:bulk",
+        max_requests=300,
+        window_seconds=60,
+        block_seconds=60,
+    )
+
+    request_id = generate_uuid()
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": "-", "api": "get_public_service_prices"},
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async def _load_bulk_service_prices():
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT
+                        upper(trim(entity_type)) AS entity_type,
+                        upper(trim(value)) AS value,
+                        CASE
+                            WHEN filter IS NULL OR trim(filter) = '' THEN NULL
+                            ELSE upper(trim(filter))
+                        END AS filter,
+                        amount,
+                        sort_order
+                    FROM {DB_SCHEMA}.payment_config
+                    WHERE upper(trim(config_type)) = 'PRICE'
+                      AND is_active = TRUE
+                    ORDER BY
+                        upper(trim(entity_type)),
+                        upper(trim(value)),
+                        CASE WHEN filter IS NULL OR trim(filter) = '' THEN 0 ELSE 1 END,
+                        sort_order ASC NULLS LAST,
+                        amount ASC NULLS LAST
+                    """
+                )
+
+                lookup_rows = []
+                rows_by_pair = {}
+                for row in rows:
+                    amount = row["amount"]
+                    if amount is None:
+                        continue
+                    entity_type = row["entity_type"]
+                    value = row["value"]
+                    filter_value = row["filter"]
+                    amount_num = float(amount)
+                    sort_order = row["sort_order"]
+                    lookup_rows.append(
+                        {
+                            "entity_type": entity_type,
+                            "value": value,
+                            "filter": filter_value,
+                            "amount": amount_num,
+                            "sort_order": sort_order,
+                        }
+                    )
+                    pair_key = (entity_type, value)
+                    pair_rows = rows_by_pair.get(pair_key)
+                    if pair_rows is None:
+                        pair_rows = []
+                        rows_by_pair[pair_key] = pair_rows
+                    pair_rows.append(
+                        {
+                            "filter": filter_value,
+                            "amount": amount_num,
+                        }
+                    )
+
+                def _pick_amount(entity_type: str, value: str, filter_value: Optional[str] = None) -> Optional[float]:
+                    pair_rows = rows_by_pair.get((entity_type, value))
+                    if not pair_rows:
+                        return None
+                    if filter_value:
+                        filter_norm = filter_value.strip().upper()
+                        for item in pair_rows:
+                            if item["filter"] == filter_norm:
+                                return item["amount"]
+                    for item in pair_rows:
+                        if item["filter"] is None:
+                            return item["amount"]
+                    return pair_rows[0]["amount"]
+
+                price_map = {}
+                for spec in SERVICE_PRICE_SPECS:
+                    resolved_amount = None
+                    for q in spec["queries"]:
+                        entity_type = (q.get("entity_type") or "").strip().upper()
+                        value = (q.get("value") or "").strip().upper()
+                        filter_value = q.get("filter")
+                        if not entity_type or not value:
+                            continue
+                        amount = _pick_amount(entity_type, value, filter_value)
+                        if amount is not None:
+                            resolved_amount = amount
+                            break
+                    if resolved_amount is not None:
+                        price_map[spec["code"]] = resolved_amount
+
+            return {
+                "data": price_map,
+                "count": len(price_map),
+                "lookup_rows": lookup_rows,
+                "request_id": request_id,
+            }
+        except asyncpg.PostgresError:
+            log.exception("Database error during bulk service price fetch")
+            raise HTTPException(status_code=500, detail="Database error occurred.")
+        except Exception:
+            log.exception("Unexpected error during bulk service price fetch")
+            raise HTTPException(status_code=500, detail="Internal server error.")
+
+    cache_key = build_cache_key("payments_config:public_service_prices")
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_bulk_service_prices,
+        ttl_seconds=180,
+        tags=["payments_config:public_service_prices:index"],
     )
 
 @router.get(
@@ -260,10 +599,15 @@ async def get_payment_amount(
                         f"""
                         SELECT display_name, amount, description, is_active
                         FROM {DB_SCHEMA}.payment_config
-                        WHERE upper(entity_type) = $1
-                          AND config_type = 'PRICE'
-                          AND (value = $2 OR value = 'DEFAULT')
-                        ORDER BY CASE WHEN value = $2 THEN 0 ELSE 1 END ASC
+                        WHERE upper(trim(entity_type)) = upper(trim($1::text))
+                          AND upper(trim(config_type)) = 'PRICE'
+                          AND (
+                            upper(trim(value)) = upper(trim($2::text))
+                            OR upper(trim(value)) = 'DEFAULT'
+                          )
+                          AND (filter IS NULL OR trim(filter) = '')
+                        ORDER BY
+                          CASE WHEN upper(trim(value)) = upper(trim($2::text)) THEN 0 ELSE 1 END ASC
                         LIMIT 1
                         """,
                         entity_type_norm,

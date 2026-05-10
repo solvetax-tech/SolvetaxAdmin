@@ -47,6 +47,38 @@ class CustomerIn(BaseSchema):
     service_required: List[str] = Field(default_factory=list)
     service_provided: List[str] = Field(default_factory=list)
     tag: Optional[str] = Field(None, max_length=100)
+    lead_source: Optional[str] = Field(
+        None,
+        max_length=120,
+        description="Stored on crm_leads when CRM sync runs (e.g. WEBSITE, PAID_GOOGLE, or UTM-derived code).",
+    )
+
+    utm_source: Optional[str] = Field(None, max_length=120)
+    utm_medium: Optional[str] = Field(None, max_length=120)
+    utm_campaign: Optional[str] = Field(None, max_length=200)
+    utm_content: Optional[str] = Field(None, max_length=200)
+    capture_page_path: Optional[str] = Field(None, max_length=1024)
+    capture_page_url: Optional[str] = None
+    capture_page_query: Optional[str] = None
+    capture_referrer_url: Optional[str] = None
+    platform: Optional[str] = Field(None, max_length=20)
+    device_type: Optional[str] = Field(None, max_length=20)
+    device_model: Optional[str] = Field(None, max_length=200)
+    os_name: Optional[str] = Field(None, max_length=64)
+    os_version: Optional[str] = Field(None, max_length=32)
+    browser_name: Optional[str] = Field(None, max_length=64)
+    browser_version: Optional[str] = Field(None, max_length=32)
+    app_version: Optional[str] = Field(None, max_length=64)
+    environment: Optional[str] = Field(None, max_length=32)
+    release_tag: Optional[str] = Field(None, max_length=64)
+    user_agent: Optional[str] = None
+    viewport_width: Optional[int] = None
+    viewport_height: Optional[int] = None
+    screen_width: Optional[int] = None
+    screen_height: Optional[int] = None
+    capture_language: Optional[str] = Field(None, max_length=32, description="Browser language at submit.")
+    timezone_offset_min: Optional[int] = None
+    ingestion_source: Optional[str] = Field(None, max_length=40)
 
     # -----------------------------------------------------
     # Normalize email
@@ -82,6 +114,30 @@ class CustomerIn(BaseSchema):
     @classmethod
     def sanitize_strings(cls, v):
         return html.escape(v.strip()) if isinstance(v, str) else v
+
+    @field_validator("lead_source", mode="before")
+    @classmethod
+    def normalize_lead_source(cls, v):
+        if isinstance(v, str):
+            s = v.strip().upper()
+            return s[:120] if s else None
+        return v
+
+    @field_validator(
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "capture_language",
+        "ingestion_source",
+        mode="before",
+    )
+    @classmethod
+    def normalize_upper_marketing_customer(cls, v):
+        if isinstance(v, str):
+            s = v.strip().upper()
+            return s[:200] if s else None
+        return v
 
 
 # =========================================================
@@ -185,7 +241,14 @@ class CustomerEditIn(BaseSchema):
     # NEW SERVICE FIELDS
     # -----------------------------------------------------
 
-    service_required: Optional[List[str]] = None
+    service_required: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Service codes to add. Merged with existing customer.service_required: "
+            "only new codes are appended; order preserved; duplicates ignored (case-insensitive). "
+            "Does not create income_tax rows; use income-tax API for ITR."
+        ),
+    )
     service_provided: Optional[List[str]] = None
 
 

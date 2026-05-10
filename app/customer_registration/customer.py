@@ -14,6 +14,10 @@ from app.customer_registration.schemas import (
     BusinessDescriptionGenerateIn,
 )
 from app.utils import get_db_pool, DB_SCHEMA, is_business_description_ai_configured
+from app.campaign.campaign import insert_campaign_capture_for_public_create
+from app.gst_registration.gst_registration import (
+    _upsert_gst_registration_crm_lead_from_customer_intent,
+)
 from app.security.rbac import require_permission
 from app.security.public_security import enforce_public_security
 from app.logger import logger
@@ -73,10 +77,53 @@ def _customer_pincode_lookup_cache_key(pincode: str) -> str:
     return build_cache_key("customer:pincode_lookup", pincode=pincode)
 
 
+def _crm_lead_source_value(lead_source: Optional[str]) -> Optional[str]:
+    if lead_source is None:
+        return None
+    s = str(lead_source).strip().upper()
+    return s[:120] if s else None
+
+
+def _services_include_gst_registration(services: List[str]) -> bool:
+    return any(str(x).strip().upper() == "GST_REGISTRATION" for x in (services or []))
+
+
+def _merge_service_required_with_existing(
+    existing_values: Optional[List[str]],
+    incoming_values: List[str],
+) -> List[str]:
+    """
+    Append-only merge: keep existing order, then add incoming codes not already present
+    (comparison is case-insensitive). Matches "add more services" without replacing the list.
+    """
+    seen: set[str] = set()
+    out: List[str] = []
+
+    def push(raw: object) -> None:
+        if not isinstance(raw, str):
+            return
+        t = raw.strip()
+        if not t:
+            return
+        k = t.upper()
+        if k in seen:
+            return
+        seen.add(k)
+        out.append(t)
+
+    if existing_values:
+        for item in existing_values:
+            push(item)
+    for item in incoming_values:
+        push(item)
+    return out
+
+
 async def _sync_crm_lead_from_customer(
     conn: asyncpg.Connection,
     customer_row: asyncpg.Record,
     tag: Optional[str] = None,
+    lead_source: Optional[str] = None,
 ) -> None:
     """
     Ensure a base CRM lead exists from customer create.
@@ -88,6 +135,7 @@ async def _sync_crm_lead_from_customer(
         if not mobile:
             return
         tag_value = (tag or "").strip() or None
+        lead_src = _crm_lead_source_value(lead_source)
 
         existing = await conn.fetchrow(
             f"""
@@ -108,6 +156,10 @@ async def _sync_crm_lead_from_customer(
                 SET rm_id = COALESCE(rm_id, $1),
                     op_id = COALESCE(op_id, $2),
                     tag = COALESCE($4, tag),
+                    lead_source = CASE
+                        WHEN $5::text IS NOT NULL AND btrim($5::text) <> '' THEN upper(btrim($5::text))
+                        ELSE lead_source
+                    END,
                     updated_at = NOW()
                 WHERE id = $3
                 """,
@@ -115,15 +167,16 @@ async def _sync_crm_lead_from_customer(
                 customer_row.get("op_id"),
                 existing["id"],
                 tag_value,
+                lead_src,
             )
             return
 
         await conn.fetchval(
             f"""
             INSERT INTO {DB_SCHEMA}.crm_leads
-                (mobile, stage, rm_id, op_id, is_active, remarks, tag, created_at, updated_at)
+                (mobile, stage, rm_id, op_id, is_active, remarks, tag, lead_source, created_at, updated_at)
             VALUES
-                ($1, $2, $3, $4, TRUE, $5, $6, NOW(), NOW())
+                ($1, $2, $3, $4, TRUE, $5, $6, $7, NOW(), NOW())
             RETURNING id
             """,
             mobile,
@@ -132,9 +185,12 @@ async def _sync_crm_lead_from_customer(
             customer_row.get("op_id"),
             "Auto synced from customer create.",
             tag_value,
+            lead_src,
         )
     except asyncpg.UndefinedTableError:
         logger.warning("CRM tables not found; skipping CRM sync from customer.")
+    except asyncpg.UndefinedColumnError:
+        logger.warning("crm_leads.lead_source column missing; skip lead_source in customer CRM sync.")
     except asyncpg.PostgresError:
         logger.exception("CRM sync failed from customer; continuing customer flow.")
 
@@ -604,7 +660,24 @@ async def create_customer(
                 customer_id = customer_row["customer_id"]
 
                 # 2️⃣ Sync base CRM lead from customer (mobile-based, no entity binding yet)
-                await _sync_crm_lead_from_customer(conn, customer_row, payload.tag)
+                await _sync_crm_lead_from_customer(
+                    conn, customer_row, tag=payload.tag, lead_source=payload.lead_source
+                )
+
+                if _services_include_gst_registration(service_required):
+                    await _upsert_gst_registration_crm_lead_from_customer_intent(
+                        conn,
+                        customer_row,
+                        tag=payload.tag,
+                        lead_source=payload.lead_source,
+                    )
+
+                await insert_campaign_capture_for_public_create(
+                    conn,
+                    mobile=payload.mobile,
+                    entity_type="CUSTOMER",
+                    payload_model=payload,
+                )
 
                 # --------------------------------------------------
                 # 3️⃣ Version Audit
@@ -1511,14 +1584,15 @@ async def edit_customer(
         return list(dict.fromkeys(cleaned))
 
     # --------------------------------------------------
-    # Normalize service arrays
+    # Normalize service arrays (service_required merged with DB row inside transaction)
     # --------------------------------------------------
 
+    incoming_service_required_patch: Optional[List[str]] = None
     if "service_required" in update_data:
-
-        update_data["service_required"] = normalize_services(
+        incoming_service_required_patch = normalize_services(
             update_data["service_required"]
         )
+        update_data.pop("service_required", None)
 
     if "service_provided" in update_data:
 
@@ -1580,6 +1654,19 @@ async def edit_customer(
                                 "fields": {}
                             }
                         }
+                    )
+
+                if incoming_service_required_patch is not None:
+                    existing_sr = old_row["service_required"]
+                    if existing_sr is None:
+                        existing_list: List[str] = []
+                    elif isinstance(existing_sr, list):
+                        existing_list = list(existing_sr)
+                    else:
+                        existing_list = list(existing_sr)
+                    update_data["service_required"] = _merge_service_required_with_existing(
+                        existing_list,
+                        incoming_service_required_patch,
                     )
 
                 # --------------------------------------------------
@@ -1701,6 +1788,21 @@ async def edit_customer(
                             }
                         }
                     )
+
+                if incoming_service_required_patch is not None:
+                    had_gst = _services_include_gst_registration(
+                        old_row.get("service_required") or []
+                    )
+                    has_gst = _services_include_gst_registration(
+                        new_row.get("service_required") or []
+                    )
+                    if has_gst and not had_gst:
+                        await _upsert_gst_registration_crm_lead_from_customer_intent(
+                            conn,
+                            new_row,
+                            tag=None,
+                            lead_source=None,
+                        )
 
                 # --------------------------------------------------
                 # 4️⃣ Version Audit

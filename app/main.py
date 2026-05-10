@@ -80,6 +80,8 @@ def custom_openapi():
         "/api/v1/contact-support",
         "/api/v1/event-logs",
         "/api/v1/event-logs/debug/smoke",
+        "/api/v1/payments_config/payment-config/public",
+        "/api/v1/payments_config/payment-config/public/service-prices",
         "/app/v1/client-otp/request",
         "/app/v1/client-otp/verify",
     }
@@ -133,7 +135,7 @@ from app.Income_tax.income_tax import router as income_tax_router
 from app.Income_tax.income_tax_documents import router as income_tax_documents_router
 from app.Income_tax.income_tax_config import router as income_tax_config_router
 from app.contact_support.contact_support import router as contact_support_router
-from app.customer_logs.customer_logs import router as customer_logs_router
+from app.campaign.campaign import router as campaign_router
 
 
 if email_verification:
@@ -208,8 +210,8 @@ if income_tax_config_router:
     app.include_router(income_tax_config_router)
 if contact_support_router:
     app.include_router(contact_support_router)
-if customer_logs_router:
-    app.include_router(customer_logs_router)
+if campaign_router:
+    app.include_router(campaign_router)
 
 @app.get("/health")
 async def health_check():
