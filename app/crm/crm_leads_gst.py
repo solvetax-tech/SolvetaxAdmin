@@ -1,20 +1,22 @@
+"""GST-registration funnel CRM: GST-only stage transitions + single-lead APIs."""
+
 import logging
 from datetime import datetime
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.crm.crm_leads_common import (
     CLOSED_STAGES,
-    FIRST_PITCH_CONNECTED,
     FINAL_PITCH_CONNECTED,
+    FIRST_PITCH_CONNECTED,
     FOLLOWUP_STATUSES,
     IST,
+    _FIRST_PITCH_CONNECTED_STAGES,
+    _STATUSES_NO_STAGE_CHANGE,
     _crm_lead_by_id_tag,
-    _crm_lead_activities_tag,
-    _crm_lead_calls_tag,
-    _crm_lead_stage_history_tag,
+    _entity_type_query,
     _fetch_crm_lead_visible,
     _get_user_context,
     _invalidate_crm_cache,
@@ -25,124 +27,34 @@ from app.crm.crm_leads_common import (
     _validate_crm_call_against_mappings,
     _validation_error,
 )
-from app.crm.schemas_itr import CRMCallUpdateIn, CRMFollowupStatusUpdateIn, CRMLeadEditIn
+from app.crm.schemas_gst import CRMCallUpdateIn, CRMFollowupStatusUpdateIn, CRMLeadEditIn
 from app.logger import logger
 from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
 from app.security.rbac import require_permission
 from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
 
-router = APIRouter(prefix="/api/v1/crm/itr/leads", tags=["CRM Leads ITR"])
-ITR_ENTITY_TYPE = "INCOME_TAX"
-ITR_CLOSED_STAGES = {"SUBSCRIBED", "NOT_INTERESTED"}
-ITR_STATUSES_NO_STAGE_CHANGE = frozenset(
-    {"CALL_NOT_ANSWERED", "CALL_NOT_CONNECTED", "CALL_BUSY", "CALL_DONE"}
-)
-ITR_FIRST_PITCH_CONNECTED_STAGES = frozenset(
-    {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}
-)
+router = APIRouter(prefix="/api/v1/crm/leads", tags=["CRM Leads GST"])
 
+# --- GST funnel call transitions ---
 
-@router.get("/{lead_id:int}", summary="Get CRM ITR lead by id")
-async def get_crm_itr_lead(
-    lead_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "READ")),
-):
-    role, emp_id = _get_user_context(current_user)
-    _require_crm_row_context(role, emp_id)
-    cache_key = build_cache_key("crm:itr:lead:by_id", lead_id=lead_id, role=role, emp_id=emp_id)
-    pool = await get_db_pool()
+def _transition_stage(current_stage: str, call_type_code: str, call_status_code: str) -> Optional[str]:
+    """
+    Map call outcome to the next CRM stage.
 
-    async def _load_crm_itr_lead():
-        try:
-            async with pool.acquire() as conn:
-                row = await _fetch_crm_lead_visible(
-                    conn,
-                    role,
-                    emp_id,
-                    lead_id,
-                    entity_type=ITR_ENTITY_TYPE,
-                )
-                if not row:
-                    raise HTTPException(status_code=404, detail="CRM lead not found.")
-                return dict(row)
-        except asyncpg.PostgresError:
-            logger.exception("Database error while fetching CRM ITR lead")
-            raise HTTPException(status_code=500, detail="Database error.")
+    Returns a stage string to set, or None to leave the lead in ``current_stage``.
 
-    return await redis_get_or_set_json(
-        cache_key,
-        loader=_load_crm_itr_lead,
-        ttl_seconds=300,
-        tags=[_crm_lead_by_id_tag(lead_id)],
-    )
+    First-pitch style stages (FRESH_LEAD / FOLLOW_UP / INTERESTED):
+    - CALL_NOT_ANSWERED, CALL_NOT_CONNECTED, CALL_BUSY, CALL_DONE → no stage change
+    - CALL_BACK → FOLLOW_UP (already FOLLOW_UP → no stage change)
+    - CONNECTED_AND_SCHEDULED → INTERESTED from FRESH_LEAD or FOLLOW_UP; no change when already INTERESTED
+    - SEND_DOCS → PENDING_REGISTRATION_DATA from FRESH_LEAD, FOLLOW_UP, or INTERESTED
+    - NOT_INTERESTED → NOT_INTERESTED from FRESH_LEAD, FOLLOW_UP, or INTERESTED (and other allowed contexts)
 
-
-@router.post("/{lead_id:int}/edit", summary="Edit CRM ITR lead")
-async def edit_crm_itr_lead(
-    lead_id: int,
-    payload: CRMLeadEditIn,
-    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
-):
-    role = (current_user.get("role") or "").strip().upper()
-    if role != "ADMIN":
-        raise HTTPException(status_code=403, detail="Only ADMIN can edit CRM leads directly.")
-
-    update_data = payload.model_dump(exclude_unset=True)
-    pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                old_row = await conn.fetchrow(
-                    f"""
-                    SELECT * FROM {DB_SCHEMA}.crm_leads
-                    WHERE id = $1 AND upper(trim(entity_type)) = $2
-                    FOR UPDATE
-                    """,
-                    lead_id,
-                    ITR_ENTITY_TYPE,
-                )
-                if not old_row:
-                    raise HTTPException(status_code=404, detail="CRM lead not found.")
-                if old_row["stage"] in CLOSED_STAGES and "stage" in update_data:
-                    raise _validation_error(
-                        "Closed lead stage cannot be changed.",
-                        {"stage": f"Lead is closed in {old_row['stage']}."},
-                    )
-                if "followup_at" in update_data and update_data["followup_at"] is not None:
-                    if update_data["followup_at"] <= datetime.now(IST):
-                        raise _validation_error("Invalid followup datetime.", {"followup_at": "Must be a future datetime."})
-
-                fields, values, idx = [], [], 1
-                for key, value in update_data.items():
-                    fields.append(f"{key} = ${idx}")
-                    values.append(value)
-                    idx += 1
-                fields.append("updated_at = NOW()")
-                values.append(lead_id)
-
-                new_row = await conn.fetchrow(
-                    f"""
-                    UPDATE {DB_SCHEMA}.crm_leads
-                    SET {', '.join(fields)}
-                    WHERE id = ${idx} AND upper(trim(entity_type)) = '{ITR_ENTITY_TYPE}'
-                    RETURNING *
-                    """,
-                    *values,
-                )
-                result = {"message": "CRM lead updated successfully.", "lead": dict(new_row)}
-            await _invalidate_crm_cache(lead_id)
-            return result
-    except asyncpg.exceptions.ForeignKeyViolationError:
-        raise _validation_error("Invalid foreign key reference.", {"rm_id/op_id": "Referenced employee not found."})
-    except asyncpg.exceptions.CheckViolationError as e:
-        raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
-    except asyncpg.PostgresError:
-        logger.exception("Database error while editing CRM ITR lead")
-        raise HTTPException(status_code=500, detail="Database error.")
-
-
-def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_code: str):
-    if call_status_code in ITR_STATUSES_NO_STAGE_CHANGE:
+    GST_REGISTRATION_DONE (final pitch):
+    - CALL_NOT_ANSWERED, CALL_NOT_CONNECTED, CALL_BUSY, CALL_DONE → no stage change
+    - SCHEDULED_PAYMENT → SCHEDULED_PAYMENTS
+    """
+    if call_status_code in _STATUSES_NO_STAGE_CHANGE:
         return None
 
     if call_status_code == "CALL_BACK":
@@ -151,7 +63,7 @@ def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_c
         return "FOLLOW_UP"
 
     if call_status_code == "CONNECTED_AND_SCHEDULED":
-        if current_stage not in ITR_FIRST_PITCH_CONNECTED_STAGES:
+        if current_stage not in _FIRST_PITCH_CONNECTED_STAGES:
             raise _validation_error(
                 "Invalid stage for CONNECTED_AND_SCHEDULED.",
                 {
@@ -163,6 +75,7 @@ def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_c
             )
         if current_stage == "INTERESTED":
             return None
+        # FRESH_LEAD or FOLLOW_UP → advance to INTERESTED
         return "INTERESTED"
 
     if call_status_code == "NOT_INTERESTED":
@@ -170,7 +83,7 @@ def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_c
 
     if call_status_code == "SEND_DOCS":
         if current_stage in {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}:
-            return "PENDING_ITR_DATA"
+            return "PENDING_REGISTRATION_DATA"
         raise _validation_error(
             "Invalid stage for SEND_DOCS.",
             {
@@ -182,13 +95,13 @@ def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_c
         )
 
     if call_status_code == "SCHEDULED_PAYMENT":
-        if current_stage == "ITR_DONE":
+        if current_stage == "GST_REGISTRATION_DONE":
             return "SCHEDULED_PAYMENTS"
         raise _validation_error(
             "Invalid stage for SCHEDULED_PAYMENT.",
             {
                 "stage": (
-                    f"SCHEDULED_PAYMENT applies only from ITR_DONE; "
+                    f"SCHEDULED_PAYMENT applies only from GST_REGISTRATION_DONE; "
                     f"current is {current_stage}."
                 )
             },
@@ -196,11 +109,13 @@ def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_c
 
     raise _validation_error(
         "Invalid status for call type.",
-        {"call_status_code": f"{call_status_code} is not allowed for {call_type_code}."},
+        {
+            "call_status_code": f"{call_status_code} is not allowed for {call_type_code}.",
+        },
     )
 
 
-async def _crm_itr_apply_call_update(
+async def _crm_apply_call_update(
     conn: asyncpg.Connection,
     role: str,
     emp_id: int,
@@ -209,27 +124,25 @@ async def _crm_itr_apply_call_update(
     payload: CRMCallUpdateIn,
     log: logging.LoggerAdapter,
 ) -> dict:
+    """Apply call outcome: updates crm_leads + inserts crm_activities with dial/contact timestamps."""
     call_type_code = _normalize_code(payload.call_type_code)
     call_status_code = _normalize_code(payload.call_status_code)
 
-    await _validate_call_config(conn, call_type_code, call_status_code, ITR_ENTITY_TYPE)
+    et_ref = _entity_type_query(lead.get("entity_type"))
+
+    await _validate_call_config(conn, call_type_code, call_status_code, et_ref)
 
     if not lead["is_active"]:
         raise _validation_error("Inactive lead cannot be updated via call flow.")
 
     current_stage = lead["stage"]
-    if current_stage in ITR_CLOSED_STAGES:
+    if current_stage in CLOSED_STAGES:
         raise _validation_error(
             "Lead is closed; stage updates are not allowed.",
             {"stage": f"Current stage is {current_stage}."},
         )
-
     await _validate_crm_call_against_mappings(
-        conn,
-        current_stage,
-        call_type_code,
-        call_status_code,
-        ITR_ENTITY_TYPE,
+        conn, current_stage, call_type_code, call_status_code, et_ref
     )
 
     if payload.followup_at is not None and payload.followup_at <= datetime.now(IST):
@@ -237,7 +150,7 @@ async def _crm_itr_apply_call_update(
     if call_status_code in {"CALL_BACK", "SCHEDULED_PAYMENT"} and payload.followup_at is None:
         raise _validation_error("followup_at is required.", {"followup_at": f"Required for {call_status_code}."})
 
-    target_stage = _itr_transition_stage(current_stage, call_type_code, call_status_code)
+    target_stage = _transition_stage(current_stage, call_type_code, call_status_code)
     connected_inc = int(
         (call_type_code == "FIRST_PITCH_CALL" and call_status_code in FIRST_PITCH_CONNECTED)
         or (call_type_code == "FINAL_PITCH_CALL" and call_status_code in FINAL_PITCH_CONNECTED)
@@ -300,7 +213,7 @@ async def _crm_itr_apply_call_update(
     )
 
     log.info(
-        "CRM ITR call updated | lead_id=%s old_stage=%s new_stage=%s type=%s status=%s",
+        "CRM call updated | lead_id=%s old_stage=%s new_stage=%s type=%s status=%s",
         lead_id,
         current_stage,
         new_stage,
@@ -325,7 +238,7 @@ async def _crm_itr_apply_call_update(
     }
 
 
-async def _crm_itr_apply_followup_status(
+async def _crm_apply_followup_status(
     conn: asyncpg.Connection,
     emp_id: int,
     lead_id: int,
@@ -338,6 +251,7 @@ async def _crm_itr_apply_followup_status(
         raise _validation_error("Inactive lead cannot be updated.")
 
     old_status = lead.get("follow_up_status")
+
     if follow_up_status == "PENDING" and payload.followup_at is None and lead.get("followup_at") is None:
         raise _validation_error(
             "followup_at is required for pending status.",
@@ -383,7 +297,7 @@ async def _crm_itr_apply_followup_status(
     )
 
     log.info(
-        "CRM ITR follow-up status updated | lead_id=%s old_status=%s new_status=%s",
+        "CRM follow-up status updated | lead_id=%s old_status=%s new_status=%s",
         lead_id,
         old_status,
         follow_up_status,
@@ -401,8 +315,90 @@ async def _crm_itr_apply_followup_status(
     }
 
 
-@router.post("/{lead_id:int}/followup-status", summary="Update CRM ITR lead follow-up status")
-async def update_crm_itr_followup_status(
+
+
+@router.get("/{lead_id:int}", summary="Get CRM lead by id")
+async def get_crm_lead(lead_id: int, current_user=Depends(require_permission("EMPLOYEE", "READ"))):
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+    cache_key = build_cache_key("crm:lead:by_id", lead_id=lead_id, role=role, emp_id=emp_id)
+    pool = await get_db_pool()
+    async def _load_crm_lead():
+        try:
+            async with pool.acquire() as conn:
+                row = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
+                if not row:
+                    raise HTTPException(status_code=404, detail="CRM lead not found.")
+                return dict(row)
+        except asyncpg.PostgresError:
+            logger.exception("Database error while fetching CRM lead")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_crm_lead,
+        ttl_seconds=300,
+        tags=[_crm_lead_by_id_tag(lead_id)],
+    )
+
+
+@router.post("/{lead_id:int}/edit", summary="Edit CRM lead")
+async def edit_crm_lead(
+    lead_id: int,
+    payload: CRMLeadEditIn,
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    role = (current_user.get("role") or "").strip().upper()
+    if role != "ADMIN":
+        raise HTTPException(status_code=403, detail="Only ADMIN can edit CRM leads directly.")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                old_row = await conn.fetchrow(
+                    f"SELECT * FROM {DB_SCHEMA}.crm_leads WHERE id = $1 FOR UPDATE",
+                    lead_id,
+                )
+                if not old_row:
+                    raise HTTPException(status_code=404, detail="CRM lead not found.")
+                if old_row["stage"] in CLOSED_STAGES and "stage" in update_data:
+                    raise _validation_error(
+                        "Closed lead stage cannot be changed.",
+                        {"stage": f"Lead is closed in {old_row['stage']}."},
+                    )
+                if "followup_at" in update_data and update_data["followup_at"] is not None:
+                    if update_data["followup_at"] <= datetime.now(IST):
+                        raise _validation_error("Invalid followup datetime.", {"followup_at": "Must be a future datetime."})
+
+                fields, values, idx = [], [], 1
+                for key, value in update_data.items():
+                    fields.append(f"{key} = ${idx}")
+                    values.append(value)
+                    idx += 1
+                fields.append("updated_at = NOW()")
+                values.append(lead_id)
+
+                new_row = await conn.fetchrow(
+                    f"UPDATE {DB_SCHEMA}.crm_leads SET {', '.join(fields)} WHERE id = ${idx} RETURNING *",
+                    *values,
+                )
+                result = {"message": "CRM lead updated successfully.", "lead": dict(new_row)}
+            await _invalidate_crm_cache(lead_id)
+            return result
+    except asyncpg.exceptions.ForeignKeyViolationError:
+        raise _validation_error("Invalid foreign key reference.", {"rm_id/op_id": "Referenced employee not found."})
+    except asyncpg.exceptions.CheckViolationError as e:
+        raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
+    except asyncpg.PostgresError:
+        logger.exception("Database error while editing CRM lead")
+        raise HTTPException(status_code=500, detail="Database error.")
+
+
+
+@router.post("/{lead_id:int}/followup-status", summary="Update CRM lead follow-up status")
+async def update_crm_followup_status(
     lead_id: int,
     payload: CRMFollowupStatusUpdateIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
@@ -412,12 +408,13 @@ async def update_crm_itr_followup_status(
     _require_crm_row_context(role, emp_id)
     log = logging.LoggerAdapter(
         logger,
-        {"request_id": request_id, "emp_id": emp_id, "api": "crm_itr_followup_status_update"},
+        {"request_id": request_id, "emp_id": emp_id, "api": "crm_followup_status_update"},
     )
 
     follow_up_status = _normalize_code(payload.follow_up_status)
     if follow_up_status not in FOLLOWUP_STATUSES:
         raise _validation_error("Invalid follow-up status.", {"follow_up_status": "Unsupported status value."})
+
     if payload.followup_at is not None and payload.followup_at <= datetime.now(IST):
         raise _validation_error("Invalid followup datetime.", {"followup_at": "Must be a future datetime."})
 
@@ -426,16 +423,12 @@ async def update_crm_itr_followup_status(
         async with pool.acquire() as conn:
             async with conn.transaction():
                 lead = await _fetch_crm_lead_visible(
-                    conn,
-                    role,
-                    emp_id,
-                    lead_id,
-                    for_update=True,
-                    entity_type=ITR_ENTITY_TYPE,
+                    conn, role, emp_id, lead_id, for_update=True
                 )
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
-                result = await _crm_itr_apply_followup_status(
+
+                result = await _crm_apply_followup_status(
                     conn, emp_id, lead_id, lead, payload, follow_up_status, log
                 )
             await _invalidate_crm_cache(lead_id)
@@ -443,16 +436,12 @@ async def update_crm_itr_followup_status(
     except asyncpg.exceptions.CheckViolationError as e:
         raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
     except asyncpg.PostgresError:
-        logger.exception("Database error while updating CRM ITR follow-up status")
+        logger.exception("Database error while updating CRM follow-up status")
         raise HTTPException(status_code=500, detail="Database error.")
 
 
-@router.post(
-    "/{lead_id:int}/call-update",
-    status_code=status.HTTP_200_OK,
-    summary="Update CRM ITR call status and apply transitions",
-)
-async def update_crm_itr_call(
+@router.post("/{lead_id:int}/call-update", status_code=status.HTTP_200_OK, summary="Update call status and apply CRM transitions")
+async def update_crm_call(
     lead_id: int,
     payload: CRMCallUpdateIn,
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
@@ -460,26 +449,19 @@ async def update_crm_itr_call(
     request_id = generate_uuid()
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
-    log = logging.LoggerAdapter(
-        logger,
-        {"request_id": request_id, "emp_id": emp_id, "api": "crm_itr_call_update"},
-    )
+    log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": emp_id, "api": "crm_call_update"})
 
     pool = await get_db_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
                 lead = await _fetch_crm_lead_visible(
-                    conn,
-                    role,
-                    emp_id,
-                    lead_id,
-                    for_update=True,
-                    entity_type=ITR_ENTITY_TYPE,
+                    conn, role, emp_id, lead_id, for_update=True
                 )
                 if not lead:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
-                result = await _crm_itr_apply_call_update(conn, role, emp_id, lead_id, lead, payload, log)
+
+                result = await _crm_apply_call_update(conn, role, emp_id, lead_id, lead, payload, log)
             await _invalidate_crm_cache(lead_id)
             return result
     except asyncpg.exceptions.ForeignKeyViolationError:
@@ -487,5 +469,5 @@ async def update_crm_itr_call(
     except asyncpg.exceptions.CheckViolationError as e:
         raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
     except asyncpg.PostgresError:
-        logger.exception("Database error while applying CRM ITR call update")
+        logger.exception("Database error while applying CRM call update")
         raise HTTPException(status_code=500, detail="Database error.")

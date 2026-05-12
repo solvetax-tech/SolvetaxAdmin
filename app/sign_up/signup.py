@@ -17,11 +17,8 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)),
 router = APIRouter(prefix="/app/v1", tags=["Signup"])
 
 
-async def _invalidate_signup_related_cache(team_id: Optional[int]) -> None:
+async def _invalidate_signup_related_cache() -> None:
     await redis_invalidate_tag("version:filter:index")
-    await redis_invalidate_tag("teams:list:index")
-    if team_id is not None:
-        await redis_invalidate_tag(f"teams:members:index:{team_id}")
 
 
 # --------------------------------------------------
@@ -168,6 +165,18 @@ async def signup(
             normalized_email
         )
 
+        if not verification_row:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "type": "validation_error",
+                        "message": "Email verification required",
+                        "fields": {"email": "No verification record for this email"},
+                    }
+                },
+            )
+
         if verification_row["is_verified"] is not True:
             raise HTTPException(
                 status_code=400,
@@ -180,7 +189,8 @@ async def signup(
                 }
             )
 
-        if verification_row["expires_at"] < datetime.now(timezone.utc):
+        expires_at = verification_row["expires_at"]
+        if expires_at is not None and expires_at < datetime.now(timezone.utc):
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -246,35 +256,33 @@ async def signup(
         # --------------------------------------------------
 
         if payload.manager_emp_id is not None:
-
-            manager_valid = await conn.fetchval(
+            manager_roles = {"SALES_MANAGER", "OP_MANAGER"}
+            mgr_row = await conn.fetchrow(
                 f"""
-                SELECT EXISTS(
-                    SELECT 1
-                    FROM {DB_SCHEMA}.employees e
-                    JOIN {DB_SCHEMA}.employee_roles er ON e.emp_id = er.emp_id
-                    JOIN {DB_SCHEMA}.roles r ON er.role_id = r.id
-                    WHERE e.emp_id = $1
-                    AND e.is_active = TRUE
-                    AND r.role_code IN ('ADMIN','SALES_MANAGER','OP_MANAGER')
-                )
+                SELECT emp_id, is_active, role
+                FROM {DB_SCHEMA}.employees
+                WHERE emp_id = $1
                 """,
-                payload.manager_emp_id
+                payload.manager_emp_id,
             )
-
-            if not manager_valid:
-
+            if (
+                not mgr_row
+                or not mgr_row["is_active"]
+                or (mgr_row["role"] or "").strip().upper()
+                not in manager_roles | {"ADMIN"}
+            ):
                 log.warning("[signup] Invalid manager_emp_id: %s", payload.manager_emp_id)
-
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
-                        "error":{
-                            "type":"validation_error",
-                            "message":"Invalid or unauthorized manager_emp_id",
-                            "fields":{"manager_emp_id":"Invalid or unauthorized manager"}
+                        "error": {
+                            "type": "validation_error",
+                            "message": "Invalid or unauthorized manager_emp_id",
+                            "fields": {
+                                "manager_emp_id": "Must be an active ADMIN/SALES_MANAGER/OP_MANAGER (employees.role)."
+                            },
                         }
-                    }
+                    },
                 )
 
         password_hash = hash_password(payload.password)
@@ -378,59 +386,6 @@ async def signup(
 
                 await assign_role_to_employee(conn, created_id, role_id)
 
-                if payload.team_id:
-
-                    team_exists = await conn.fetchval(
-                        f"""
-                        SELECT EXISTS(
-                            SELECT 1
-                            FROM {DB_SCHEMA}.teams
-                            WHERE id = $1
-                            AND is_active = TRUE
-                        )
-                        """,
-                        payload.team_id
-                    )
-
-                    if not team_exists:
-
-                        raise HTTPException(
-                            status_code=400,
-                            detail={
-                                "error":{
-                                    "type":"validation_error",
-                                    "message":"Validation failed",
-                                    "fields":{
-                                        "team_id":"Invalid team id"
-                                    }
-                                }
-                            }
-                        )
-
-                    await conn.execute(
-                        f"""
-                        INSERT INTO {DB_SCHEMA}.team_members
-                        (team_id, emp_id, is_active, created_at, updated_at)
-                        VALUES ($1,$2,TRUE,NOW(),NOW())
-                        ON CONFLICT DO NOTHING
-                        """,
-                        payload.team_id,
-                        created_id
-                    )
-
-                if payload.role in ["SALES_MANAGER","OP_MANAGER"] and payload.team_id:
-
-                    await conn.execute(
-                        f"""
-                        INSERT INTO {DB_SCHEMA}.team_managers
-                        (team_id, manager_emp_id, is_active, created_at, updated_at)
-                        VALUES ($1,$2,TRUE,NOW(),NOW())
-                        ON CONFLICT DO NOTHING
-                        """,
-                        payload.team_id,
-                        created_id
-                    )
-
                 employee_row = await conn.fetchrow(
                     f"""
                     SELECT *
@@ -512,7 +467,7 @@ async def signup(
             )
 
         log.info("[signup] Employee created successfully id=%s", created_id)
-        await _invalidate_signup_related_cache(payload.team_id)
+        await _invalidate_signup_related_cache()
 
         return SignupResponse(
             emp_id=created_id,

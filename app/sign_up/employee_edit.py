@@ -52,7 +52,6 @@ async def _invalidate_employee_related_cache(emp_id: Optional[int] = None) -> No
     await redis_invalidate_tag(_employee_active_rm_tag())
     await redis_invalidate_tag(_employee_active_op_tag())
     await redis_invalidate_tag(_employee_active_managers_tag())
-    await redis_invalidate_tag("teams:list:index")
     await redis_invalidate_tag("version:filter:index")
     if emp_id is not None:
         await redis_invalidate_tag(_employee_by_id_tag(emp_id))
@@ -78,7 +77,7 @@ async def edit_employee(
     current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
 ):
     """
-    Edit Employee API (Dynamic Update + Version Audit + Team Sync + Manager Sync)
+    Edit Employee API (dynamic fields + version audit). Org hierarchy uses ``manager_emp_id`` only.
     """
 
     request_id = generate_uuid()
@@ -101,15 +100,6 @@ async def edit_employee(
             detail="At least one field must be provided for update.",
         )
     
-    # Team assignment is managed via security/teams APIs only.
-    requested_team_id = update_data.pop("team_id", None)
-    if requested_team_id is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="team_id updates are not allowed in employee edit. Use teams API to assign/move team.",
-        )
-
-
     try:
         pool = await get_db_pool()
     except Exception as e:
@@ -136,7 +126,6 @@ async def edit_employee(
                 if not old_row:
                     raise HTTPException(status_code=404, detail="Employee not found.")
 
-                old_role = old_row["role"]
                 manager_roles = {"SALES_MANAGER", "OP_MANAGER"}
 
                 # --------------------------------------------------
@@ -213,6 +202,11 @@ async def edit_employee(
                 # Validate manager_emp_id compatibility when provided.
                 if "manager_emp_id" in update_data and update_data["manager_emp_id"] is not None:
                     manager_emp_id = update_data["manager_emp_id"]
+                    if manager_emp_id == emp_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="manager_emp_id cannot be the same as the employee being edited.",
+                        )
                     manager_row = await conn.fetchrow(
                         f"""
                         SELECT e.emp_id, e.is_active, e.role
@@ -259,24 +253,6 @@ async def edit_employee(
                         status_code=409,
                         detail="Employee state changed. Please retry."
                     )
-
-                new_role = (new_row["role"] or "").strip().upper()
-                if (old_role or "").strip().upper() in manager_roles and new_role not in manager_roles:
-                    is_active_manager = await conn.fetchval(
-                        f"""
-                        SELECT 1
-                        FROM {DB_SCHEMA}.team_managers
-                        WHERE manager_emp_id = $1
-                          AND is_active = TRUE
-                        LIMIT 1
-                        """,
-                        emp_id,
-                    )
-                    if is_active_manager:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Cannot demote active team manager via employee edit. Reassign team manager in teams API first.",
-                        )
 
                 # --------------------------------------------------
                 # VERSION AUDIT
@@ -851,10 +827,10 @@ async def soft_delete_employee(
 
     ✔ Atomic transaction
     ✔ json = NULL
-    ✔ updated_json = NEW snapshot (is_active = FALSE)
+    ✔ updated_json = snapshot after soft delete (is_active = FALSE)
     ✔ action = DELETE
     ✔ entity_type = EMPLOYEE
-    ✔ entity_id = 3
+    ✔ entity_id = emp_id
     """
 
     request_id = generate_uuid()
@@ -942,13 +918,13 @@ async def soft_delete_employee(
 
                 await conn.execute(
                     version_sql,
-                    actor_emp_id,                       # Actor
-                    "EMPLOYEE",                         # entity_type
-                    3,                                  # entity_id
-                    None,                               # customer_id
-                    "DELETE",                           # action
-                    None,                               # json must be NULL
+                    actor_emp_id,
+                    "EMPLOYEE",
+                    emp_id,
                     None,
+                    "DELETE",
+                    None,
+                    json.dumps(deleted_snapshot, default=str),
                 )
 
             log.info("Employee soft deleted successfully emp_id=%s", emp_id)

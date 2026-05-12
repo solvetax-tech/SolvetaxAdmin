@@ -32,7 +32,6 @@ class SignupRequest(BaseSchema):
     role: Annotated[str, constr(max_length=50)] = "SE"
     is_active: bool = True
     manager_emp_id: Optional[int] = Field(None, gt=0)
-    team_id: Optional[int] = None
 
     # ----------------------------
     # Normalize Email
@@ -184,7 +183,6 @@ class EmployeeEditIn(BaseSchema):
     is_active: Optional[bool] = None
     manager_emp_id: Optional[int] = Field(None, gt=0)
     employee_image_url: Optional[str] = None
-    team_id: Optional[int] = None
 
     @field_validator("email", mode="before")
     @classmethod

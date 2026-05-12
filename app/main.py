@@ -75,6 +75,7 @@ def custom_openapi():
     }
 
     public_api_key_paths = {
+        "/api/v1/crm/leads/marketing",
         "/api/v1/customers",
         "/api/v1/income-tax",
         "/api/v1/contact-support",
@@ -104,7 +105,6 @@ from app.sign_up.signup import router as signup_router
 from app.sign_up.login import router as login_router
 from app.sign_up.forgot import router as forgot_password_router
 from app.sign_up.verify_client_otp import router as verify_client_otp_router
-from app.security.teams_api import router as teams_api
 from app.sign_up.employee_edit import router as employee_edit_router
 from app.customer_registration.customer import router as customer_router
 from app.gst_registration.gst_registration import router as gst_registration_router
@@ -127,7 +127,7 @@ from app.customer_registration.entity_types import router as entity_types_router
 from app.gst_registration_filing.gst_filing_config import router as gst_filing_config
 from app.gst_registration_filing.gst_registration_filing import router as gst_registration_filing
 from app.gst_registration_filing.gst_filing_document import router as gst_filing_document_router
-from app.crm.crm_leads import router as crm_leads_router
+from app.crm.crm_leads_gst import router as crm_leads_router
 from app.crm.crm_leads_common import router as crm_leads_common_router
 from app.crm.crm_leads_itr import router as crm_leads_itr_router
 from app.gst_registration_filing.gst_filing_rule_engine import router as gst_filing_rule_engine_router
@@ -148,8 +148,6 @@ if forgot_password_router:
     app.include_router(forgot_password_router)
 if verify_client_otp_router:
     app.include_router(verify_client_otp_router)
-if teams_api:
-    app.include_router(teams_api)
 if customer_router:
     app.include_router(customer_router)
 if gst_registration_router:
