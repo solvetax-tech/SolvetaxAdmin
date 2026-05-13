@@ -17,6 +17,28 @@ class CRMBaseSchema(BaseModel):
     }
 
 
+class CRMLeadEntityIdPatchIn(CRMBaseSchema):
+    """
+    Link ``crm_leads.entity_id`` to a concrete registration row, or clear it.
+
+    Body must include ``entity_id``: a positive integer, or JSON ``null`` to clear the link.
+
+    Must match the lead funnel: GST routes → ``gst_registration.id``; ITR routes → ``income_tax.id``.
+    """
+
+    entity_id: Optional[int] = Field(
+        ...,
+        description="Primary key to link, or JSON null to clear entity_id.",
+    )
+
+    @field_validator("entity_id")
+    @classmethod
+    def entity_id_positive_when_set(cls, v: Optional[int]):
+        if v is not None and v < 1:
+            raise ValueError("entity_id must be >= 1 when set")
+        return v
+
+
 class CRMLeadMarketingCreateIn(CRMBaseSchema):
     """
     External / digital-marketing intake: persists only ``crm_leads`` (no gst_registration / income_tax row).

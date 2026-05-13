@@ -14,7 +14,10 @@ from app.crm.crm_leads_common import (
     _crm_lead_by_id_tag,
     _crm_lead_activities_tag,
     _crm_lead_calls_tag,
+    _crm_lead_matches_funnel_entity_type,
     _crm_lead_stage_history_tag,
+    _crm_linked_entity_row_exists,
+    _entity_type_query,
     _fetch_crm_lead_visible,
     _get_user_context,
     _invalidate_crm_cache,
@@ -25,6 +28,7 @@ from app.crm.crm_leads_common import (
     _validate_crm_call_against_mappings,
     _validation_error,
 )
+from app.crm.schemas_common import CRMLeadEntityIdPatchIn
 from app.crm.schemas_itr import CRMCallUpdateIn, CRMFollowupStatusUpdateIn, CRMLeadEditIn
 from app.logger import logger
 from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
@@ -40,6 +44,91 @@ ITR_STATUSES_NO_STAGE_CHANGE = frozenset(
 ITR_FIRST_PITCH_CONNECTED_STAGES = frozenset(
     {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}
 )
+
+
+@router.post(
+    "/{lead_id:int}/entity-id",
+    summary="Link or clear ITR entity_id for a CRM lead",
+    description=(
+        "Sets crm_leads.entity_id to income_tax.id (or JSON null to clear). "
+        "Same visibility as other ITR lead routes (RM/OP/managers with EMPLOYEE WRITE). "
+        "Only leads with entity_type INCOME_TAX are addressable here."
+    ),
+)
+async def patch_crm_lead_entity_id_itr(
+    lead_id: int,
+    payload: CRMLeadEntityIdPatchIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+
+    new_eid = payload.entity_id
+
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                lead = await _fetch_crm_lead_visible(
+                    conn,
+                    role,
+                    emp_id,
+                    lead_id,
+                    for_update=True,
+                    entity_type=ITR_ENTITY_TYPE,
+                )
+                if not lead:
+                    raise HTTPException(status_code=404, detail="CRM ITR lead not found.")
+                if not _crm_lead_matches_funnel_entity_type(lead.get("entity_type"), ITR_ENTITY_TYPE):
+                    raise _validation_error(
+                        "This lead is not an ITR (INCOME_TAX) funnel row.",
+                        {"entity_type": "Expected INCOME_TAX."},
+                    )
+                if new_eid is not None:
+                    exists = await _crm_linked_entity_row_exists(conn, ITR_ENTITY_TYPE, new_eid)
+                    if not exists:
+                        raise _validation_error(
+                            "entity_id is not a valid income_tax id.",
+                            {"entity_id": "No income_tax row with this id."},
+                        )
+                updated = await conn.fetchrow(
+                    f"""
+                    UPDATE {DB_SCHEMA}.crm_leads
+                    SET entity_id = $1,
+                        updated_at = NOW()
+                    WHERE id = $2
+                      AND upper(trim(entity_type)) = $3
+                    RETURNING *
+                    """,
+                    new_eid,
+                    lead_id,
+                    ITR_ENTITY_TYPE,
+                )
+                if not updated:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Lead could not be updated; it may have changed. Retry after refresh.",
+                    )
+        await _invalidate_crm_cache(lead_id)
+        return {
+            "message": "entity_id updated successfully.",
+            "lead_id": lead_id,
+            "entity_id": updated["entity_id"],
+            "lead": dict(updated),
+        }
+    except asyncpg.exceptions.UniqueViolationError:
+        raise _validation_error(
+            "Cannot link: unique constraint violated.",
+            {"entity_id": "This income_tax row may already be linked to another CRM lead."},
+        )
+    except asyncpg.exceptions.ForeignKeyViolationError:
+        raise _validation_error(
+            "Foreign key violation when setting entity_id.",
+            {"entity_id": "Invalid reference for this database policy."},
+        )
+    except asyncpg.PostgresError:
+        logger.exception("Database error while updating CRM lead entity_id (ITR)")
+        raise HTTPException(status_code=500, detail="Database error.")
 
 
 @router.get("/{lead_id:int}", summary="Get CRM ITR lead by id")
@@ -142,6 +231,34 @@ async def edit_crm_itr_lead(
 
 
 def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_code: str):
+    """
+    FINAL_PITCH_CALL: only SCHEDULED_PAYMENT → SCHEDULED_PAYMENTS; all other outcomes keep stage.
+
+    FIRST_PITCH_CALL: same early-funnel rules as GST (FOLLOW_UP, NOT_INTERESTED, PENDING_ITR_DATA, etc.).
+    """
+    ctc = (call_type_code or "").strip().upper()
+
+    if ctc == "FINAL_PITCH_CALL":
+        if call_status_code == "SCHEDULED_PAYMENT":
+            if current_stage in {"ITR_DONE", "SCHEDULED_PAYMENTS"}:
+                return "SCHEDULED_PAYMENTS"
+            raise _validation_error(
+                "Invalid stage for SCHEDULED_PAYMENT.",
+                {
+                    "stage": (
+                        f"SCHEDULED_PAYMENT applies only from ITR_DONE or SCHEDULED_PAYMENTS; "
+                        f"current is {current_stage}."
+                    )
+                },
+            )
+        return None
+
+    if ctc != "FIRST_PITCH_CALL":
+        raise _validation_error(
+            "Unsupported call_type_code for stage transition.",
+            {"call_type_code": str(call_type_code)},
+        )
+
     if call_status_code in ITR_STATUSES_NO_STAGE_CHANGE:
         return None
 
@@ -176,19 +293,6 @@ def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_c
             {
                 "stage": (
                     f"SEND_DOCS applies only from FRESH_LEAD, FOLLOW_UP, or INTERESTED; "
-                    f"current is {current_stage}."
-                )
-            },
-        )
-
-    if call_status_code == "SCHEDULED_PAYMENT":
-        if current_stage == "ITR_DONE":
-            return "SCHEDULED_PAYMENTS"
-        raise _validation_error(
-            "Invalid stage for SCHEDULED_PAYMENT.",
-            {
-                "stage": (
-                    f"SCHEDULED_PAYMENT applies only from ITR_DONE; "
                     f"current is {current_stage}."
                 )
             },
@@ -244,6 +348,8 @@ async def _crm_itr_apply_call_update(
     )
     new_stage = target_stage or current_stage
 
+    et_for_activity = _entity_type_query(lead.get("entity_type"))
+
     updated = await conn.fetchrow(
         f"""
         UPDATE {DB_SCHEMA}.crm_leads
@@ -275,20 +381,21 @@ async def _crm_itr_apply_call_update(
     activity_id = await conn.fetchval(
         f"""
         INSERT INTO {DB_SCHEMA}.crm_activities (
-            lead_id, activity_type, call_type_code, call_status_code,
+            lead_id, entity_type, activity_type, call_type_code, call_status_code,
             old_stage, new_stage, followup_at, remarks, performed_by,
             last_dailed_at, last_connected_at,
             performed_at, created_at
         )
         VALUES (
-            $1, 'CALL', $2, $3, $4, $5, $6, $7, $8,
+            $1, $2, 'CALL', $3, $4, $5, $6, $7, $8, $9,
             NOW(),
-            CASE WHEN $9 = 1 THEN NOW() ELSE NULL END,
+            CASE WHEN $10 = 1 THEN NOW() ELSE NULL END,
             NOW(), NOW()
         )
         RETURNING id
         """,
         lead_id,
+        et_for_activity,
         call_type_code,
         call_status_code,
         current_stage,
@@ -368,12 +475,13 @@ async def _crm_itr_apply_followup_status(
     activity_id = await conn.fetchval(
         f"""
         INSERT INTO {DB_SCHEMA}.crm_activities (
-            lead_id, activity_type, remarks, performed_by, performed_at, created_at
+            lead_id, entity_type, activity_type, remarks, performed_by, performed_at, created_at
         )
-        VALUES ($1, 'FOLLOWUP_STATUS_UPDATE', $2, $3, NOW(), NOW())
+        VALUES ($1, $2, 'FOLLOWUP_STATUS_UPDATE', $3, $4, NOW(), NOW())
         RETURNING id
         """,
         lead_id,
+        _entity_type_query(lead.get("entity_type")),
         (
             f"follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
             if payload.remarks is None

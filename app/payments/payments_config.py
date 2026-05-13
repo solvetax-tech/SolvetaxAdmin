@@ -561,7 +561,7 @@ async def get_payment_amount(
                         (
                             SELECT amount
                             FROM {DB_SCHEMA}.payments
-                            WHERE customer_id = $1
+                            WHERE customer_id IS NOT DISTINCT FROM $1
                               AND entity_id = $2
                               AND entity_type = $3
                               AND is_active = TRUE
@@ -574,7 +574,7 @@ async def get_payment_amount(
                         (
                             SELECT payment_status
                             FROM {DB_SCHEMA}.payments
-                            WHERE customer_id = $1
+                            WHERE customer_id IS NOT DISTINCT FROM $1
                               AND entity_id = $2
                               AND entity_type = $3
                               AND is_active = TRUE
@@ -583,7 +583,7 @@ async def get_payment_amount(
                             LIMIT 1
                         ) AS last_status
                     FROM {DB_SCHEMA}.payments
-                    WHERE customer_id = $1
+                    WHERE customer_id IS NOT DISTINCT FROM $1
                       AND entity_id = $2
                       AND entity_type = $3
                       AND is_active = TRUE

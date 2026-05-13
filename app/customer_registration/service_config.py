@@ -114,8 +114,7 @@ async def get_services(
                     service_category,
                     service_code,
                     service_name,
-                    description,
-                    COALESCE(followup_mode, 'MANUAL') AS followup_mode
+                    description
                 FROM {DB_SCHEMA}.service_config
                 {where_clause}
                 ORDER BY service_category, service_name

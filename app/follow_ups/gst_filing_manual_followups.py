@@ -316,11 +316,8 @@ async def create_filing_followup(
                         cs.status,
                         cs.entity_type,
                         cs.entity_id,
-                        cs.service_id,
-                        sc.followup_mode
+                        cs.service_id
                     FROM {DB_SCHEMA}.customer_services cs
-                    JOIN {DB_SCHEMA}.service_config sc
-                        ON sc.id = cs.service_id
                     WHERE cs.id = $1
                     """,
                     payload.customer_service_id,

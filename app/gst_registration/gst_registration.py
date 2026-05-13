@@ -31,8 +31,12 @@ router = APIRouter(
     tags=["GST Registration"]
 )
 
-# CRM `crm_leads.entity_type` when the lead is tied to a GST registration row.
-CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION = "GST_REGISTRATION"
+
+def _gst_reg_sql_col(name: str) -> str:
+    """Ident must match ddl-quoted columns (e.g. \"language\", \"password\")."""
+    if name in ("language", "password"):
+        return f'"{name}"'
+    return name
 
 
 def _gst_filter_tag() -> str:
@@ -58,214 +62,20 @@ async def _invalidate_gst_registration_cache(
         await redis_invalidate_tag(_gst_detail_tag(registration_id))
 
 
-def _normalize_crm_lead_source_value(lead_source: Optional[str]) -> Optional[str]:
-    if lead_source is None:
-        return None
-    s = str(lead_source).strip().upper()
-    return s[:120] if s else None
+async def _customer_exists_and_active(conn: asyncpg.Connection, customer_id: int) -> bool:
+    row = await conn.fetchrow(
+        f"""
+        SELECT 1
+          FROM {DB_SCHEMA}.customers
+         WHERE customer_id = $1
+           AND is_active IS TRUE
+        LIMIT 1
+        """,
+        customer_id,
+    )
+    return row is not None
 
 
-async def _upsert_gst_registration_crm_lead_from_customer_intent(
-    conn: asyncpg.Connection,
-    customer_row: asyncpg.Record,
-    tag: Optional[str] = None,
-    lead_source: Optional[str] = None,
-) -> None:
-    """
-    Customer signup listed GST_REGISTRATION in service_required: ensure a CRM row exists with
-    entity_type GST_REGISTRATION, lead_source, and entity_id NULL until gst_registration is created.
-    _sync_crm_lead_with_gst later attaches entity_id to this row (or promotes a bare mobile lead).
-    """
-    try:
-        mobile = customer_row.get("mobile")
-        if not mobile:
-            return
-        tag_value = (tag or "").strip() or None
-        lead_src = _normalize_crm_lead_source_value(lead_source)
-
-        existing_lead_id = await conn.fetchval(
-            f"""
-            SELECT id
-            FROM {DB_SCHEMA}.crm_leads
-            WHERE entity_type = $1
-              AND trim(mobile) = trim($2::text)
-            ORDER BY id DESC
-            LIMIT 1
-            FOR UPDATE
-            """,
-            CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-            mobile,
-        )
-        if existing_lead_id:
-            await conn.execute(
-                f"""
-                UPDATE {DB_SCHEMA}.crm_leads
-                SET rm_id = COALESCE(rm_id, $1),
-                    op_id = COALESCE(op_id, $2),
-                    tag = COALESCE($4, tag),
-                    lead_source = CASE
-                        WHEN $5::text IS NOT NULL AND btrim($5::text) <> '' THEN upper(btrim($5::text))
-                        ELSE lead_source
-                    END,
-                    updated_at = NOW()
-                WHERE id = $3
-                """,
-                customer_row.get("rm_id"),
-                customer_row.get("op_id"),
-                existing_lead_id,
-                tag_value,
-                lead_src,
-            )
-            return
-
-        await conn.fetchval(
-            f"""
-            INSERT INTO {DB_SCHEMA}.crm_leads (
-                mobile, entity_id, entity_type, stage, rm_id, op_id, is_active,
-                remarks, tag, lead_source, created_at, updated_at
-            )
-            VALUES (
-                trim($1::text),
-                NULL,
-                $2,
-                $3,
-                $4,
-                $5,
-                COALESCE($6, TRUE),
-                $7,
-                $8,
-                $9,
-                NOW(),
-                NOW()
-            )
-            RETURNING id
-            """,
-            mobile,
-            CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-            "FRESH_LEAD",
-            customer_row.get("rm_id"),
-            customer_row.get("op_id"),
-            customer_row.get("is_active"),
-            "GST intent from customer signup; entity_id set when GST registration is created.",
-            tag_value,
-            lead_src,
-        )
-    except asyncpg.UndefinedTableError:
-        logger.warning("CRM tables not found; skipping GST intent CRM upsert from customer.")
-    except asyncpg.UndefinedColumnError:
-        logger.warning("crm_leads column missing; skipping GST intent CRM upsert from customer.")
-    except asyncpg.PostgresError:
-        logger.exception("GST intent CRM upsert from customer failed; continuing customer flow.")
-
-
-async def _sync_crm_lead_with_gst(
-    conn: asyncpg.Connection,
-    gst_row: asyncpg.Record,
-):
-    """
-    Syncs crm_leads with gst_registration lifecycle.
-    Safe no-op when CRM tables are unavailable.
-    """
-    try:
-        mobile = gst_row.get("mobile")
-        if not mobile:
-            return
-
-        existing = await conn.fetchrow(
-            f"""
-            SELECT *
-            FROM {DB_SCHEMA}.crm_leads
-            WHERE entity_type = $1
-              AND entity_id = $2
-              AND is_active = TRUE
-            ORDER BY id DESC
-            LIMIT 1
-            FOR UPDATE
-            """,
-            CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-            gst_row["id"],
-        )
-
-        # Fallback: latest active lead by mobile; prefer GST_REGISTRATION intent rows over generic
-        # mobile-only leads so customer signup + later GST create still binds correctly.
-        if not existing:
-            existing = await conn.fetchrow(
-                f"""
-                SELECT *
-                FROM {DB_SCHEMA}.crm_leads
-                WHERE trim(mobile) = trim($1::text)
-                  AND is_active = TRUE
-                ORDER BY
-                    CASE
-                        WHEN upper(trim(coalesce(entity_type::text, ''))) = upper(trim($2::text))
-                        THEN 0 ELSE 1
-                    END,
-                    id DESC
-                LIMIT 1
-                FOR UPDATE
-                """,
-                mobile,
-                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-            )
-
-        remarks = "Auto synced from GST registration create/edit."
-
-        # Update existing lead only when:
-        # - lead is already GST_REGISTRATION, OR
-        # - lead has no entity_type yet (base customer/bulk lead)
-        # If lead belongs to any other entity type, create a fresh GST lead row.
-        existing_entity_type = (existing.get("entity_type") or "").strip().upper() if existing else ""
-        can_update_existing = bool(
-            existing
-            and (
-                existing_entity_type == ""
-                or existing_entity_type == CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION
-            )
-        )
-
-        if can_update_existing:
-            await conn.execute(
-                f"""
-                UPDATE {DB_SCHEMA}.crm_leads
-                SET mobile = $1,
-                    entity_id = $2,
-                    entity_type = $3,
-                    rm_id = $4,
-                    op_id = $5,
-                    is_active = $6,
-                    updated_at = NOW()
-                WHERE id = $7
-                """,
-                mobile,
-                gst_row["id"],
-                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-                gst_row.get("rm_id"),
-                gst_row.get("created_by"),
-                gst_row.get("is_active"),
-                existing["id"],
-            )
-        else:
-            await conn.fetchval(
-                f"""
-                INSERT INTO {DB_SCHEMA}.crm_leads (
-                    mobile, entity_id, entity_type, stage, rm_id, op_id, is_active, remarks, created_at, updated_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-                RETURNING id
-                """,
-                mobile,
-                gst_row["id"],
-                CRM_LEAD_ENTITY_TYPE_GST_REGISTRATION,
-                "FRESH_LEAD",
-                gst_row.get("rm_id"),
-                gst_row.get("created_by"),
-                gst_row.get("is_active"),
-                remarks,
-            )
-    except asyncpg.UndefinedTableError:
-        logger.warning("CRM tables not found; skipping CRM sync.")
-    except asyncpg.PostgresError:
-        logger.exception("CRM sync failed; continuing GST flow.")
 # -------------------------------------------------------------------
 # CREATE GST REGISTRATION
 # -------------------------------------------------------------------
@@ -275,7 +85,7 @@ async def _sync_crm_lead_with_gst(
     summary="Create GST Registration",
     responses={
         201: {"description": "GST registration created successfully."},
-        400: {"description": "Validation failed or customer not found."},
+        400: {"description": "Validation failed."},
         409: {"description": "Duplicate field value."},
         500: {"description": "Database or internal error."},
     },
@@ -296,7 +106,6 @@ async def create_gst_registration(
     if role_norm == "RM" and rm_id is None:
         rm_id = emp_id
     created_by_val = emp_id if role_norm == "OP" else None
-    op_id_for_service = emp_id if role_norm == "OP" else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -315,22 +124,6 @@ async def create_gst_registration(
     async with pool.acquire() as conn:
         try:
             async with conn.transaction():
-
-                customer_row = await conn.fetchrow(
-                    f"""
-                    SELECT customer_id, is_active
-                    FROM {DB_SCHEMA}.customers
-                    WHERE customer_id = $1
-                    LIMIT 1
-                    """,
-                    payload.customer_id,
-                )
-
-                if not customer_row:
-                    raise HTTPException(400, "Customer not found.")
-
-                if not customer_row["is_active"]:
-                    raise HTTPException(400, "Customer is inactive.")
 
                 # --------------------------------------------------
                 # Pre-validation (format + duplicates)
@@ -412,6 +205,12 @@ async def create_gst_registration(
                         field_errors["username"] = "Username already exists."
                         has_duplicate = True
 
+                if payload.customer_id is not None:
+                    if not await _customer_exists_and_active(conn, payload.customer_id):
+                        field_errors["customer_id"] = (
+                            "Customer not found or inactive."
+                        )
+
                 if field_errors:
                     raise HTTPException(
                         status_code=409 if has_duplicate else 400,
@@ -430,44 +229,51 @@ async def create_gst_registration(
                         detail="rm_id is required (or sign in as RM to default rm_id to yourself).",
                     )
 
+                approved_at_val = (
+                    now
+                    if str(payload.registration_status).strip().upper() == "APPROVED"
+                    else None
+                )
+
                 # --------------------------------------------------
-                # INSERT GST
+                # INSERT GST (column order aligned with solvetax.gst_registration ddl)
                 # --------------------------------------------------
                 insert_sql = f"""
                     INSERT INTO {DB_SCHEMA}.gst_registration (
                         customer_id,
-                        username,
-                        password,
-                        pan,
                         gstin,
+                        username,
+                        {_gst_reg_sql_col("password")},
+                        pan,
+                        mobile,
+                        {_gst_reg_sql_col("language")},
+                        state,
                         business_name,
                         registration_type,
                         ownership_category,
                         business_type,
-                        state,
-                        language,
-                        referral_id,
-                        referral_entity,
                         turnover_details,
                         registration_status,
                         suspension_reason,
                         cancellation_reason,
+                        approved_at,
                         is_rcm_applicable,
-                        is_filing_needed,
                         is_active,
-                        mobile,
-                        email,
-                        secondary_email,
                         created_by,
                         rm_id,
+                        email,
+                        secondary_email,
+                        is_filing_needed,
                         filing_preference,
+                        referral_id,
+                        referral_entity,
                         created_at,
                         updated_at
                     )
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
                         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-                        $21,$22,$23,$24,$25,$26,$27,$28
+                        $21,$22,$23,$24,$25,$26,$27,$28,$29
                     )
                     RETURNING *
                 """
@@ -475,70 +281,38 @@ async def create_gst_registration(
                 gst_row = await conn.fetchrow(
                     insert_sql,
                     payload.customer_id,
+                    gstin_value,
                     username_value,
                     payload.password,
                     pan_value,
-                    gstin_value,
+                    mobile_value,
+                    payload.language,
+                    payload.state,
                     payload.business_name,
                     payload.registration_type,
                     payload.ownership_category,
                     payload.business_type,
-                    payload.state,
-                    payload.language,
-                    payload.referral_id,
-                    payload.referral_entity,
                     payload.turnover_details,
                     payload.registration_status,
                     payload.suspension_reason,
                     payload.cancellation_reason,
+                    approved_at_val,
                     payload.is_rcm_applicable,
-                    payload.is_filing_needed,
                     True,
-                    mobile_value,
-                    payload.email,
-                    secondary_email_value,
                     created_by_val,
                     rm_id,
+                    payload.email,
+                    secondary_email_value,
+                    payload.is_filing_needed,
                     getattr(payload, "filing_preference", None),
+                    payload.referral_id,
+                    payload.referral_entity,
                     now,
                     now,
                 )
 
                 if not gst_row:
                     raise HTTPException(500, "GST registration creation failed.")
-
-                # --------------------------------------------------
-                # ✅ ALWAYS INSERT SERVICE_ID = 1
-                # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.customer_services (
-                        customer_id,
-                        service_id,
-                        service_status,
-                        rm_id,
-                        op_id,
-                        entity_type,
-                        entity_id,
-                        created_at
-                    )
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    payload.customer_id,
-                    1,  # 🔥 FIXED SERVICE_ID
-                    "PENDING",
-                    rm_id,
-                    op_id_for_service,
-                    "GST_REGISTRATION",
-                    gst_row["id"],
-                    now,
-                )
-
-                # --------------------------------------------------
-                # CRM LEAD SYNC (best-effort, non-blocking)
-                # --------------------------------------------------
-                await _sync_crm_lead_with_gst(conn, gst_row)
 
                 # --------------------------------------------------
                 # VERSION LOG
@@ -559,7 +333,7 @@ async def create_gst_registration(
                     emp_id,
                     "GST_REGISTRATION",
                     gst_row["id"],
-                    payload.customer_id,
+                    gst_row.get("customer_id"),
                     "CREATE",
                     json.dumps(dict(gst_row), default=str),
                     None,
@@ -894,7 +668,7 @@ async def list_gst_registrations(
             param_index += 1
 
         if language_norm:
-            conditions.append(f"g.language = ${param_index}")
+            conditions.append(f"g.{_gst_reg_sql_col('language')} = ${param_index}")
             values.append(language_norm)
             param_index += 1
 
@@ -1511,6 +1285,12 @@ async def edit_gst_registration(
                         field_errors["username"] = "Username already exists."
                         has_duplicate = True
 
+                if "customer_id" in update_data and update_data["customer_id"] is not None:
+                    if not await _customer_exists_and_active(conn, update_data["customer_id"]):
+                        field_errors["customer_id"] = (
+                            "Customer not found or inactive."
+                        )
+
                 if field_errors:
                     raise HTTPException(
                         status_code=409 if has_duplicate else 400,
@@ -1550,7 +1330,7 @@ async def edit_gst_registration(
                 fields, values, idx = [], [], 1
 
                 for k, v in update_data.items():
-                    fields.append(f"{k} = ${idx}")
+                    fields.append(f"{_gst_reg_sql_col(k)} = ${idx}")
                     values.append(v)
                     idx += 1
 
@@ -1678,15 +1458,10 @@ async def edit_gst_registration(
                     emp_id,
                     "GST_REGISTRATION",
                     new_row["id"],
-                    new_row["customer_id"],
+                    new_row.get("customer_id"),
                     "UPDATE",
                     json.dumps(dict(old_row), default=str),
                     json.dumps(dict(new_row), default=str),
-                )
-
-                await _sync_crm_lead_with_gst(
-                    conn,
-                    new_row,
                 )
 
                 log.info(
@@ -1910,22 +1685,7 @@ async def soft_delete_gst_registration(
                 )
 
                 # --------------------------------------------------
-                # 5️⃣ CUSTOMER SERVICE SYNC
-                # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.customer_services
-                       SET status = 'INACTIVE'
-                     WHERE entity_type = 'GST_REGISTRATION'
-                       AND entity_id = $1
-                    """,
-                    gst_id,
-                )
-
-                await _sync_crm_lead_with_gst(conn, deleted_gst)
-
-                # --------------------------------------------------
-                # 6️⃣ Version Audit (GST ONLY)
+                # 5️⃣ Version Audit (GST ONLY)
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -1957,8 +1717,8 @@ async def soft_delete_gst_registration(
                 len(deleted_documents),
             )
             await _invalidate_gst_registration_cache(
-                deleted_gst.get("customer_id"),
-                deleted_gst.get("id"),
+                customer_id=None,
+                registration_id=deleted_gst.get("id"),
             )
 
             return {
@@ -2036,15 +1796,13 @@ async def activate_gst_registration(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Fetch GST + Customer Status (LOCK)
+                # 1️⃣ Fetch Existing GST (LOCK)
                 # --------------------------------------------------
                 gst_row = await conn.fetchrow(
                     f"""
-                    SELECT gst.*, c.is_active AS customer_active
-                      FROM {DB_SCHEMA}.gst_registration gst
-                      JOIN {DB_SCHEMA}.customers c
-                        ON gst.customer_id = c.customer_id
-                     WHERE gst.id = $1
+                    SELECT *
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE id = $1
                      FOR UPDATE
                     """,
                     gst_id,
@@ -2055,14 +1813,6 @@ async def activate_gst_registration(
 
                 if gst_row["is_active"]:
                     raise HTTPException(400, "GST registration already active.")
-
-                if not gst_row["customer_active"]:
-                    raise HTTPException(
-                        400,
-                        "Cannot activate GST: associated customer is inactive.",
-                    )
-
-                customer_id = gst_row["customer_id"]
 
                 # --------------------------------------------------
                 # 2️⃣ Activate GST
@@ -2118,23 +1868,7 @@ async def activate_gst_registration(
                 )
 
                 # --------------------------------------------------
-                # 5️⃣ CUSTOMER SERVICE SYNC
-                # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.customer_services
-                       SET status = 'ACTIVE'
-                     WHERE entity_type = 'GST_REGISTRATION'
-                       AND entity_id = $1
-                       AND status = 'INACTIVE'
-                    """,
-                    gst_id,
-                )
-
-                await _sync_crm_lead_with_gst(conn, activated_gst)
-
-                # --------------------------------------------------
-                # 6️⃣ Version Audit
+                # 5️⃣ Version Audit
                 # --------------------------------------------------
                 await conn.execute(
                     f"""
@@ -2153,7 +1887,7 @@ async def activate_gst_registration(
                     emp_id,
                     "GST_REGISTRATION",
                     activated_gst["id"],
-                    customer_id,
+                    activated_gst.get("customer_id"),
                     "ACTIVATE",
                     None,
                     None,
@@ -2166,8 +1900,8 @@ async def activate_gst_registration(
                 len(activated_documents),
             )
             await _invalidate_gst_registration_cache(
-                activated_gst.get("customer_id"),
-                activated_gst.get("id"),
+                customer_id=None,
+                registration_id=activated_gst.get("id"),
             )
 
             return {

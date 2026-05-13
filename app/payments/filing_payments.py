@@ -70,7 +70,7 @@ async def create_gst_filing_payment(
                 f"""
                 SELECT 1
                 FROM {DB_SCHEMA}.payments
-                WHERE customer_id = $1
+                WHERE customer_id IS NOT DISTINCT FROM $1
                 AND entity_id = $2
                 AND entity_type = $3
                 AND payment_status = 'PAID'
@@ -93,7 +93,7 @@ async def create_gst_filing_payment(
                 f"""
                 SELECT id
                 FROM {DB_SCHEMA}.payments
-                WHERE customer_id = $1
+                WHERE customer_id IS NOT DISTINCT FROM $1
                 AND entity_id = $2
                 AND entity_type = $3
                 FOR UPDATE
@@ -113,8 +113,7 @@ async def create_gst_filing_payment(
                     (
                         SELECT amount
                         FROM {DB_SCHEMA}.payments
-                        WHERE
-                            customer_id = $1
+                        WHERE customer_id IS NOT DISTINCT FROM $1
                         AND entity_id = $2
                         AND entity_type = $3
                         AND is_active = TRUE
@@ -126,8 +125,7 @@ async def create_gst_filing_payment(
                     COALESCE(SUM(discount), 0) AS total_discount
 
                 FROM {DB_SCHEMA}.payments
-                WHERE
-                    customer_id = $1
+                WHERE customer_id IS NOT DISTINCT FROM $1
                 AND entity_id = $2
                 AND entity_type = $3
                 AND is_active = TRUE
@@ -154,7 +152,7 @@ async def create_gst_filing_payment(
                 f"""
                 SELECT COALESCE(SUM(paid_amount),0) AS total_paid
                 FROM {DB_SCHEMA}.payments
-                WHERE customer_id = $1
+                WHERE customer_id IS NOT DISTINCT FROM $1
                 AND entity_id = $2
                 AND entity_type = $3
                 AND is_active = TRUE
@@ -500,15 +498,17 @@ async def activate_filing_payment(
                         f"""
                         SELECT id
                         FROM {DB_SCHEMA}.payments
-                        WHERE customer_id = $1
+                        WHERE customer_id IS NOT DISTINCT FROM $1
                         AND entity_id = $2
                         AND entity_type = $3
                         AND payment_status = 'PAID'
                         AND is_active = TRUE
+                        AND id <> $4
                         """,
                         payment_row["customer_id"],
                         payment_row["entity_id"],
                         payment_row["entity_type"],
+                        payment_id,
                     )
                     if existing_paid:
                         raise HTTPException(409, "Another active PAID payment already exists for this filing.")

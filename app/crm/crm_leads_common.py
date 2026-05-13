@@ -103,10 +103,8 @@ def _mapping_row_entity_type(row: asyncpg.Record) -> Optional[str]:
     v = row["entity_type"]
     if v is None:
         return None
-    if isinstance(v, str):
-        s = v.strip()
-        return s.upper() if s else None
-    return str(v)
+    s = str(v).strip()
+    return s.upper() if s else None
 
 
 def _crm_mapping_type_precedence_sql(param_idx: int) -> str:
@@ -117,10 +115,12 @@ def _crm_mapping_type_precedence_sql(param_idx: int) -> str:
 FIRST_PITCH_ALLOWED_STAGES = {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}
 FINAL_PITCH_ALLOWED_STAGES = {"GST_REGISTRATION_DONE", "SCHEDULED_PAYMENTS"}
 CLOSED_STAGES = {"SUBSCRIBED", "NOT_INTERESTED"}
+# Fallback when DB has no configured rows yet; union of GST + ITR funnel stage codes used in this app.
 ALL_STAGES = (
     FIRST_PITCH_ALLOWED_STAGES
-    | {"PENDING_REGISTRATION_DATA"}
+    | {"PENDING_REGISTRATION_DATA", "PENDING_ITR_DATA"}
     | FINAL_PITCH_ALLOWED_STAGES
+    | {"ITR_DONE"}
     | CLOSED_STAGES
 )
 
@@ -248,6 +248,36 @@ async def _fetch_crm_lead_visible(
         f"SELECT l.* FROM {DB_SCHEMA}.crm_leads l WHERE {' AND '.join(where)}{lock}",
         *params,
     )
+
+
+def _crm_lead_matches_funnel_entity_type(
+    lead_et: Optional[str],
+    expected: str,
+) -> bool:
+    """
+    Allow link when the row is for this funnel: ``entity_type`` unset/blank (legacy GST list)
+    or matches ``expected`` (e.g. GST_REGISTRATION / INCOME_TAX).
+    """
+    raw = (lead_et or "").strip().upper()
+    if not raw:
+        return True
+    return raw == (expected or "").strip().upper()
+
+
+async def _crm_linked_entity_row_exists(
+    conn: asyncpg.Connection,
+    funnel_entity_type: str,
+    entity_id: int,
+) -> bool:
+    """Return True if ``entity_id`` exists in the business table for this CRM funnel."""
+    ft = (funnel_entity_type or "").strip().upper()
+    if ft == DEFAULT_CRM_ENTITY_TYPE:
+        q = f"SELECT 1 FROM {DB_SCHEMA}.gst_registration WHERE id = $1"
+    elif ft == "INCOME_TAX":
+        q = f"SELECT 1 FROM {DB_SCHEMA}.income_tax WHERE id = $1"
+    else:
+        return False
+    return (await conn.fetchval(q, entity_id)) is not None
 
 
 async def _fetch_valid_stage_codes(
@@ -972,26 +1002,23 @@ async def _bulk_import_crm_leads(
 
 
 async def _svc_get_bulk_assign_candidates(
-    op_ids: Optional[List[int]] = Query(None),
-    lead_types: Optional[List[str]] = Query(None),
-    tags: Optional[List[str]] = Query(None),
-    lead_sources: Optional[List[str]] = Query(None),
-    entity_types: Optional[List[str]] = Query(None),
-    follow_up_statuses: Optional[List[str]] = Query(None),
-    null_fields: Optional[List[str]] = Query(
-        None,
-        description="Columns that must be NULL. Supported: stage, rm_id, op_id, lead_type, tag, lead_source, entity_type, follow_up_status",
-    ),
-    not_null_fields: Optional[List[str]] = Query(
-        None,
-        description="Columns that must be NOT NULL. Supported: stage, rm_id, op_id, lead_type, tag, lead_source, entity_type, follow_up_status",
-    ),
+    *,
+    stages: Optional[List[str]] = None,
+    rm_ids: Optional[List[int]] = None,
+    op_ids: Optional[List[int]] = None,
+    lead_types: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    lead_sources: Optional[List[str]] = None,
+    entity_types: List[str],
+    follow_up_statuses: Optional[List[str]] = None,
+    null_fields: Optional[List[str]] = None,
+    not_null_fields: Optional[List[str]] = None,
     is_active: Optional[bool] = None,
-    match_mode: str = Query("AND", description="AND or OR across provided filters."),
-    filter_mode: str = Query("IN", description="IN or NOT_IN for provided filter values."),
-    limit: int = Query(500, ge=1, le=5000),
-    offset: int = Query(0, ge=0),
-    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+    match_mode: str = "AND",
+    filter_mode: str = "IN",
+    limit: int = 500,
+    offset: int = 0,
+    current_user,
 ):
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
@@ -1002,12 +1029,23 @@ async def _svc_get_bulk_assign_candidates(
     if filter_mode_norm not in {"IN", "NOT_IN"}:
         raise _validation_error("Invalid filter_mode.", {"filter_mode": "Use IN or NOT_IN."})
 
-    norm_str_list = lambda vals: list(dict.fromkeys([_normalize_code(v) for v in (vals or []) if isinstance(v, str) and v.strip()]))
+    def norm_str_list(vals: Optional[List[str]]) -> List[str]:
+        return list(
+            dict.fromkeys(
+                [_normalize_code(v) for v in (vals or []) if isinstance(v, str) and v.strip()]
+            )
+        )
+
     stages_n = norm_str_list(stages)
     lead_types_n = norm_str_list(lead_types)
     tags_n = norm_str_list(tags)
     lead_sources_n = norm_str_list(lead_sources)
     entity_types_n = norm_str_list(entity_types)
+    if not entity_types_n:
+        raise _validation_error(
+            "Invalid entity_types.",
+            {"entity_types": "Provide at least one non-empty entity type (e.g. GST_REGISTRATION, INCOME_TAX)."},
+        )
     follow_up_statuses_n = norm_str_list(follow_up_statuses)
     null_fields_n = norm_str_list(null_fields)
     not_null_fields_n = norm_str_list(not_null_fields)

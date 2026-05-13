@@ -50,7 +50,10 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     # Identity
     # ----------------------------
-    customer_id: int = Field(..., gt=0)
+    customer_id: Optional[Annotated[int, Field(gt=0)]] = Field(
+        None,
+        description="Optional link to customers.customer_id. Omit for GST rows without a customer record (DB must allow NULL).",
+    )
 
     username: Optional[Annotated[str, Field(min_length=0, max_length=100)]] = None
     password: Optional[Annotated[str, Field(min_length=0, max_length=128)]] = None
@@ -215,6 +218,12 @@ class GSTRegistrationIn(BaseModel):
 
         return self
 class GSTRegistrationEditIn(BaseModel):
+
+    customer_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Link to customers.customer_id; omit if unchanged. JSON null clears link when column is nullable.",
+    )
 
     business_name: Optional[str] = Field(None, max_length=200)
 
@@ -381,10 +390,11 @@ class GSTRegistrationEditIn(BaseModel):
 
 class GSTRegistrationOut(BaseSchema):
     id: int
-    customer_id: int
+    customer_id: Optional[int] = None
     gstin: Optional[str]
-    username: str
+    username: Optional[str] = None
     pan: str
+    mobile: Optional[str] = None
     registration_type: Optional[str]
     ownership_category: Optional[str]
     business_type: Optional[str]

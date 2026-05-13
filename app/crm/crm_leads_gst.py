@@ -13,9 +13,12 @@ from app.crm.crm_leads_common import (
     FIRST_PITCH_CONNECTED,
     FOLLOWUP_STATUSES,
     IST,
+    DEFAULT_CRM_ENTITY_TYPE,
     _FIRST_PITCH_CONNECTED_STAGES,
     _STATUSES_NO_STAGE_CHANGE,
     _crm_lead_by_id_tag,
+    _crm_lead_matches_funnel_entity_type,
+    _crm_linked_entity_row_exists,
     _entity_type_query,
     _fetch_crm_lead_visible,
     _get_user_context,
@@ -27,6 +30,7 @@ from app.crm.crm_leads_common import (
     _validate_crm_call_against_mappings,
     _validation_error,
 )
+from app.crm.schemas_common import CRMLeadEntityIdPatchIn
 from app.crm.schemas_gst import CRMCallUpdateIn, CRMFollowupStatusUpdateIn, CRMLeadEditIn
 from app.logger import logger
 from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
@@ -41,19 +45,38 @@ def _transition_stage(current_stage: str, call_type_code: str, call_status_code:
     """
     Map call outcome to the next CRM stage.
 
-    Returns a stage string to set, or None to leave the lead in ``current_stage``.
+    **FINAL_PITCH_CALL** (stage is ``GST_REGISTRATION_DONE`` or ``SCHEDULED_PAYMENTS`` upstream):
+    only ``SCHEDULED_PAYMENT`` sets ``stage`` to ``SCHEDULED_PAYMENTS``. All other outcomes
+    (incl. ``CALL_BACK``, ``NOT_INTERESTED``, no-connect, ``CALL_DONE``) leave ``stage`` unchanged.
 
-    First-pitch style stages (FRESH_LEAD / FOLLOW_UP / INTERESTED):
-    - CALL_NOT_ANSWERED, CALL_NOT_CONNECTED, CALL_BUSY, CALL_DONE → no stage change
-    - CALL_BACK → FOLLOW_UP (already FOLLOW_UP → no stage change)
-    - CONNECTED_AND_SCHEDULED → INTERESTED from FRESH_LEAD or FOLLOW_UP; no change when already INTERESTED
-    - SEND_DOCS → PENDING_REGISTRATION_DATA from FRESH_LEAD, FOLLOW_UP, or INTERESTED
-    - NOT_INTERESTED → NOT_INTERESTED from FRESH_LEAD, FOLLOW_UP, or INTERESTED (and other allowed contexts)
-
-    GST_REGISTRATION_DONE (final pitch):
-    - CALL_NOT_ANSWERED, CALL_NOT_CONNECTED, CALL_BUSY, CALL_DONE → no stage change
-    - SCHEDULED_PAYMENT → SCHEDULED_PAYMENTS
+    **FIRST_PITCH_CALL** (early funnel): ``CALL_BACK`` → ``FOLLOW_UP``; ``NOT_INTERESTED`` →
+    ``NOT_INTERESTED``; ``SEND_DOCS`` from FRESH_LEAD / FOLLOW_UP / INTERESTED →
+    ``PENDING_REGISTRATION_DATA``; ``CONNECTED_AND_SCHEDULED`` → ``INTERESTED`` as before;
+    ``CALL_NOT_*`` / ``CALL_DONE`` → no change.
     """
+    ctc = (call_type_code or "").strip().upper()
+
+    if ctc == "FINAL_PITCH_CALL":
+        if call_status_code == "SCHEDULED_PAYMENT":
+            if current_stage in {"GST_REGISTRATION_DONE", "SCHEDULED_PAYMENTS"}:
+                return "SCHEDULED_PAYMENTS"
+            raise _validation_error(
+                "Invalid stage for SCHEDULED_PAYMENT.",
+                {
+                    "stage": (
+                        f"SCHEDULED_PAYMENT applies only from GST_REGISTRATION_DONE or SCHEDULED_PAYMENTS; "
+                        f"current is {current_stage}."
+                    )
+                },
+            )
+        return None
+
+    if ctc != "FIRST_PITCH_CALL":
+        raise _validation_error(
+            "Unsupported call_type_code for stage transition.",
+            {"call_type_code": str(call_type_code)},
+        )
+
     if call_status_code in _STATUSES_NO_STAGE_CHANGE:
         return None
 
@@ -75,7 +98,6 @@ def _transition_stage(current_stage: str, call_type_code: str, call_status_code:
             )
         if current_stage == "INTERESTED":
             return None
-        # FRESH_LEAD or FOLLOW_UP → advance to INTERESTED
         return "INTERESTED"
 
     if call_status_code == "NOT_INTERESTED":
@@ -89,19 +111,6 @@ def _transition_stage(current_stage: str, call_type_code: str, call_status_code:
             {
                 "stage": (
                     f"SEND_DOCS applies only from FRESH_LEAD, FOLLOW_UP, or INTERESTED; "
-                    f"current is {current_stage}."
-                )
-            },
-        )
-
-    if call_status_code == "SCHEDULED_PAYMENT":
-        if current_stage == "GST_REGISTRATION_DONE":
-            return "SCHEDULED_PAYMENTS"
-        raise _validation_error(
-            "Invalid stage for SCHEDULED_PAYMENT.",
-            {
-                "stage": (
-                    f"SCHEDULED_PAYMENT applies only from GST_REGISTRATION_DONE; "
                     f"current is {current_stage}."
                 )
             },
@@ -157,6 +166,8 @@ async def _crm_apply_call_update(
     )
     new_stage = target_stage or current_stage
 
+    et_for_activity = _entity_type_query(lead.get("entity_type"))
+
     updated = await conn.fetchrow(
         f"""
         UPDATE {DB_SCHEMA}.crm_leads
@@ -188,20 +199,21 @@ async def _crm_apply_call_update(
     activity_id = await conn.fetchval(
         f"""
         INSERT INTO {DB_SCHEMA}.crm_activities (
-            lead_id, activity_type, call_type_code, call_status_code,
+            lead_id, entity_type, activity_type, call_type_code, call_status_code,
             old_stage, new_stage, followup_at, remarks, performed_by,
             last_dailed_at, last_connected_at,
             performed_at, created_at
         )
         VALUES (
-            $1, 'CALL', $2, $3, $4, $5, $6, $7, $8,
+            $1, $2, 'CALL', $3, $4, $5, $6, $7, $8, $9,
             NOW(),
-            CASE WHEN $9 = 1 THEN NOW() ELSE NULL END,
+            CASE WHEN $10 = 1 THEN NOW() ELSE NULL END,
             NOW(), NOW()
         )
         RETURNING id
         """,
         lead_id,
+        et_for_activity,
         call_type_code,
         call_status_code,
         current_stage,
@@ -282,12 +294,13 @@ async def _crm_apply_followup_status(
     activity_id = await conn.fetchval(
         f"""
         INSERT INTO {DB_SCHEMA}.crm_activities (
-            lead_id, activity_type, remarks, performed_by, performed_at, created_at
+            lead_id, entity_type, activity_type, remarks, performed_by, performed_at, created_at
         )
-        VALUES ($1, 'FOLLOWUP_STATUS_UPDATE', $2, $3, NOW(), NOW())
+        VALUES ($1, $2, 'FOLLOWUP_STATUS_UPDATE', $3, $4, NOW(), NOW())
         RETURNING id
         """,
         lead_id,
+        _entity_type_query(lead.get("entity_type")),
         (
             f"follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
             if payload.remarks is None
@@ -315,6 +328,92 @@ async def _crm_apply_followup_status(
     }
 
 
+@router.post(
+    "/{lead_id:int}/entity-id",
+    summary="Link or clear GST entity_id for a CRM lead",
+    description=(
+        "Sets crm_leads.entity_id to gst_registration.id (or JSON null to clear). "
+        "Same visibility as call updates (RM/OP/managers with EMPLOYEE WRITE). "
+        "INCOME_TAX leads must use /api/v1/crm/itr/leads/{lead_id}/entity-id."
+    ),
+)
+async def patch_crm_lead_entity_id_gst(
+    lead_id: int,
+    payload: CRMLeadEntityIdPatchIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+
+    new_eid = payload.entity_id
+
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                lead = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id, for_update=True)
+                if not lead:
+                    raise HTTPException(status_code=404, detail="CRM lead not found.")
+                if not _crm_lead_matches_funnel_entity_type(
+                    lead.get("entity_type"),
+                    DEFAULT_CRM_ENTITY_TYPE,
+                ):
+                    raise _validation_error(
+                        "This lead does not belong to the GST registration funnel.",
+                        {
+                            "entity_type": (
+                                "Expected GST_REGISTRATION or unset entity_type; "
+                                "use /api/v1/crm/itr/leads/{lead_id}/entity-id for INCOME_TAX."
+                            )
+                        },
+                    )
+                if new_eid is not None:
+                    exists = await _crm_linked_entity_row_exists(
+                        conn,
+                        DEFAULT_CRM_ENTITY_TYPE,
+                        new_eid,
+                    )
+                    if not exists:
+                        raise _validation_error(
+                            "entity_id is not a valid GST registration id.",
+                            {"entity_id": "No gst_registration row with this id."},
+                        )
+                updated = await conn.fetchrow(
+                    f"""
+                    UPDATE {DB_SCHEMA}.crm_leads
+                    SET entity_id = $1,
+                        updated_at = NOW()
+                    WHERE id = $2
+                    RETURNING *
+                    """,
+                    new_eid,
+                    lead_id,
+                )
+                if not updated:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Lead could not be updated; it may have changed. Retry after refresh.",
+                    )
+        await _invalidate_crm_cache(lead_id)
+        return {
+            "message": "entity_id updated successfully.",
+            "lead_id": lead_id,
+            "entity_id": updated["entity_id"],
+            "lead": dict(updated),
+        }
+    except asyncpg.exceptions.UniqueViolationError:
+        raise _validation_error(
+            "Cannot link: unique constraint violated.",
+            {"entity_id": "This registration may already be linked to another CRM lead."},
+        )
+    except asyncpg.exceptions.ForeignKeyViolationError:
+        raise _validation_error(
+            "Foreign key violation when setting entity_id.",
+            {"entity_id": "Invalid reference for this database policy."},
+        )
+    except asyncpg.PostgresError:
+        logger.exception("Database error while updating CRM lead entity_id (GST)")
+        raise HTTPException(status_code=500, detail="Database error.")
 
 
 @router.get("/{lead_id:int}", summary="Get CRM lead by id")

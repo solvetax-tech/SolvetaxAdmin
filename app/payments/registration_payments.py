@@ -4,7 +4,12 @@ from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from app.security.rbac import require_permission
 from app.payments.schemas import RegistrationPaymentIn
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_customer_visibility
+from app.utils import (
+    get_db_pool,
+    DB_SCHEMA,
+    generate_uuid,
+    build_registration_payments_visibility,
+)
 from app.logger import logger
 from app.redis_cache import (
     build_cache_key,
@@ -79,7 +84,7 @@ async def create_registration_payment(
                 f"""
                 SELECT 1
                 FROM {DB_SCHEMA}.payments
-                WHERE customer_id = $1
+                WHERE customer_id IS NOT DISTINCT FROM $1
                 AND entity_id = $2
                 AND entity_type = $3
                 AND payment_status = 'PAID'
@@ -102,7 +107,7 @@ async def create_registration_payment(
                 f"""
                 SELECT id
                 FROM {DB_SCHEMA}.payments
-                WHERE customer_id = $1
+                WHERE customer_id IS NOT DISTINCT FROM $1
                 AND entity_id = $2
                 AND entity_type = $3
                 FOR UPDATE
@@ -122,8 +127,7 @@ async def create_registration_payment(
                     (
                         SELECT amount
                         FROM {DB_SCHEMA}.payments
-                        WHERE
-                            customer_id = $1
+                        WHERE customer_id IS NOT DISTINCT FROM $1
                         AND entity_id = $2
                         AND entity_type = $3
                         AND is_active = TRUE
@@ -135,8 +139,7 @@ async def create_registration_payment(
                     COALESCE(SUM(discount), 0) AS total_discount
 
                 FROM {DB_SCHEMA}.payments
-                WHERE
-                    customer_id = $1
+                WHERE customer_id IS NOT DISTINCT FROM $1
                 AND entity_id = $2
                 AND entity_type = $3
                 AND is_active = TRUE
@@ -163,7 +166,7 @@ async def create_registration_payment(
                 f"""
                 SELECT COALESCE(SUM(paid_amount),0) AS total_paid
                 FROM {DB_SCHEMA}.payments
-                WHERE customer_id = $1
+                WHERE customer_id IS NOT DISTINCT FROM $1
                 AND entity_id = $2
                 AND entity_type = $3
                 AND is_active = TRUE
@@ -619,8 +622,8 @@ async def list_registration_payments(
         # ROLE BASED VISIBILITY (CUSTOMER → PAYMENT)
         # --------------------------------------------------
 
-        visibility_sql, visibility_values, param_index = build_customer_visibility(
-            role_norm,
+        visibility_sql, visibility_values, param_index = build_registration_payments_visibility(
+            role_norm or "",
             int(current_emp_id) if str(current_emp_id).isdigit() else None,
             param_index,
             DB_SCHEMA,
@@ -640,11 +643,21 @@ async def list_registration_payments(
         # COUNT QUERY
         # --------------------------------------------------
 
-        count_sql = f"""
-            SELECT COUNT(*)
+        entity_joins = f"""
             FROM {DB_SCHEMA}.payments rp
             LEFT JOIN {DB_SCHEMA}.customers c
                    ON rp.customer_id = c.customer_id
+            LEFT JOIN {DB_SCHEMA}.gst_registration g
+                   ON rp.entity_type = 'GST_REGISTRATION' AND rp.entity_id = g.id
+            LEFT JOIN {DB_SCHEMA}.income_tax i
+                   ON rp.entity_type = 'INCOME_TAX' AND rp.entity_id = i.id
+            LEFT JOIN {DB_SCHEMA}.gst_filings f
+                   ON rp.entity_type = 'GST_FILING' AND rp.entity_id = f.id
+        """
+
+        count_sql = f"""
+            SELECT COUNT(*)
+            {entity_joins}
             {where_clause}
         """
 
@@ -655,15 +668,13 @@ async def list_registration_payments(
         data_sql = f"""
             SELECT
                 rp.*,
-                rp.remaining_amount,   -- NEW FIELD
+                rp.remaining_amount,
                 c.full_name,
                 c.rm_id,
                 c.op_id,
                 e_rm.first_name AS rm_name,
                 e_op.first_name AS op_name
-            FROM {DB_SCHEMA}.payments rp
-            LEFT JOIN {DB_SCHEMA}.customers c
-                   ON rp.customer_id = c.customer_id
+            {entity_joins}
             LEFT JOIN {DB_SCHEMA}.employees e_rm
                    ON c.rm_id = e_rm.emp_id
             LEFT JOIN {DB_SCHEMA}.employees e_op
@@ -941,15 +952,17 @@ async def activate_registration_payment(
                         f"""
                         SELECT id
                         FROM {DB_SCHEMA}.payments
-                        WHERE customer_id = $1
+                        WHERE customer_id IS NOT DISTINCT FROM $1
                         AND entity_id = $2
                         AND entity_type = $3
                         AND payment_status = 'PAID'
                         AND is_active = TRUE
+                        AND id <> $4
                         """,
                         payment_row["customer_id"],
                         payment_row["entity_id"],
                         payment_row["entity_type"],
+                        payment_id,
                     )
 
                     if existing_paid:

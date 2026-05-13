@@ -15,10 +15,7 @@ from app.customer_registration.schemas import (
 )
 from app.utils import get_db_pool, DB_SCHEMA, is_business_description_ai_configured
 from app.campaign.campaign import insert_campaign_capture_for_public_create
-from app.gst_registration.gst_registration import (
-    _upsert_gst_registration_crm_lead_from_customer_intent,
-)
-from app.security.rbac import require_permission
+from app.security.rbac import require_permission, get_employee_payload_if_bearer
 from app.security.public_security import enforce_public_security
 from app.logger import logger
 from app.utils import (
@@ -31,6 +28,8 @@ from app.utils import (
 import json
 from zoneinfo import ZoneInfo
 from app.customer_registration.business_description_ai import request_business_description
+from app.customer_registration.services import _invalidate_customer_services_cache
+from app.crm.crm_leads_common import _invalidate_crm_cache
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -84,8 +83,62 @@ def _crm_lead_source_value(lead_source: Optional[str]) -> Optional[str]:
     return s[:120] if s else None
 
 
-def _services_include_gst_registration(services: List[str]) -> bool:
-    return any(str(x).strip().upper() == "GST_REGISTRATION" for x in (services or []))
+def _crm_lead_type_value(lead_type: Optional[str]) -> Optional[str]:
+    if lead_type is None:
+        return None
+    s = str(lead_type).strip().upper()
+    return s[:100] if s else None
+
+
+# service_required codes → crm_leads.entity_type (insert-only when no row for mobile + entity_type)
+_CRM_ENTITY_BY_SERVICE_CODE = {
+    "GST_REGISTRATION": "GST_REGISTRATION",
+    "ITR_FILING": "INCOME_TAX",
+}
+
+# create_customer: service_required drives two paths (can both run in one request):
+# - customers.service_required always holds the full list (including GST_REGISTRATION + ITR_FILING).
+# - crm_leads: if GST_REGISTRATION or ITR_FILING is present, insert one lead per entity type only when
+#   no active row exists for (trim(mobile), entity_type). rm_id/op_id are copied from the customer row:
+#   public create → usually NULL (admin assigns on CRM later); optional Bearer RM → rm_id=emp_id, op_id from
+#   payload; Bearer OP → op_id=emp_id, rm_id from payload. If (mobile, entity_type) already exists, skip CRM
+#   insert; those codes still sit on customers.service_required and admin works the existing lead.
+# - customer_services: PENDING rows for every other eligible service_code in service_required (not the two
+#   registration codes above), subject to service_config lookup.
+
+# Eligible for customer_services (PENDING) on customer create — excludes registration funnel codes only.
+_CUSTOMER_SERVICE_ELIGIBLE_CODES = frozenset(
+    {
+        "GST_FILING",
+        "GST_Q_FILING",
+        "GST_ANNUAL_RETURN",
+        "GST_AMENDMENT",
+        "GST_CANCELLATION",
+        "GST_LUT",
+        "GST_REFUND",
+        "GST_NOTICE_REPLY",
+        "ITR_NOTICE",
+        "ADVANCE_TAX",
+        "CAPITAL_GAINS",
+        "PVT_LTD_REG",
+        "LLP_REG",
+        "OPC_REG",
+        "PARTNERSHIP_REG",
+        "ROC_ANNUAL",
+        "DIR3_KYC",
+        "DIRECTOR_CHANGE",
+        "MONTHLY_ACCOUNTING",
+        "YEAR_END_FINALIZATION",
+        "PAYROLL_PROCESSING",
+        "PF_FILING",
+        "ESI_FILING",
+        "TRADEMARK_REG",
+        "TRADEMARK_RENEWAL",
+        "MSME_REG",
+        "FSSAI_LICENSE",
+        "IEC_REG",
+    }
+)
 
 
 def _merge_service_required_with_existing(
@@ -119,80 +172,210 @@ def _merge_service_required_with_existing(
     return out
 
 
-async def _sync_crm_lead_from_customer(
+async def _insert_crm_lead_if_missing_for_customer_entity(
     conn: asyncpg.Connection,
+    *,
     customer_row: asyncpg.Record,
-    tag: Optional[str] = None,
-    lead_source: Optional[str] = None,
+    entity_type: str,
+    tag: Optional[str],
+    lead_source: Optional[str],
+    lead_type: Optional[str],
 ) -> None:
     """
-    Ensure a base CRM lead exists from customer create.
-    Intentionally does not set entity_type/entity_id so downstream modules
-    (GST / ITR) can bind the same lead later by mobile.
+    Insert a CRM lead only when no active row exists for (trim(mobile), entity_type).
+    entity_type is GST_REGISTRATION or INCOME_TAX. If a row exists, do nothing — intent stays on
+    customers.service_required only; RM/OP come from the customer row (public: usually NULL; RM bearer: set on customer).
     """
-    try:
-        mobile = customer_row.get("mobile")
-        if not mobile:
-            return
-        tag_value = (tag or "").strip() or None
-        lead_src = _crm_lead_source_value(lead_source)
+    mobile = (customer_row.get("mobile") or "").strip()
+    if not mobile:
+        return
 
+    tag_value = (tag or "").strip() or None
+    lead_src = _crm_lead_source_value(lead_source)
+    lead_ty = _crm_lead_type_value(lead_type)
+    full_name = customer_row.get("full_name")
+    email = customer_row.get("email")
+    preferred_language = customer_row.get("language")
+
+    try:
         existing = await conn.fetchrow(
             f"""
-            SELECT id
-            FROM {DB_SCHEMA}.crm_leads
-            WHERE trim(mobile) = trim($1::text)
-              AND is_active = TRUE
-            ORDER BY id DESC
-            LIMIT 1
-            FOR UPDATE
+            SELECT 1
+              FROM {DB_SCHEMA}.crm_leads
+             WHERE trim(mobile) = trim($1::text)
+               AND entity_type = $2
+               AND is_active = TRUE
+             LIMIT 1
             """,
             mobile,
+            entity_type,
         )
         if existing:
-            await conn.execute(
-                f"""
-                UPDATE {DB_SCHEMA}.crm_leads
-                SET rm_id = COALESCE(rm_id, $1),
-                    op_id = COALESCE(op_id, $2),
-                    tag = COALESCE($4, tag),
-                    lead_source = CASE
-                        WHEN $5::text IS NOT NULL AND btrim($5::text) <> '' THEN upper(btrim($5::text))
-                        ELSE lead_source
-                    END,
-                    updated_at = NOW()
-                WHERE id = $3
-                """,
-                customer_row.get("rm_id"),
-                customer_row.get("op_id"),
-                existing["id"],
-                tag_value,
-                lead_src,
-            )
             return
 
-        await conn.fetchval(
+        lead_id = await conn.fetchval(
             f"""
-            INSERT INTO {DB_SCHEMA}.crm_leads
-                (mobile, stage, rm_id, op_id, is_active, remarks, tag, lead_source, created_at, updated_at)
-            VALUES
-                ($1, $2, $3, $4, TRUE, $5, $6, $7, NOW(), NOW())
+            INSERT INTO {DB_SCHEMA}.crm_leads (
+                mobile,
+                full_name,
+                email,
+                entity_id,
+                entity_type,
+                preferred_language,
+                stage,
+                follow_up_status,
+                rm_id,
+                op_id,
+                remarks,
+                is_active,
+                lead_type,
+                tag,
+                lead_source,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                $1, $2, $3, NULL, $4, $5,
+                'FRESH_LEAD',
+                'PENDING',
+                $6, $7,
+                $8,
+                TRUE,
+                $9, $10, $11,
+                NOW(), NOW()
+            )
             RETURNING id
             """,
             mobile,
-            "FRESH_LEAD",
+            full_name,
+            email,
+            entity_type,
+            preferred_language,
             customer_row.get("rm_id"),
             customer_row.get("op_id"),
             "Auto synced from customer create.",
+            lead_ty,
             tag_value,
             lead_src,
         )
+        if lead_id:
+            await _invalidate_crm_cache(int(lead_id))
     except asyncpg.UndefinedTableError:
         logger.warning("CRM tables not found; skipping CRM sync from customer.")
     except asyncpg.UndefinedColumnError:
-        logger.warning("crm_leads.lead_source column missing; skip lead_source in customer CRM sync.")
+        logger.warning(
+            "crm_leads column missing; skip typed CRM lead sync (expected lead_type / lead_source / preferred_language)."
+        )
     except asyncpg.PostgresError:
-        logger.exception("CRM sync failed from customer; continuing customer flow.")
+        logger.exception("CRM typed lead insert failed from customer; continuing customer flow.")
+
+
+async def _sync_crm_leads_from_customer_service_required(
+    conn: asyncpg.Connection,
+    customer_row: asyncpg.Record,
+    service_codes_upper: List[str],
+    *,
+    tag: Optional[str],
+    lead_source: Optional[str],
+    lead_type: Optional[str],
+) -> None:
+    """Insert GST_REGISTRATION / INCOME_TAX CRM leads only when no row exists for mobile + entity_type."""
+    seen_entity: set[str] = set()
+    for raw in service_codes_upper:
+        entity = _CRM_ENTITY_BY_SERVICE_CODE.get(raw)
+        if not entity or entity in seen_entity:
+            continue
+        seen_entity.add(entity)
+        await _insert_crm_lead_if_missing_for_customer_entity(
+            conn,
+            customer_row=customer_row,
+            entity_type=entity,
+            tag=tag,
+            lead_source=lead_source,
+            lead_type=lead_type,
+        )
+
+
+async def _insert_pending_customer_services_for_eligible_codes(
+    conn: asyncpg.Connection,
+    customer_id: int,
+    service_codes_upper: List[str],
+    rm_id: Optional[int],
+    op_id: Optional[int],
+) -> int:
+    """
+    For allowed catalog codes in service_required, insert customer_services PENDING
+    when a service_config row exists and no row yet for (customer_id, service_id).
+    """
+    skip = frozenset(_CRM_ENTITY_BY_SERVICE_CODE.keys())
+    wanted = [
+        c
+        for c in service_codes_upper
+        if c in _CUSTOMER_SERVICE_ELIGIBLE_CODES and c not in skip
+    ]
+    if not wanted:
+        return 0
+
+    rows = await conn.fetch(
+        f"""
+        SELECT id, upper(trim(service_code)) AS sc
+          FROM {DB_SCHEMA}.service_config
+         WHERE is_active = TRUE
+           AND upper(trim(service_code)) = ANY($1::text[])
+        """,
+        wanted,
+    )
+    by_code = {r["sc"]: r["id"] for r in rows}
+    inserted = 0
+    for code in wanted:
+        sid = by_code.get(code)
+        if sid is None:
+            logger.warning(
+                "customer create: service_config missing for code=%s; skip customer_services",
+                code,
+            )
+            continue
+        exists = await conn.fetchrow(
+            f"""
+            SELECT 1
+              FROM {DB_SCHEMA}.customer_services
+             WHERE customer_id = $1
+               AND service_id = $2
+             LIMIT 1
+            """,
+            customer_id,
+            sid,
+        )
+        if exists:
+            continue
+        try:
+            await conn.execute(
+                f"""
+                INSERT INTO {DB_SCHEMA}.customer_services (
+                    customer_id,
+                    service_id,
+                    service_status,
+                    rm_id,
+                    op_id,
+                    entity_type,
+                    entity_id,
+                    created_at
+                )
+                VALUES ($1, $2, 'PENDING', $3, $4, NULL, NULL, NOW())
+                """,
+                customer_id,
+                sid,
+                rm_id,
+                op_id,
+            )
+            inserted += 1
+        except asyncpg.PostgresError:
+            logger.exception(
+                "customer create: customer_services insert failed | customer_id=%s service_id=%s",
+                customer_id,
+                sid,
+            )
+    return inserted
 
 
 @router.get(
@@ -455,6 +638,9 @@ async def create_customer(
         block_seconds=300,
     )
 
+    # Optional: employee JWT assigns RM/OP when role is RM/OP (public creates omit Bearer).
+    employee = get_employee_payload_if_bearer(request)
+
     # --------------------------------------------------
     # Request Context
     # --------------------------------------------------
@@ -463,6 +649,10 @@ async def create_customer(
 
     emp_id = None
     role = None
+    if employee:
+        emp_raw = employee.get("emp_id") or employee.get("sub")
+        emp_id = int(emp_raw) if str(emp_raw).isdigit() else None
+        role = str(employee.get("role") or "").strip().upper() or None
 
     log = logging.LoggerAdapter(
         logger,
@@ -474,11 +664,10 @@ async def create_customer(
     masked_mobile = mask_sensitive_data(payload.mobile)
 
     log.info(
-        "Incoming create customer request | email=%s mobile=%s service_required=%s service_provided=%s",
+        "Incoming create customer request | email=%s mobile=%s service_required=%s",
         masked_email,
         masked_mobile,
         payload.service_required,
-        payload.service_provided,
     )
 
     # --------------------------------------------------
@@ -515,10 +704,10 @@ async def create_customer(
 
     service_required = normalize_services(payload.service_required)
 
-    service_provided = normalize_services(payload.service_provided)
-
     # --------------------------------------------------
-    # Default RM / OP assignment based on role
+    # RM / OP on customers (and thus on new crm_leads + customer_services rows)
+    # Public: typically NULL. Bearer RM: default rm_id to emp_id, op_id from payload. Bearer OP: default op_id
+    # to emp_id, rm_id from payload.
     # --------------------------------------------------
     rm_id = payload.rm_id
     op_id = payload.op_id
@@ -553,6 +742,8 @@ async def create_customer(
     async with pool.acquire() as conn:
 
         try:
+
+            pending_svcs_created = 0
 
             # --------------------------------------------------
             # PROACTIVE DUPLICATE CHECK
@@ -600,22 +791,25 @@ async def create_customer(
                         full_name,
                         email,
                         mobile,
+                        service_required,
+                        language,
                         business_name,
                         business_description,
                         business_image_url,
                         business_type,
                         state,
                         city,
-                        language,
                         remark,
                         rm_id,
                         op_id,
                         referral_id,
-                        service_required,
-                        service_provided
+                        referral_entity,
+                        lead_source,
+                        tag,
+                        lead_type
                     )
                     VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
                     )
                     RETURNING *
                 """
@@ -625,6 +819,8 @@ async def create_customer(
                     payload.full_name,
                     payload.email,
                     payload.mobile,
+                    service_required,
+                    payload.language,
                     payload.business_name,
                     payload.business_description,
                     str(payload.business_image_url)
@@ -633,13 +829,14 @@ async def create_customer(
                     payload.business_type,
                     payload.state,
                     payload.city,
-                    payload.language,
                     payload.remark,
                     rm_id,
                     op_id,
                     payload.referral_id,
-                    service_required,
-                    service_provided,
+                    payload.referral_entity,
+                    payload.lead_source,
+                    payload.tag,
+                    payload.lead_type,
                 )
 
                 if not customer_row:
@@ -659,18 +856,27 @@ async def create_customer(
 
                 customer_id = customer_row["customer_id"]
 
-                # 2️⃣ Sync base CRM lead from customer (mobile-based, no entity binding yet)
-                await _sync_crm_lead_from_customer(
-                    conn, customer_row, tag=payload.tag, lead_source=payload.lead_source
-                )
+                service_codes_upper = [
+                    s.strip().upper()
+                    for s in service_required
+                    if isinstance(s, str) and s.strip()
+                ]
 
-                if _services_include_gst_registration(service_required):
-                    await _upsert_gst_registration_crm_lead_from_customer_intent(
-                        conn,
-                        customer_row,
-                        tag=payload.tag,
-                        lead_source=payload.lead_source,
-                    )
+                await _sync_crm_leads_from_customer_service_required(
+                    conn,
+                    customer_row,
+                    service_codes_upper,
+                    tag=payload.tag,
+                    lead_source=payload.lead_source,
+                    lead_type=payload.lead_type,
+                )
+                pending_svcs_created = await _insert_pending_customer_services_for_eligible_codes(
+                    conn,
+                    customer_id,
+                    service_codes_upper,
+                    rm_id,
+                    op_id,
+                )
 
                 await insert_campaign_capture_for_public_create(
                     conn,
@@ -710,6 +916,9 @@ async def create_customer(
                 "Customer created successfully | customer_id=%s",
                 customer_id,
             )
+
+            if pending_svcs_created > 0:
+                await _invalidate_customer_services_cache()
 
             await _invalidate_customer_cache(customer_id)
             return {
@@ -1129,10 +1338,6 @@ ARRAY_FILTERS = {
     "service_required": ("service_required", "ANY"),
     "services_required_all": ("service_required", "@>"),
     "services_required_any": ("service_required", "&&"),
-
-    "service_provided": ("service_provided", "ANY"),
-    "services_provided_all": ("service_provided", "@>"),
-    "services_provided_any": ("service_provided", "&&"),
 }
 
 from fastapi import Query
@@ -1167,10 +1372,6 @@ async def filter_customers(
     service_required: Optional[str] = None,
     services_required_all: Optional[List[str]] = Query(None),
     services_required_any: Optional[List[str]] = Query(None),
-
-    service_provided: Optional[str] = None,
-    services_provided_all: Optional[List[str]] = Query(None),
-    services_provided_any: Optional[List[str]] = Query(None),
 
     # date filters
     from_date: Optional[datetime] = None,
@@ -1232,9 +1433,6 @@ async def filter_customers(
         service_required=service_required,
         services_required_all=services_required_all,
         services_required_any=services_required_any,
-        service_provided=service_provided,
-        services_provided_all=services_provided_all,
-        services_provided_any=services_provided_any,
         from_date=from_date,
         to_date=to_date,
         limit=limit,
@@ -1289,9 +1487,6 @@ async def filter_customers(
                     "service_required": service_required,
                     "services_required_all": services_required_all,
                     "services_required_any": services_required_any,
-                    "service_provided": service_provided,
-                    "services_provided_all": services_provided_all,
-                    "services_provided_any": services_provided_any,
                 }.get(key)
 
                 if not value:
@@ -1594,12 +1789,6 @@ async def edit_customer(
         )
         update_data.pop("service_required", None)
 
-    if "service_provided" in update_data:
-
-        update_data["service_provided"] = normalize_services(
-            update_data["service_provided"]
-        )
-
     # --------------------------------------------------
     # DB Pool
     # --------------------------------------------------
@@ -1788,21 +1977,6 @@ async def edit_customer(
                             }
                         }
                     )
-
-                if incoming_service_required_patch is not None:
-                    had_gst = _services_include_gst_registration(
-                        old_row.get("service_required") or []
-                    )
-                    has_gst = _services_include_gst_registration(
-                        new_row.get("service_required") or []
-                    )
-                    if has_gst and not had_gst:
-                        await _upsert_gst_registration_crm_lead_from_customer_intent(
-                            conn,
-                            new_row,
-                            tag=None,
-                            lead_source=None,
-                        )
 
                 # --------------------------------------------------
                 # 4️⃣ Version Audit

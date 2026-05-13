@@ -20,13 +20,16 @@ class CustomerIn(BaseSchema):
     full_name: str = Field(..., min_length=2, max_length=150)
     email: Optional[EmailStr] = Field(None, max_length=150)
     mobile: Annotated[str, Field(pattern=r"^\d{10}$")]
+
+    service_required: List[str] = Field(default_factory=list)
+    language: Optional[str] = Field(None, max_length=50)
+
     business_name: Optional[str] = Field(None, max_length=200)
     business_description: Optional[str] = None
     business_image_url: Optional[str] = None
     business_type: Optional[str] = Field(None, max_length=50)
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
-    language: Optional[str] = Field(None, max_length=50)
     remark: Optional[str] = None
     rm_id: Optional[int] = Field(
         None,
@@ -39,18 +42,22 @@ class CustomerIn(BaseSchema):
         description="Operations emp_id. Omitted + JWT role OP → API sets to current emp_id.",
     )
     referral_id: Optional[int] = Field(None, gt=0)
+    referral_entity: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Entity type for referral_id (e.g. CUSTOMER, GST_REGISTRATION).",
+    )
 
-    # -----------------------------------------------------
-    # NEW SERVICE COLUMNS (DB ALIGNED)
-    # -----------------------------------------------------
-
-    service_required: List[str] = Field(default_factory=list)
-    service_provided: List[str] = Field(default_factory=list)
-    tag: Optional[str] = Field(None, max_length=100)
     lead_source: Optional[str] = Field(
         None,
         max_length=120,
-        description="Stored on crm_leads when CRM sync runs (e.g. WEBSITE, PAID_GOOGLE, or UTM-derived code).",
+        description="Stored on customers and crm_leads (e.g. WEBSITE, PAID_GOOGLE).",
+    )
+    tag: Optional[str] = Field(None, max_length=100)
+    lead_type: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Lead classification (e.g. INBOUND, REFERRAL).",
     )
 
     utm_source: Optional[str] = Field(None, max_length=120)
@@ -109,6 +116,7 @@ class CustomerIn(BaseSchema):
         "language",
         "remark",
         "tag",
+        "referral_entity",
         mode="before",
     )
     @classmethod
@@ -121,6 +129,14 @@ class CustomerIn(BaseSchema):
         if isinstance(v, str):
             s = v.strip().upper()
             return s[:120] if s else None
+        return v
+
+    @field_validator("lead_type", mode="before")
+    @classmethod
+    def normalize_lead_type(cls, v):
+        if isinstance(v, str):
+            s = v.strip().upper()
+            return s[:100] if s else None
         return v
 
     @field_validator(
@@ -182,30 +198,29 @@ class CustomerOut(BaseSchema):
     full_name: str
     email: Optional[str]
     mobile: Optional[str]
+    service_required: List[str] = []
+    language: Optional[str]
     business_name: Optional[str]
     business_description: Optional[str]
     business_image_url: Optional[str]
     business_type: Optional[str]
     state: Optional[str]
     city: Optional[str]
-    language: Optional[str]
     remark: Optional[str]
     rm_id: Optional[int]
     rm_name: Optional[str] = None
     op_id: Optional[int]
     op_name: Optional[str] = None
+    is_active: bool
     referral_id: Optional[int]
+    referral_entity: Optional[str] = None
+    lead_source: Optional[str] = None
+    tag: Optional[str] = None
+    lead_type: Optional[str] = None
+
     created_at: datetime
     updated_at: datetime
     message: Optional[str] = None
-    is_active: bool
-
-    # -----------------------------------------------------
-    # NEW SERVICE FIELDS
-    # -----------------------------------------------------
-
-    service_required: List[str] = []
-    service_provided: List[str] = []
 
 
 # =========================================================
@@ -216,13 +231,21 @@ class CustomerEditIn(BaseSchema):
     full_name: Optional[str] = Field(None, min_length=2, max_length=150)
     email: Optional[EmailStr] = Field(None, max_length=150)
     mobile: Optional[str] = Field(None, pattern=r"^\d{10}$")
+    service_required: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Service codes to add. Merged with existing customer.service_required: "
+            "only new codes are appended; order preserved; duplicates ignored (case-insensitive). "
+            "Does not create income_tax rows; use income-tax API for ITR."
+        ),
+    )
+    language: Optional[str] = Field(None, max_length=50)
     business_name: Optional[str] = Field(None, max_length=200)
     business_description: Optional[str] = None
     business_image_url: Optional[str] = None
     business_type: Optional[str] = Field(None, max_length=50)
     state: Optional[str] = Field(None, max_length=100)
     city: Optional[str] = Field(None, max_length=100)
-    language: Optional[str] = Field(None, max_length=50)
     remark: Optional[str] = None
     rm_id: Optional[int] = Field(
         None,
@@ -235,22 +258,15 @@ class CustomerEditIn(BaseSchema):
         description="When set, updates OP emp_id; omit to leave unchanged (see edit_customer handler).",
     )
     referral_id: Optional[int] = Field(None, gt=0)
-    is_active: Optional[bool] = None
-
-    # -----------------------------------------------------
-    # NEW SERVICE FIELDS
-    # -----------------------------------------------------
-
-    service_required: Optional[List[str]] = Field(
+    referral_entity: Optional[str] = Field(
         None,
-        description=(
-            "Service codes to add. Merged with existing customer.service_required: "
-            "only new codes are appended; order preserved; duplicates ignored (case-insensitive). "
-            "Does not create income_tax rows; use income-tax API for ITR."
-        ),
+        max_length=100,
+        description="Entity type for referral_id (e.g. CUSTOMER, GST_REGISTRATION).",
     )
-    service_provided: Optional[List[str]] = None
-
+    lead_source: Optional[str] = Field(None, max_length=120)
+    tag: Optional[str] = Field(None, max_length=100)
+    lead_type: Optional[str] = Field(None, max_length=100)
+    is_active: Optional[bool] = None
 
     # -----------------------------------------------------
     # Normalize Email
@@ -282,14 +298,30 @@ class CustomerEditIn(BaseSchema):
         "city",
         "language",
         "remark",
+        "referral_entity",
+        "tag",
         mode="before",
     )
     @classmethod
     def sanitize_strings(cls, v):
         return html.escape(v.strip()) if isinstance(v, str) else v
 
+    @field_validator("lead_source", mode="before")
+    @classmethod
+    def normalize_lead_source_edit(cls, v):
+        if isinstance(v, str):
+            s = v.strip().upper()
+            return s[:120] if s else None
+        return v
 
-    
+    @field_validator("lead_type", mode="before")
+    @classmethod
+    def normalize_lead_type_edit(cls, v):
+        if isinstance(v, str):
+            s = v.strip().upper()
+            return s[:100] if s else None
+        return v
+
     # -----------------------------------------------------
     # Ensure At Least One Field Provided
     # -----------------------------------------------------
