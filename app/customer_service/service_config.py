@@ -1,26 +1,24 @@
+"""Staff APIs for `service_config` (dropdown / catalog reads)."""
+
 import logging
-import uuid
+from typing import Optional
+
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Depends, status
-from pydantic import constr, validator
-from typing import Optional, List
-from datetime import datetime
-from app.utils import get_db_pool, DB_SCHEMA
-from app.security.rbac import require_permission
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.customer_service.schemas import ServiceConfigDropdownResponse, ServiceConfigDropdownRow
 from app.logger import logger
-from app.utils import mask_sensitive_data,generate_uuid
-import json
-from zoneinfo import ZoneInfo
 from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
-IST = ZoneInfo("Asia/Kolkata")
+from app.security.rbac import require_permission
+from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
 
 router = APIRouter(
-    prefix="/api/v1/services-config",
-    tags=["Services_config"]
+    prefix="/api/v1/customer-service",
+    tags=["Service config"],
 )
 
 
-def _services_dropdown_cache_key(
+def _service_config_dropdown_cache_key(
     service_category_cleaned: Optional[str],
     role: Optional[str],
     emp_id: Optional[int],
@@ -32,22 +30,16 @@ def _services_dropdown_cache_key(
         emp_id=emp_id,
     )
 
-# -------------------------------------------------------------------
-# GET SERVICE CONFIG (Dropdown)
-# -------------------------------------------------------------------
+
 @router.get(
-    "/services",
-    summary="Get Services for Dropdown",
-    responses={
-        200: {"description": "Services fetched successfully."},
-        500: {"description": "Database error."},
-    },
+    "/service-config/services",
+    response_model=ServiceConfigDropdownResponse,
+    summary="service_config rows for staff dropdown (was /api/v1/services-config/services)",
 )
-async def get_services(
+async def get_service_config_dropdown(
     service_category: Optional[str] = None,
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
-
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
@@ -58,25 +50,15 @@ async def get_services(
         {"request_id": request_id, "emp_id": emp_id if emp_id is not None else "-"},
     )
 
-    # --------------------------------------------------
-    # Normalize Input
-    # --------------------------------------------------
-
     service_category_cleaned = (
         service_category.strip().upper()
         if service_category and service_category.strip()
         else None
     )
 
-    log.info(
-        "Fetching services dropdown | category=%s",
-        service_category_cleaned
-    )
-    cache_key = _services_dropdown_cache_key(service_category_cleaned, role, emp_id)
+    log.info("Fetching services dropdown | category=%s", service_category_cleaned)
+    cache_key = _service_config_dropdown_cache_key(service_category_cleaned, role, emp_id)
 
-    # --------------------------------------------------
-    # DB Pool
-    # --------------------------------------------------
     try:
         pool = await get_db_pool()
     except Exception:
@@ -93,20 +75,12 @@ async def get_services(
             values = []
             param_index = 1
 
-            # --------------------------------------------------
-            # CATEGORY FILTER
-            # --------------------------------------------------
-
             if service_category_cleaned:
                 conditions.append(f"service_category = ${param_index}")
                 values.append(service_category_cleaned)
                 param_index += 1
 
             where_clause = f"WHERE {' AND '.join(conditions)}"
-
-            # --------------------------------------------------
-            # MAIN QUERY (IMPROVED)
-            # --------------------------------------------------
 
             sql = f"""
                 SELECT
@@ -123,16 +97,15 @@ async def get_services(
             async with pool.acquire() as conn:
                 rows = await conn.fetch(sql, *values)
 
-            log.info(
-                "Services fetched successfully | count=%s",
-                len(rows)
-            )
+            log.info("Services fetched successfully | count=%s", len(rows))
 
-            return {
-                "data": [dict(row) for row in rows],
-                "count": len(rows),
-                "request_id": request_id,
-            }
+            data = [ServiceConfigDropdownRow(**dict(row)) for row in rows]
+
+            return ServiceConfigDropdownResponse(
+                data=data,
+                count=len(data),
+                request_id=request_id,
+            ).model_dump()
 
         return await redis_get_or_set_json(
             cache_key,

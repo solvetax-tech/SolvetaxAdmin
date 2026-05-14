@@ -26,6 +26,17 @@ PUBLIC_PATHS = [
     "/app/v1/forgot-password/verify",
 ]
 
+CUSTOMER_PORTAL_PUBLIC = {
+    ("GET", "/app/v1/customer-profile"),
+    ("PATCH", "/app/v1/customer-profile"),
+    ("POST", "/app/v1/customer-profile/signup"),
+    ("POST", "/app/v1/customer-profile/login"),
+    ("POST", "/app/v1/customer-profile/refresh"),
+    ("POST", "/app/v1/customer-profile/logout"),
+    ("POST", "/app/v1/customer-profile/forgot-password/request"),
+    ("POST", "/app/v1/customer-profile/forgot-password/verify"),
+}
+
 PUBLIC_EXACT_ENDPOINTS = {
     ("POST", "/api/v1/crm/leads/marketing"),
     ("POST", "/api/v1/income-tax"),
@@ -35,9 +46,10 @@ PUBLIC_EXACT_ENDPOINTS = {
     ("POST", "/api/v1/event-logs/debug/smoke"),
     ("GET", "/api/v1/payments_config/payment-config/public"),
     ("GET", "/api/v1/payments_config/payment-config/public/service-prices"),
-    ("POST", "/app/v1/client-otp/request"),
-    ("POST", "/app/v1/client-otp/verify"),
+    ("POST", "/app/v1/customer-otp/request"),
+    ("POST", "/app/v1/customer-otp/verify"),
 }
+PUBLIC_EXACT_ENDPOINTS |= CUSTOMER_PORTAL_PUBLIC
 
 def _get_client_ip(request: Request | None) -> str:
     """Get client IP from request (same logic as login.py)."""

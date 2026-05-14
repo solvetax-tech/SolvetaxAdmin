@@ -1171,16 +1171,19 @@ async def create_gst_filing(
         try:
             async with conn.transaction():
 
-                # ================= CUSTOMER =================
-                customer = await conn.fetchrow(
-                    f"""SELECT customer_id, is_active
-                        FROM {DB_SCHEMA}.customers
-                        WHERE customer_id = $1""",
-                    payload.customer_id,
-                )
+                # ================= CUSTOMER (only when linked) =================
+                if payload.customer_id is not None:
+                    customer = await conn.fetchrow(
+                        f"""SELECT customer_id, is_active
+                            FROM {DB_SCHEMA}.customers
+                            WHERE customer_id = $1""",
+                        payload.customer_id,
+                    )
 
-                if not customer or not customer["is_active"]:
-                    raise HTTPException(400, GstFilingApiMessages.CREATE_CUSTOMER_INVALID)
+                    if not customer or not customer["is_active"]:
+                        raise HTTPException(
+                            400, GstFilingApiMessages.CREATE_CUSTOMER_INVALID
+                        )
 
                 # ================= GST =================
                 if payload.gst_registration_id:
@@ -1210,7 +1213,7 @@ async def create_gst_filing(
                 duplicate = await conn.fetchval(
                     f"""
                     SELECT 1 FROM {DB_SCHEMA}.gst_filings
-                    WHERE customer_id = $1
+                    WHERE customer_id IS NOT DISTINCT FROM $1
                       AND gst_registration_id IS NOT DISTINCT FROM $2
                       AND gstin IS NOT DISTINCT FROM $3
                       AND filing_period = $4
@@ -1300,24 +1303,6 @@ async def create_gst_filing(
                     explicit_filing_period=explicit_filing_period,
                     is_auto_enabled=is_auto_enabled,
                     supersede_with_is_current=False,
-                )
-
-                # ================= CUSTOMER SERVICE =================
-                await conn.execute(
-                    f"""INSERT INTO {DB_SCHEMA}.customer_services (
-                        customer_id, service_id, service_status,
-                        rm_id, op_id, entity_type, entity_id, created_at
-                    )
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-                    ON CONFLICT DO NOTHING""",
-                    payload.customer_id,
-                    service_id,
-                    "PENDING",
-                    rm_id,
-                    op_id,
-                    "GST_FILING",
-                    filing_id,
-                    now,
                 )
 
                 # ================= VERSION LOG =================
@@ -1764,25 +1749,26 @@ async def deactivate_gst_filing(
                     raise HTTPException(400, GstFilingApiMessages.DEACTIVATE_FILED_BLOCK)
 
                 # --------------------------------------------------
-                # 2️⃣ CUSTOMER VALIDATION
+                # 2️⃣ CUSTOMER VALIDATION (only when filing is linked to a customer)
                 # --------------------------------------------------
-                customer = await conn.fetchrow(
-                    f"""
-                    SELECT customer_id, is_active
-                    FROM {DB_SCHEMA}.customers
-                    WHERE customer_id = $1
-                    """,
-                    filing["customer_id"],
-                )
-
-                if not customer:
-                    raise HTTPException(400, GstFilingApiMessages.CUSTOMER_NOT_FOUND)
-
-                if not customer["is_active"]:
-                    raise HTTPException(
-                        400,
-                        GstFilingApiMessages.DEACTIVATE_CUSTOMER_INACTIVE,
+                if filing["customer_id"] is not None:
+                    customer = await conn.fetchrow(
+                        f"""
+                        SELECT customer_id, is_active
+                        FROM {DB_SCHEMA}.customers
+                        WHERE customer_id = $1
+                        """,
+                        filing["customer_id"],
                     )
+
+                    if not customer:
+                        raise HTTPException(400, GstFilingApiMessages.CUSTOMER_NOT_FOUND)
+
+                    if not customer["is_active"]:
+                        raise HTTPException(
+                            400,
+                            GstFilingApiMessages.DEACTIVATE_CUSTOMER_INACTIVE,
+                        )
 
                 # --------------------------------------------------
                 # 3️⃣ DEACTIVATE GST FILING
@@ -1832,19 +1818,6 @@ async def deactivate_gst_filing(
                     """,
                     filing_id,
                     now,
-                )
-
-                # ==================================================
-                # 🔥 NEW: CUSTOMER SERVICE SYNC
-                # ==================================================
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.customer_services
-                    SET status = 'INACTIVE'
-                    WHERE entity_type = 'GST_FILING'
-                      AND entity_id = $1
-                    """,
-                    filing_id,
                 )
 
                 # --------------------------------------------------
@@ -1975,25 +1948,26 @@ async def activate_gst_filing(
                     raise HTTPException(400, GstFilingApiMessages.ACTIVATE_ALREADY_ACTIVE)
 
                 # --------------------------------------------------
-                # 2️⃣ FETCH CUSTOMER (SEPARATE VALIDATION 🔥)
+                # 2️⃣ CUSTOMER (only when filing is linked)
                 # --------------------------------------------------
-                customer = await conn.fetchrow(
-                    f"""
-                    SELECT customer_id, is_active
-                    FROM {DB_SCHEMA}.customers
-                    WHERE customer_id = $1
-                    """,
-                    filing["customer_id"],
-                )
-
-                if not customer:
-                    raise HTTPException(400, GstFilingApiMessages.CUSTOMER_NOT_FOUND)
-
-                if not customer["is_active"]:
-                    raise HTTPException(
-                        400,
-                        GstFilingApiMessages.ACTIVATE_CUSTOMER_INACTIVE,
+                if filing["customer_id"] is not None:
+                    customer = await conn.fetchrow(
+                        f"""
+                        SELECT customer_id, is_active
+                        FROM {DB_SCHEMA}.customers
+                        WHERE customer_id = $1
+                        """,
+                        filing["customer_id"],
                     )
+
+                    if not customer:
+                        raise HTTPException(400, GstFilingApiMessages.CUSTOMER_NOT_FOUND)
+
+                    if not customer["is_active"]:
+                        raise HTTPException(
+                            400,
+                            GstFilingApiMessages.ACTIVATE_CUSTOMER_INACTIVE,
+                        )
 
                 # --------------------------------------------------
                 # 3️⃣ ACTIVATE GST FILING
@@ -2046,20 +2020,6 @@ async def activate_gst_filing(
                     """,
                     filing_id,
                     now,
-                )
-
-                # --------------------------------------------------
-                # 4.2️⃣ RESTORE CUSTOMER SERVICE (PENDING)
-                # --------------------------------------------------
-                await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.customer_services
-                    SET status = 'ACTIVE'
-                    WHERE entity_type = 'GST_FILING'
-                      AND entity_id = $1
-                      AND status = 'INACTIVE'
-                    """,
-                    filing_id
                 )
 
                 # --------------------------------------------------

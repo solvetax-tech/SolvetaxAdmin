@@ -83,8 +83,15 @@ def custom_openapi():
         "/api/v1/event-logs/debug/smoke",
         "/api/v1/payments_config/payment-config/public",
         "/api/v1/payments_config/payment-config/public/service-prices",
-        "/app/v1/client-otp/request",
-        "/app/v1/client-otp/verify",
+        "/app/v1/customer-otp/request",
+        "/app/v1/customer-otp/verify",
+        "/app/v1/customer-profile",
+        "/app/v1/customer-profile/signup",
+        "/app/v1/customer-profile/login",
+        "/app/v1/customer-profile/refresh",
+        "/app/v1/customer-profile/logout",
+        "/app/v1/customer-profile/forgot-password/request",
+        "/app/v1/customer-profile/forgot-password/verify",
     }
 
     for path_key, path_item in openapi_schema["paths"].items():
@@ -104,7 +111,8 @@ from app.sign_up.email_verification import router as email_verification
 from app.sign_up.signup import router as signup_router
 from app.sign_up.login import router as login_router
 from app.sign_up.forgot import router as forgot_password_router
-from app.sign_up.verify_client_otp import router as verify_client_otp_router
+from app.customer_profile.verify_customer_otp import router as verify_customer_otp_router
+from app.customer_profile import router as customer_profile_router
 from app.sign_up.employee_edit import router as employee_edit_router
 from app.customer_registration.customer import router as customer_router
 from app.gst_registration.gst_registration import router as gst_registration_router
@@ -119,9 +127,7 @@ from app.payments.income_tax_payments import router as income_tax_payments_route
 from app.payments.payments_config import router as payments_config
 from app.gst_registration.gst_blob import router as gst_blob
 from app.gst_registration.document_config import router as document_config
-from app.customer_registration.services import router as services
-from app.follow_ups.gst_filing_manual_followups import router as gst_filing_manual_followups
-from app.customer_registration.service_config import router as service_config
+from app.follow_ups.customer_service_followups import router as customer_service_followups_router
 from app.customer_registration.entity_types import router as entity_types_router
 from app.gst_registration_filing.gst_filing_config import router as gst_filing_config
 from app.gst_registration_filing.gst_registration_filing import router as gst_registration_filing
@@ -135,6 +141,8 @@ from app.Income_tax.income_tax_documents import router as income_tax_documents_r
 from app.Income_tax.income_tax_config import router as income_tax_config_router
 from app.contact_support.contact_support import router as contact_support_router
 from app.campaign.campaign import router as campaign_router
+from app.customer_service.customer_service import router as customer_service_staff_router
+from app.customer_service.service_config import router as customer_service_config_router
 
 
 if email_verification:
@@ -145,8 +153,10 @@ if login_router:
     app.include_router(login_router)
 if forgot_password_router:
     app.include_router(forgot_password_router)
-if verify_client_otp_router:
-    app.include_router(verify_client_otp_router)
+if verify_customer_otp_router:
+    app.include_router(verify_customer_otp_router)
+if customer_profile_router:
+    app.include_router(customer_profile_router)
 if customer_router:
     app.include_router(customer_router)
 if gst_registration_router:
@@ -181,12 +191,8 @@ if gst_blob:
     app.include_router(gst_blob)
 if document_config:
     app.include_router(document_config)
-if gst_filing_manual_followups:
-    app.include_router(gst_filing_manual_followups)
-if services:
-    app.include_router(services)
-if service_config:
-    app.include_router(service_config)
+if customer_service_followups_router:
+    app.include_router(customer_service_followups_router)
 if entity_types_router:
     app.include_router(entity_types_router)
 if crm_leads_router:
@@ -207,6 +213,10 @@ if contact_support_router:
     app.include_router(contact_support_router)
 if campaign_router:
     app.include_router(campaign_router)
+if customer_service_staff_router:
+    app.include_router(customer_service_staff_router)
+if customer_service_config_router:
+    app.include_router(customer_service_config_router)
 
 @app.get("/health")
 async def health_check():

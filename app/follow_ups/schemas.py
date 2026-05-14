@@ -18,68 +18,67 @@ class FollowupBaseSchema(BaseModel):
 
 
 # =========================================================
-# GST filing manual followups — `customer_service_followups`
-# Router: app/follow_ups/gst_filing_manual_followups.py
-# Prefix: /api/v1/filing-followups
+# Customer service follow-ups — stored on `customer_services`
+# (followup_at, followup_status, followup_remarks, completed_at, missed_at)
+# Router: app/follow_ups/customer_service_followups.py
+# Prefix: /api/v1/customer-service-followups
 # =========================================================
 
 
-class CreateFilingFollowupRequest(FollowupBaseSchema):
+class CreateCustomerServiceFollowupRequest(FollowupBaseSchema):
     customer_service_id: int = Field(..., gt=0)
     followup_at: datetime
     remarks: Optional[str] = Field(None, max_length=2000)
-    assigned_to: Optional[int] = Field(
-        None,
-        gt=0,
-        description="Ignored when JWT role is RM or OP; assigned_to is set to current emp_id.",
-    )
 
 
-class CreateFilingFollowupResponse(FollowupBaseSchema):
+class CreateCustomerServiceFollowupResponse(FollowupBaseSchema):
     id: int
     message: str
 
 
-class UpdateFilingFollowupRequest(FollowupBaseSchema):
+class UpdateCustomerServiceFollowupRequest(FollowupBaseSchema):
     followup_at: Optional[datetime] = None
     remarks: Optional[str] = Field(None, max_length=2000)
-    assigned_to: Optional[int] = Field(
+    status: Optional[Literal["PENDING", "COMPLETED", "MISSED"]] = Field(
         None,
-        gt=0,
-        description="If JWT role is RM or OP, API sets assigned_to to current emp_id.",
+        description="Maps to customer_services.followup_status",
     )
-    status: Optional[Literal["PENDING", "COMPLETED", "MISSED", "CANCELLED"]] = None
 
 
-class UpdateFilingFollowupResponse(FollowupBaseSchema):
+class UpdateCustomerServiceFollowupResponse(FollowupBaseSchema):
     id: int
     message: str
 
 
-class FilingFollowupListItem(FollowupBaseSchema):
+class CustomerServiceFollowupListItem(FollowupBaseSchema):
+    """One scheduled follow-up row (customer_services with followup_at set) plus display fields."""
+
     id: int
     customer_service_id: int
-    mode: str
+    customer_id: int
+    service_code: str
+    service_status: str
     followup_at: datetime
-    status: str
+    followup_status: Optional[str] = None
     remarks: Optional[str] = None
-    assigned_to: Optional[int] = None
-    created_by: Optional[int] = None
     completed_at: Optional[datetime] = None
-    reminder_sent: Optional[bool] = None
-    reminder_count: Optional[int] = None
-    entity_type: Optional[str] = None
-    entity_id: Optional[int] = None
-    service_id: Optional[int] = None
     missed_at: Optional[datetime] = None
+    provided_at: Optional[datetime] = None
+    is_active: bool = True
+    rm_id: Optional[int] = None
+    op_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    full_name: Optional[str] = None
+    mobile: Optional[str] = None
+    service_name: Optional[str] = None
+    rm_first_name: Optional[str] = None
+    op_first_name: Optional[str] = None
 
 
-class FilingFollowupListResponse(FollowupBaseSchema):
-    data: list[FilingFollowupListItem]
-    count: int
-    total_count: int
+class CustomerServiceFollowupListResponse(FollowupBaseSchema):
+    data: list[CustomerServiceFollowupListItem]
+    total: int
     limit: int
     offset: int
     request_id: str

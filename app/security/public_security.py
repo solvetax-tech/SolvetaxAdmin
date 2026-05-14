@@ -105,15 +105,14 @@ def enforce_public_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing public API key.")
 
 
-async def enforce_public_security(
+async def enforce_public_rate_limit_only(
     request: Request,
     bucket: str,
     max_requests: int = 20,
     window_seconds: int = 60,
     block_seconds: int = 300,
 ) -> None:
-    enforce_public_api_key(request)
-
+    """Same sliding limiter as public routes, without API key (e.g. Bearer-only employee calls)."""
     if is_redis_configured():
         try:
             await _enforce_public_rate_limit_redis(
@@ -131,6 +130,24 @@ async def enforce_public_security(
             pass
 
     await enforce_public_rate_limit(
+        request=request,
+        bucket=bucket,
+        max_requests=max_requests,
+        window_seconds=window_seconds,
+        block_seconds=block_seconds,
+    )
+
+
+async def enforce_public_security(
+    request: Request,
+    bucket: str,
+    max_requests: int = 20,
+    window_seconds: int = 60,
+    block_seconds: int = 300,
+) -> None:
+    enforce_public_api_key(request)
+
+    await enforce_public_rate_limit_only(
         request=request,
         bucket=bucket,
         max_requests=max_requests,

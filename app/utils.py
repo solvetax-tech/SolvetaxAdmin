@@ -397,35 +397,6 @@ def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: 
     return f"(cs.rm_id = ${idx} OR cs.op_id = ${idx})", [emp_id], idx + 1
 
 
-def build_filing_followup_assignment_visibility(role: str, emp_id: int, idx: int, schema: str):
-    """
-    Row visibility for ``customer_service_followups`` (alias ``f``) by ``f.assigned_to`` (emp_id).
-
-    - ADMIN: no extra predicate (see all).
-    - RM / OP: only followups assigned to the current employee.
-    - SALES_MANAGER / OP_MANAGER: ``f.assigned_to`` is in their reporting subtree (``manager_emp_id`` chain).
-    - Other roles: only followups assigned to themselves.
-    """
-    if role == "ADMIN":
-        return None, [], idx
-
-    if role in ("RM", "OP"):
-        if emp_id is None:
-            return "1=0", [], idx
-        return f"f.assigned_to = ${idx}", [emp_id], idx + 1
-
-    if role in ["SALES_MANAGER", "OP_MANAGER"]:
-        if emp_id is None:
-            return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
-        sql = f"f.assigned_to IN {tree}"
-        return sql, [emp_id], idx + 1
-
-    if emp_id is None or not emp_id:
-        return "1=0", [], idx
-    return f"f.assigned_to = ${idx}", [emp_id], idx + 1
-
-
 async def get_user_permissions(emp_id: int, conn, DB_SCHEMA="solvetax") -> Dict[str, Any]:
     try:
         # ✅ 1) fetch role ids for this employee

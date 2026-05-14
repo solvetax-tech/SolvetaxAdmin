@@ -23,9 +23,10 @@ class GSTFilingIn(BaseSchema):
     """
 
     # =====================================================
-    # REQUIRED
+    # OPTIONAL — when set, must exist and be active (see create_gst_filing).
+    # Customer-side `customer_services` rows come from customer registration flows.
     # =====================================================
-    customer_id: int = Field(..., gt=0)
+    customer_id: Optional[int] = Field(None, gt=0)
 
     # =====================================================
     # GST LINK (at least one; both allowed — UI can mirror prefill; API prefers id)
@@ -246,7 +247,7 @@ class GSTRegistrationFilingPrefillOut(BaseSchema):
 
 class GSTFilingYearlyIn(BaseSchema):
 
-    customer_id: int = Field(..., gt=0)
+    customer_id: Optional[int] = Field(None, gt=0)
 
     gst_registration_id: Optional[int] = Field(None, gt=0)
     gstin: Optional[

@@ -378,15 +378,15 @@ async def _mark_overdue_gst_return_statuses(conn) -> str:
     )
 
 
-async def _expire_client_otps(conn) -> str:
+async def _expire_customer_otps(conn) -> str:
     lim = SCHEDULER_SQL_BATCH_LIMIT
     return await conn.execute(
         f"""
-        UPDATE {DB_SCHEMA}.client_otp_verify
+        UPDATE {DB_SCHEMA}.customer_otp_verify
         SET is_active = FALSE
         WHERE id IN (
             SELECT id
-            FROM {DB_SCHEMA}.client_otp_verify
+            FROM {DB_SCHEMA}.customer_otp_verify
             WHERE is_active = TRUE
               AND expires_at IS NOT NULL
               AND expires_at < NOW()
@@ -405,42 +405,45 @@ async def background_jobs():
                 logging.info("Running background scheduler...")
 
                 lim = SCHEDULER_SQL_BATCH_LIMIT
-                # 1) Mark overdue pending followups as MISSED
-                result = await conn.execute(
-                    f"""
-                    UPDATE {DB_SCHEMA}.customer_service_followups
-                    SET status = 'MISSED',
-                        updated_at = NOW()
-                    WHERE id IN (
-                        SELECT id
-                        FROM {DB_SCHEMA}.customer_service_followups
-                        WHERE status = 'PENDING'
-                          AND followup_at < NOW()
-                          AND followup_at IS NOT NULL
-                        LIMIT {lim}
-                    )
-                    """
-                )
-                logging.info("MISSED followups updated: %s", result)
 
-                # 2) Stamp missed_at for MISSED followups after 10 minutes
+                # 1) customer_services: overdue PENDING follow-ups (>10 min past followup_at) → MISSED (+ missed_at)
+                #    Matches trg_followup_missed_if_overdue; catches rows that never get an API UPDATE.
                 result = await conn.execute(
                     f"""
-                    UPDATE {DB_SCHEMA}.customer_service_followups
-                    SET missed_at = NOW(),
-                        updated_at = NOW()
+                    UPDATE {DB_SCHEMA}.customer_services
+                    SET followup_status = 'MISSED',
+                        missed_at = COALESCE(missed_at, NOW())
                     WHERE id IN (
                         SELECT id
-                        FROM {DB_SCHEMA}.customer_service_followups
-                        WHERE status = 'MISSED'
-                          AND missed_at IS NULL
-                          AND followup_at <= (NOW() - INTERVAL '10 minutes')
+                        FROM {DB_SCHEMA}.customer_services
+                        WHERE is_active IS TRUE
+                          AND followup_status = 'PENDING'
                           AND followup_at IS NOT NULL
+                          AND NOW() > followup_at + INTERVAL '10 minutes'
                         LIMIT {lim}
                     )
                     """
                 )
-                logging.info("MISSED followups stamped with missed_at: %s", result)
+                logging.info("customer_services follow-ups marked MISSED (overdue): %s", result)
+
+                # 2) customer_services: MISSED rows still missing missed_at (edge cases)
+                result = await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.customer_services
+                    SET missed_at = NOW()
+                    WHERE id IN (
+                        SELECT id
+                        FROM {DB_SCHEMA}.customer_services
+                        WHERE is_active IS TRUE
+                          AND followup_status = 'MISSED'
+                          AND missed_at IS NULL
+                          AND followup_at IS NOT NULL
+                          AND followup_at <= (NOW() - INTERVAL '10 minutes')
+                        LIMIT {lim}
+                    )
+                    """
+                )
+                logging.info("customer_services stamped missed_at: %s", result)
 
                 # 3) Mark overdue CRM lead followups as MISSED
                 result = await conn.execute(
@@ -497,13 +500,13 @@ async def background_jobs():
                     """
                 )
 
-                # 5b) Expire client OTPs
-                otp_expired = await _expire_client_otps(conn)
+                # 6) Expire customer OTPs
+                otp_expired = await _expire_customer_otps(conn)
                 _otp_n = otp_expired.split()[-1] if otp_expired else "0"
                 if _otp_n.isdigit() and int(_otp_n) > 0:
-                    logging.info("Client OTPs expired by scheduler: %s", otp_expired)
+                    logging.info("Customer OTPs expired by scheduler: %s", otp_expired)
 
-                # 6) GST return-detail: NOT_FILED -> MISSED when due date has passed
+                # 7) GST return-detail: NOT_FILED -> MISSED when due date has passed
                 overdue_status = await _mark_overdue_gst_return_statuses(conn)
                 _n = overdue_status.split()[-1] if overdue_status else "0"
                 if _n.isdigit() and int(_n) > 0:
@@ -512,7 +515,7 @@ async def background_jobs():
                         overdue_status,
                     )
 
-                # 6b) Turn off auto-generation when MISSED-period thresholds are exceeded
+                # 8) Turn off auto-generation when MISSED-period thresholds are exceeded
                 disabled_ids = await disable_gst_filings_auto_over_missed_threshold(conn, lim)
                 if disabled_ids:
                     logging.info(
@@ -521,7 +524,7 @@ async def background_jobs():
                         disabled_ids,
                     )
 
-                # 6c) GSTR-9C on YEARLY rows ↔ parent filing turnover_details (post-edit / data drift)
+                # 9) GSTR-9C on YEARLY rows ↔ parent filing turnover_details (post-edit / data drift)
                 n9c_add, n9c_clear = await _sync_gstr9c_with_parent_turnover(conn)
                 if n9c_add or n9c_clear:
                     logging.info(
@@ -530,7 +533,7 @@ async def background_jobs():
                         n9c_clear,
                     )
 
-                # 7) Auto-generate next GST filing return detail rows
+                # 10) Auto-generate next GST filing return detail rows
                 generated = await _run_gst_filing_auto_generation(conn)
                 if generated:
                     logging.info("Auto generated gst filing return-detail rows: %s", generated)

@@ -37,6 +37,24 @@ def get_current_user_payload(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
+def assert_platform_permission(payload: dict, feature: str, permission: str) -> None:
+    """
+    Ensures JWT payload includes the given platform permission.
+    WRITE implies READ for permission == READ (same rules as require_permission).
+    """
+    perms = payload.get("permissions", {}).get("platform", {})
+    feature_perms = perms.get(feature, [])
+
+    if permission == "READ" and "WRITE" in feature_perms:
+        return
+
+    if permission not in feature_perms:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: missing {feature}:{permission}",
+        )
+
+
 def require_permission(feature: str, permission: str):
     """
     Usage:
@@ -45,18 +63,7 @@ def require_permission(feature: str, permission: str):
     async def checker(request: Request):
         payload = get_current_user_payload(request)
 
-        perms = payload.get("permissions", {}).get("platform", {})
-        feature_perms = perms.get(feature, [])
-
-        # ✅ optional: WRITE implies READ
-        if permission == "READ" and "WRITE" in feature_perms:
-            return payload
-
-        if permission not in feature_perms:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Forbidden: missing {feature}:{permission}"
-            )
+        assert_platform_permission(payload, feature, permission)
 
         return payload
 
