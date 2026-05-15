@@ -20,8 +20,22 @@ class CustomerServiceBulkAssignExecuteIn(CustomerServiceBaseSchema):
 
     customer_service_ids: List[int] = Field(..., min_length=1, max_length=10000)
     selected_employee_ids: List[int] = Field(..., min_length=1, max_length=500)
-    assignment_role: Literal["RM", "OP"]
+    assignment_role: Literal["RM", "OP"] = Field(
+        ...,
+        description=(
+            "RM updates rm_id; OP updates op_id. "
+            "Employee pools: GET /api/v1/employees/active-rm and /api/v1/employees/active-op."
+        ),
+        examples=["RM", "OP"],
+    )
     per_employee_limit: Optional[int] = Field(default=None, ge=1, le=10000)
+
+    @field_validator("assignment_role", mode="before")
+    @classmethod
+    def normalize_assignment_role(cls, v):
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
 
 
 class CustomerServicePatchIn(CustomerServiceBaseSchema):
@@ -31,6 +45,19 @@ class CustomerServicePatchIn(CustomerServiceBaseSchema):
     op_id: Optional[int] = Field(None, gt=0)
     service_status: Optional[Literal["PENDING", "PROVIDED"]] = None
     is_active: Optional[bool] = None
+
+
+class CustomerServiceStatusPatchIn(CustomerServiceBaseSchema):
+    """Update only `service_status` (staff with EMPLOYEE WRITE; visibility rules apply)."""
+
+    service_status: Literal["PENDING", "PROVIDED"]
+
+    @field_validator("service_status", mode="before")
+    @classmethod
+    def upper_service_status(cls, v):
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
 
 
 class CustomerServiceDetailOut(CustomerServiceBaseSchema):

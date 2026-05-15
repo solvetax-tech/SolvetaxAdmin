@@ -202,7 +202,7 @@ def employee_report_tree_subquery(schema: str, idx: int) -> str:
     )
 
 
-def build_customer_visibility(role: str, emp_id: int, idx: int, schema: str):
+def build_customer_visibility(role: str, emp_id: Optional[int], idx: int, schema: str):
 
     # --------------------------------------------------
     # ADMIN → Full Access
@@ -254,14 +254,53 @@ def build_registration_payments_visibility(
     Unified payments ledger: prefer ``customers`` rm/op when ``payments.customer_id`` is set,
     else fall back to the paid entity row (gst_registration / income_tax / gst_filings).
 
-    Requires query FROM to LEFT JOIN aliases: ``c``, ``g``, ``i``, ``f`` matching
-    ``registration_payments`` list queries.
+    Requires query FROM to LEFT JOIN aliases: ``c``, ``g``, ``i``, ``f``, ``f_rd``, ``cs``
+    matching ``registration_payments`` list queries (``f_rd`` via ``gst_filing_return_details``).
     """
     if role == "ADMIN":
         return None, [], idx
 
-    rm_col = "COALESCE(c.rm_id, g.rm_id, i.rm_id, f.rm_id)"
-    op_col = "COALESCE(c.op_id, g.created_by, i.op_id, f.op_id)"
+    rm_col = "COALESCE(c.rm_id, g.rm_id, i.rm_id, f.rm_id, f_rd.rm_id, cs.rm_id)"
+    op_col = "COALESCE(c.op_id, g.created_by, i.op_id, f.op_id, f_rd.op_id, cs.op_id)"
+
+    if not emp_id:
+        return "1=0", [], idx
+
+    if role == "RM":
+        return f"{rm_col} = ${idx}", [emp_id], idx + 1
+
+    if role == "OP":
+        return f"{op_col} = ${idx}", [emp_id], idx + 1
+
+    if role in ("SALES_MANAGER", "OP_MANAGER"):
+        tree = employee_report_tree_subquery(schema, idx)
+        sql = f"(({rm_col} IN {tree}) OR ({op_col} IN {tree}))"
+        return sql, [emp_id], idx + 1
+
+    return (
+        f"(({rm_col} = ${idx}) OR ({op_col} = ${idx + 1}))",
+        [emp_id, emp_id],
+        idx + 2,
+    )
+
+
+def build_payment_followup_visibility(
+    role: str,
+    emp_id: Optional[int],
+    idx: int,
+    schema: str,
+):
+    """
+    Payment collection follow-ups for GST filing rows, return-detail rows, and catalog services.
+
+    Requires LEFT JOIN aliases: ``c``, ``f``, ``f_rd``, ``cs`` (same as
+    ``_payment_followup_entity_joins`` in ``payments_followup.py``).
+    """
+    if role == "ADMIN":
+        return None, [], idx
+
+    rm_col = "COALESCE(c.rm_id, f.rm_id, f_rd.rm_id, cs.rm_id)"
+    op_col = "COALESCE(c.op_id, f.op_id, f_rd.op_id, cs.op_id)"
 
     if not emp_id:
         return "1=0", [], idx

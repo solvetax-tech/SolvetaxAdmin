@@ -32,6 +32,7 @@ def _registration_payments_filter_tag() -> str:
 
 async def _invalidate_registration_payments_cache() -> None:
     await redis_invalidate_tag(_registration_payments_filter_tag())
+    await redis_invalidate_tag("payments_config:get_amount:index")
 
 @router.post(
     "",
@@ -332,7 +333,9 @@ async def create_registration_payment(
     summary="Filter payments (unified ledger)",
     description=(
         "Lists rows from `registration_payments` with the same filters and joins for all flows. "
-        "Pass `entity_type=GST_REGISTRATION`, `entity_type=GST_FILING`, or `entity_type=INCOME_TAX` "
+        "Pass `entity_type=GST_REGISTRATION`, `GST_FILING`, `GST_FILING_RETURN_DETAILS`, "
+        "`INCOME_TAX`, or `CUSTOMER_SERVICE` (customer_services.id when CUSTOMER_SERVICE; "
+        "gst_filing_return_details.id when GST_FILING_RETURN_DETAILS) "
         "to match scoped lists; "
         "omit `entity_type` to return every payment type."
     ),
@@ -653,6 +656,12 @@ async def list_registration_payments(
                    ON rp.entity_type = 'INCOME_TAX' AND rp.entity_id = i.id
             LEFT JOIN {DB_SCHEMA}.gst_filings f
                    ON rp.entity_type = 'GST_FILING' AND rp.entity_id = f.id
+            LEFT JOIN {DB_SCHEMA}.gst_filing_return_details rd
+                   ON rp.entity_type = 'GST_FILING_RETURN_DETAILS' AND rp.entity_id = rd.id
+            LEFT JOIN {DB_SCHEMA}.gst_filings f_rd
+                   ON f_rd.id = rd.gst_filing_id
+            LEFT JOIN {DB_SCHEMA}.customer_services cs
+                   ON rp.entity_type = 'CUSTOMER_SERVICE' AND rp.entity_id = cs.id
         """
 
         count_sql = f"""

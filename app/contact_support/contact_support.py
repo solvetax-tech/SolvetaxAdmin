@@ -12,7 +12,12 @@ from app.redis_cache import (
 )
 from app.security.public_security import enforce_public_security
 from app.security.rbac import require_permission
-from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
+from app.utils import (
+    DB_SCHEMA,
+    build_customer_visibility,
+    generate_uuid,
+    get_db_pool,
+)
 
 router = APIRouter(prefix="/api/v1/contact-support", tags=["Contact Support"])
 
@@ -29,6 +34,13 @@ async def _invalidate_contact_support_cache(contact_id: Optional[int] = None) ->
     await redis_invalidate_tag(_contact_support_filter_tag())
     if contact_id is not None:
         await redis_invalidate_tag(_contact_support_detail_tag(contact_id))
+
+
+def _contact_support_role_emp(current_user: dict) -> tuple[str, Optional[int]]:
+    role_norm = str(current_user.get("role") or "").strip().upper()
+    raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_int = int(raw) if raw is not None and str(raw).isdigit() else None
+    return role_norm, emp_int
 
 
 def _raise_contact_support_validation_error(fields: dict, status_code: int = 400, message: str = "Validation failed") -> None:
@@ -203,6 +215,14 @@ async def filter_contact_support(
     elif not include_inactive:
         conditions.append("c.is_active = TRUE")
 
+    role_vis, emp_vis = _contact_support_role_emp(current_user)
+    visibility_sql, visibility_values, idx = build_customer_visibility(
+        role_vis, emp_vis, idx, DB_SCHEMA
+    )
+    if visibility_sql:
+        conditions.append(f"({visibility_sql})")
+        values.extend(visibility_values)
+
     where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
     async def _loader():
@@ -215,8 +235,12 @@ async def filter_contact_support(
                 )
                 rows = await conn.fetch(
                     f"""
-                    SELECT c.*
+                    SELECT c.*,
+                           erm.first_name AS rm_name,
+                           eop.first_name AS op_name
                     FROM {DB_SCHEMA}.contact_support c
+                    LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = c.rm_id
+                    LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = c.op_id
                     {where_sql}
                     ORDER BY c.updated_at DESC, c.id DESC
                     LIMIT ${idx} OFFSET ${idx + 1}
@@ -253,14 +277,29 @@ async def get_contact_support(
         emp_id=emp_id,
     )
 
+    role_vis, emp_vis = _contact_support_role_emp(current_user)
+
     async def _loader():
         try:
             pool = await get_db_pool()
             async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    f"SELECT * FROM {DB_SCHEMA}.contact_support WHERE id = $1",
-                    contact_id,
+                vis_sql, vis_vals, _ = build_customer_visibility(
+                    role_vis, emp_vis, 2, DB_SCHEMA
                 )
+                params: list = [contact_id]
+                sql = f"""
+                    SELECT c.*,
+                           erm.first_name AS rm_name,
+                           eop.first_name AS op_name
+                    FROM {DB_SCHEMA}.contact_support c
+                    LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = c.rm_id
+                    LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = c.op_id
+                    WHERE c.id = $1
+                    """
+                if vis_sql:
+                    sql += f" AND ({vis_sql})"
+                    params.extend(vis_vals)
+                row = await conn.fetchrow(sql, *params)
             if not row:
                 raise HTTPException(status_code=404, detail="Contact support request not found.")
             return dict(row)
@@ -284,6 +323,7 @@ async def edit_contact_support(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role_vis, emp_vis = _contact_support_role_emp(current_user)
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields provided for update.")
@@ -292,10 +332,16 @@ async def edit_contact_support(
         pool = await get_db_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
-                existing = await conn.fetchrow(
-                    f"SELECT * FROM {DB_SCHEMA}.contact_support WHERE id = $1 FOR UPDATE",
-                    contact_id,
+                vis_sql, vis_vals, _ = build_customer_visibility(
+                    role_vis, emp_vis, 2, DB_SCHEMA
                 )
+                sel_params: list = [contact_id]
+                sel_sql = f"SELECT * FROM {DB_SCHEMA}.contact_support c WHERE c.id = $1"
+                if vis_sql:
+                    sel_sql += f" AND ({vis_sql})"
+                    sel_params.extend(vis_vals)
+                sel_sql += " FOR UPDATE"
+                existing = await conn.fetchrow(sel_sql, *sel_params)
                 if not existing:
                     raise HTTPException(status_code=404, detail="Contact support request not found.")
 
@@ -386,10 +432,25 @@ async def soft_delete_contact_support(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role_vis, emp_vis = _contact_support_role_emp(current_user)
     try:
         pool = await get_db_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
+                vis_sql, vis_vals, _ = build_customer_visibility(
+                    role_vis, emp_vis, 2, DB_SCHEMA
+                )
+                chk_params: list = [contact_id]
+                chk_sql = f"SELECT 1 FROM {DB_SCHEMA}.contact_support c WHERE c.id = $1"
+                if vis_sql:
+                    chk_sql += f" AND ({vis_sql})"
+                    chk_params.extend(vis_vals)
+                visible = await conn.fetchrow(chk_sql + " FOR UPDATE", *chk_params)
+                if not visible:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Contact support request not found.",
+                    )
                 row = await conn.fetchrow(
                     f"""
                     UPDATE {DB_SCHEMA}.contact_support
@@ -430,10 +491,25 @@ async def activate_contact_support(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role_vis, emp_vis = _contact_support_role_emp(current_user)
     try:
         pool = await get_db_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
+                vis_sql, vis_vals, _ = build_customer_visibility(
+                    role_vis, emp_vis, 2, DB_SCHEMA
+                )
+                chk_params: list = [contact_id]
+                chk_sql = f"SELECT 1 FROM {DB_SCHEMA}.contact_support c WHERE c.id = $1"
+                if vis_sql:
+                    chk_sql += f" AND ({vis_sql})"
+                    chk_params.extend(vis_vals)
+                visible = await conn.fetchrow(chk_sql + " FOR UPDATE", *chk_params)
+                if not visible:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Contact support request not found.",
+                    )
                 row = await conn.fetchrow(
                     f"""
                     UPDATE {DB_SCHEMA}.contact_support

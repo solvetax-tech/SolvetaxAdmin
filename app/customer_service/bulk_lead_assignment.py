@@ -189,18 +189,26 @@ async def svc_bulk_assign_execute(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                expected_role = payload.assignment_role
                 valid_rows = await conn.fetch(
                     f"""
                     SELECT emp_id FROM {DB_SCHEMA}.employees
-                     WHERE is_active = TRUE AND emp_id = ANY($1::bigint[])
+                     WHERE is_active = TRUE
+                       AND emp_id = ANY($1::bigint[])
+                       AND role = $2
                     """,
                     emps,
+                    expected_role,
                 )
                 valid_emp_ids = [int(r["emp_id"]) for r in valid_rows]
                 if len(valid_emp_ids) != len(emps):
                     raise HTTPException(
                         status_code=400,
-                        detail="One or more employees are invalid or inactive.",
+                        detail=(
+                            "One or more employees are invalid, inactive, or do not match "
+                            f"assignment_role={payload.assignment_role} (expect employees.role "
+                            f"to be {payload.assignment_role})."
+                        ),
                     )
 
                 vis_sql, vis_vals, _ = build_customer_service_visibility(

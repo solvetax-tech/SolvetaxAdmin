@@ -82,3 +82,70 @@ class CustomerServiceFollowupListResponse(FollowupBaseSchema):
     limit: int
     offset: int
     request_id: str
+
+
+# =========================================================
+# Payment follow-ups — columns on `payments`
+# Router: app/follow_ups/payments_followup.py
+# Prefix: /api/v1/payment-followups
+# =========================================================
+
+
+class CreatePaymentFollowupRequest(FollowupBaseSchema):
+    payment_id: int = Field(..., gt=0)
+    followup_at: datetime
+    remarks: Optional[str] = Field(None, max_length=2000)
+
+
+class CreatePaymentFollowupResponse(FollowupBaseSchema):
+    id: int
+    message: str
+
+
+class UpdatePaymentFollowupRequest(FollowupBaseSchema):
+    followup_at: Optional[datetime] = None
+    remarks: Optional[str] = Field(None, max_length=2000)
+    status: Optional[Literal["PENDING", "COMPLETED", "MISSED"]] = Field(
+        None,
+        description="Maps to payments.followup_status",
+    )
+
+
+class UpdatePaymentFollowupResponse(FollowupBaseSchema):
+    id: int
+    message: str
+
+
+class PaymentFollowupListItem(FollowupBaseSchema):
+    id: int
+    customer_id: Optional[int] = None
+    entity_id: int
+    entity_type: str
+    payment_status: str
+    amount: Optional[float] = None
+    discount: Optional[float] = None
+    net_amount: Optional[float] = None
+    paid_amount: Optional[float] = None
+    remaining_amount: Optional[float] = None
+    followup_at: datetime
+    followup_status: Optional[str] = None
+    remarks: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    missed_at: Optional[datetime] = None
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    full_name: Optional[str] = None
+    mobile: Optional[str] = None
+    rm_id: Optional[int] = None
+    op_id: Optional[int] = None
+    rm_name: Optional[str] = None
+    op_name: Optional[str] = None
+
+
+class PaymentFollowupListResponse(FollowupBaseSchema):
+    data: list[PaymentFollowupListItem]
+    total: int
+    limit: int
+    offset: int
+    request_id: str

@@ -445,6 +445,50 @@ async def background_jobs():
                 )
                 logging.info("customer_services stamped missed_at: %s", result)
 
+                # 2b) payments: overdue PENDING follow-ups (>10 min past followup_at) → MISSED (+ missed_at)
+                result = await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.payments
+                       SET followup_status = 'MISSED',
+                           missed_at = COALESCE(missed_at, NOW()),
+                           updated_at = NOW()
+                     WHERE id IN (
+                        SELECT id
+                          FROM {DB_SCHEMA}.payments
+                         WHERE is_active IS TRUE
+                           AND entity_type IN ('GST_FILING', 'GST_FILING_RETURN_DETAILS', 'CUSTOMER_SERVICE')
+                           AND payment_status = 'PENDING'
+                           AND followup_status = 'PENDING'
+                           AND followup_at IS NOT NULL
+                           AND NOW() > followup_at + INTERVAL '10 minutes'
+                         LIMIT {lim}
+                    )
+                    """
+                )
+                logging.info("payments follow-ups marked MISSED (overdue): %s", result)
+
+                # 2c) payments: MISSED rows still missing missed_at (edge cases)
+                result = await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.payments
+                       SET missed_at = NOW(),
+                           updated_at = NOW()
+                     WHERE id IN (
+                        SELECT id
+                          FROM {DB_SCHEMA}.payments
+                         WHERE is_active IS TRUE
+                           AND entity_type IN ('GST_FILING', 'GST_FILING_RETURN_DETAILS', 'CUSTOMER_SERVICE')
+                           AND payment_status = 'PENDING'
+                           AND followup_status = 'MISSED'
+                           AND missed_at IS NULL
+                           AND followup_at IS NOT NULL
+                           AND followup_at <= (NOW() - INTERVAL '10 minutes')
+                         LIMIT {lim}
+                    )
+                    """
+                )
+                logging.info("payments stamped missed_at: %s", result)
+
                 # 3) Mark overdue CRM lead followups as MISSED
                 result = await conn.execute(
                     f"""

@@ -3,7 +3,12 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from app.security.rbac import require_permission
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
+from app.utils import (
+    build_customer_visibility,
+    get_db_pool,
+    DB_SCHEMA,
+    generate_uuid,
+)
 from app.logger import logger
 from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
 from datetime import datetime
@@ -50,6 +55,9 @@ async def list_versions(
     # --------------------------------------------------
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
+    role_norm = str(current_user.get("role") or "").strip().upper()
+    emp_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id_for_vis = int(emp_raw) if str(emp_raw).isdigit() else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -69,6 +77,7 @@ async def list_versions(
         to_date=to_date.isoformat() if to_date else None,
         limit=limit,
         offset=offset,
+        role=role_norm,
         current_emp_id=current_emp_id,
     )
 
@@ -159,6 +168,17 @@ async def list_versions(
             values.append(to_date)
             param_index += 1
 
+        if role_norm != "ADMIN":
+            visibility_sql, visibility_values, param_index = build_customer_visibility(
+                role_norm,
+                emp_id_for_vis,
+                param_index,
+                DB_SCHEMA,
+            )
+            if visibility_sql:
+                conditions.append(f"v.customer_id IS NOT NULL AND ({visibility_sql})")
+                values.extend(visibility_values)
+
         # --------------------------------------------------
         # WHERE Clause Builder
         # --------------------------------------------------
@@ -172,6 +192,7 @@ async def list_versions(
         count_sql = f"""
             SELECT COUNT(*)
               FROM {DB_SCHEMA}.versions v
+              LEFT JOIN {DB_SCHEMA}.customers c ON v.customer_id = c.customer_id
               {where_clause}
         """
 

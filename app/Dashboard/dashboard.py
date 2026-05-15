@@ -708,6 +708,8 @@ async def get_gst_missed_filings_gt_one(
                 f.rm_id,
                 f.op_id,
                 f.filing_frequency,
+                erm.first_name AS rm_name,
+                eop.first_name AS op_name,
                 COUNT(d.id) AS missed_records_count
             FROM {DB_SCHEMA}.gst_filings f
             JOIN {DB_SCHEMA}.gst_filing_return_details d
@@ -716,10 +718,13 @@ async def get_gst_missed_filings_gt_one(
              AND {missed_predicate}
             LEFT JOIN {DB_SCHEMA}.customers c
               ON c.customer_id = f.customer_id
+            LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = f.rm_id
+            LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = f.op_id
             {where_clause}
             GROUP BY
                 f.id, f.customer_id, c.mobile,
-                f.gst_registration_id, f.rm_id, f.op_id, f.filing_frequency
+                f.gst_registration_id, f.rm_id, f.op_id, f.filing_frequency,
+                erm.first_name, eop.first_name
             HAVING COUNT(d.id) > 1
         )
     """
@@ -902,6 +907,8 @@ async def get_gst_missed_filings_buckets(
                 f.rm_id,
                 f.op_id,
                 f.filing_frequency,
+                erm.first_name AS rm_name,
+                eop.first_name AS op_name,
                 COUNT(d.id) AS missed_records_count
             FROM {DB_SCHEMA}.gst_filings f
             JOIN {DB_SCHEMA}.gst_filing_return_details d
@@ -910,10 +917,13 @@ async def get_gst_missed_filings_buckets(
              AND {missed_predicate}
             LEFT JOIN {DB_SCHEMA}.customers c
               ON c.customer_id = f.customer_id
+            LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = f.rm_id
+            LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = f.op_id
             {where_clause}
             GROUP BY
                 f.id, f.customer_id, c.mobile,
-                f.gst_registration_id, f.rm_id, f.op_id, f.filing_frequency
+                f.gst_registration_id, f.rm_id, f.op_id, f.filing_frequency,
+                erm.first_name, eop.first_name
         )
     """
 
@@ -1133,6 +1143,8 @@ async def get_gst_missed_filings_exact_one(
                 f.rm_id,
                 f.op_id,
                 f.filing_frequency,
+                erm.first_name AS rm_name,
+                eop.first_name AS op_name,
                 COUNT(d.id) AS missed_records_count
             FROM {DB_SCHEMA}.gst_filings f
             JOIN {DB_SCHEMA}.gst_filing_return_details d
@@ -1141,10 +1153,13 @@ async def get_gst_missed_filings_exact_one(
              AND {missed_predicate}
             LEFT JOIN {DB_SCHEMA}.customers c
               ON c.customer_id = f.customer_id
+            LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = f.rm_id
+            LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = f.op_id
             {where_clause}
             GROUP BY
                 f.id, f.customer_id, c.mobile,
-                f.gst_registration_id, f.rm_id, f.op_id, f.filing_frequency
+                f.gst_registration_id, f.rm_id, f.op_id, f.filing_frequency,
+                erm.first_name, eop.first_name
             HAVING COUNT(d.id) = 1
         )
     """

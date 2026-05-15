@@ -76,6 +76,73 @@ SERVICE_PRICE_SPECS = [
 ]
 
 
+async def fetch_active_price_for_service_code(conn: asyncpg.Connection, service_code: str):
+    """
+    Resolve an active PRICE row from ``payment_config`` for a catalog ``service_code``
+    (same mapping rules as public service-prices).
+    """
+    code_norm = (service_code or "").strip().upper()
+    if not code_norm:
+        return None
+    spec = next((s for s in SERVICE_PRICE_SPECS if s["code"] == code_norm), None)
+    if spec:
+        for q in spec["queries"]:
+            entity_type_norm = (q.get("entity_type") or "").strip().upper()
+            value_norm = (q.get("value") or "").strip().upper()
+            filter_norm = _normalize_optional_filter(q.get("filter"))
+            if not entity_type_norm or not value_norm:
+                continue
+            row = await conn.fetchrow(
+                f"""
+                SELECT display_name, amount, description, is_active
+                  FROM {DB_SCHEMA}.payment_config
+                 WHERE upper(trim(entity_type)) = $1
+                   AND upper(trim(value)) = $2
+                   AND upper(trim(config_type)) = 'PRICE'
+                   AND is_active = TRUE
+                   AND (
+                       $3::text IS NULL
+                       OR filter IS NULL
+                       OR upper(trim(filter)) = upper(trim($3::text))
+                   )
+                 ORDER BY
+                   CASE
+                     WHEN $3::text IS NOT NULL AND filter IS NOT NULL
+                       AND upper(trim(filter)) = upper(trim($3::text)) THEN 0
+                     WHEN $3::text IS NULL AND filter IS NULL THEN 0
+                     ELSE 1
+                   END,
+                   sort_order ASC NULLS LAST,
+                   amount ASC NULLS LAST
+                 LIMIT 1
+                """,
+                entity_type_norm,
+                value_norm,
+                filter_norm,
+            )
+            if row:
+                return row
+    return await conn.fetchrow(
+        f"""
+        SELECT display_name, amount, description, is_active
+          FROM {DB_SCHEMA}.payment_config
+         WHERE upper(trim(config_type)) = 'PRICE'
+           AND is_active = TRUE
+           AND upper(trim(entity_type)) = $1
+           AND (
+               upper(trim(value)) = 'DEFAULT'
+               OR upper(trim(value)) = $1
+           )
+           AND (filter IS NULL OR trim(filter) = '')
+         ORDER BY
+           CASE WHEN upper(trim(value)) = $1 THEN 0 ELSE 1 END ASC,
+           sort_order ASC NULLS LAST
+         LIMIT 1
+        """,
+        code_norm,
+    )
+
+
 # -------------------------------------------------------------------
 # GET PAYMENT CONFIG (UI DROPDOWN)
 # -------------------------------------------------------------------
@@ -467,7 +534,11 @@ async def get_public_service_prices(request: Request):
 )
 async def get_payment_amount(
     entity_id: int,
-    entity_type: str = Query("GST_REGISTRATION"),
+    entity_type: str = Query(
+        "GST_REGISTRATION",
+        description="GST_REGISTRATION | GST_FILING | GST_FILING_RETURN_DETAILS | INCOME_TAX | CUSTOMER_SERVICE "
+        "(CUSTOMER_SERVICE: customer_services.id; GST_FILING_RETURN_DETAILS: gst_filing_return_details.id).",
+    ),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     request_id = generate_uuid()
@@ -489,6 +560,7 @@ async def get_payment_amount(
                 display_name = ""
                 description = ""
                 ownership_category = "N/A"
+                pricing_lookup_entity_type = entity_type_norm
 
                 if entity_type_norm == "GST_REGISTRATION":
                     gst_row = await conn.fetchrow(
@@ -530,6 +602,41 @@ async def get_payment_amount(
                     display_name = f"GST Filing ({filing_row['filing_frequency']})"
                     ownership_category = filing_row["filing_frequency"]
 
+                elif entity_type_norm == "GST_FILING_RETURN_DETAILS":
+                    detail_row = await conn.fetchrow(
+                        f"""
+                        SELECT d.id,
+                               d.is_active AS detail_active,
+                               f.customer_id,
+                               f.filing_frequency,
+                               f.is_active AS filing_active
+                          FROM {DB_SCHEMA}.gst_filing_return_details d
+                          INNER JOIN {DB_SCHEMA}.gst_filings f
+                            ON f.id = d.gst_filing_id
+                         WHERE d.id = $1
+                         LIMIT 1
+                        """,
+                        entity_id,
+                    )
+                    if not detail_row:
+                        raise HTTPException(
+                            404, "GST filing return detail not found."
+                        )
+                    if not detail_row["detail_active"]:
+                        raise HTTPException(
+                            400, "GST filing return detail is inactive."
+                        )
+                    if not detail_row["filing_active"]:
+                        raise HTTPException(400, "Parent GST filing is inactive.")
+
+                    customer_id = detail_row["customer_id"]
+                    filing_frequency = detail_row["filing_frequency"]
+                    display_name = (
+                        f"GST Filing return detail ({filing_frequency})"
+                    )
+                    ownership_category = filing_frequency
+                    pricing_lookup_entity_type = "GST_FILING"
+
                 elif entity_type_norm == "INCOME_TAX":
                     income_tax_row = await conn.fetchrow(
                         f"""
@@ -548,6 +655,34 @@ async def get_payment_amount(
                     customer_id = income_tax_row["customer_id"]
                     display_name = f"Income Tax ({income_tax_row['financial_year']})"
                     ownership_category = income_tax_row["financial_year"] or "N/A"
+
+                elif entity_type_norm == "CUSTOMER_SERVICE":
+                    cs_row = await conn.fetchrow(
+                        f"""
+                        SELECT cs.id,
+                               cs.customer_id,
+                               cs.service_code,
+                               cs.is_active,
+                               sc.service_name
+                          FROM {DB_SCHEMA}.customer_services cs
+                          LEFT JOIN {DB_SCHEMA}.service_config sc
+                            ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
+                           AND sc.is_active IS NOT DISTINCT FROM TRUE
+                         WHERE cs.id = $1
+                         LIMIT 1
+                        """,
+                        entity_id,
+                    )
+                    if not cs_row:
+                        raise HTTPException(404, "Customer service not found.")
+                    if not cs_row["is_active"]:
+                        raise HTTPException(400, "Customer service is inactive.")
+
+                    customer_id = cs_row["customer_id"]
+                    code = (cs_row["service_code"] or "").strip().upper()
+                    ownership_category = code or "N/A"
+                    label = (cs_row["service_name"] or code or "Customer service").strip()
+                    display_name = label
 
                 else:
                     raise HTTPException(
@@ -595,24 +730,30 @@ async def get_payment_amount(
                 )
 
                 if payment_summary["original_amount"] is None:
-                    config = await conn.fetchrow(
-                        f"""
-                        SELECT display_name, amount, description, is_active
-                        FROM {DB_SCHEMA}.payment_config
-                        WHERE upper(trim(entity_type)) = upper(trim($1::text))
-                          AND upper(trim(config_type)) = 'PRICE'
-                          AND (
-                            upper(trim(value)) = upper(trim($2::text))
-                            OR upper(trim(value)) = 'DEFAULT'
-                          )
-                          AND (filter IS NULL OR trim(filter) = '')
-                        ORDER BY
-                          CASE WHEN upper(trim(value)) = upper(trim($2::text)) THEN 0 ELSE 1 END ASC
-                        LIMIT 1
-                        """,
-                        entity_type_norm,
-                        ownership_category,
-                    )
+                    if entity_type_norm == "CUSTOMER_SERVICE":
+                        config = await fetch_active_price_for_service_code(
+                            conn,
+                            ownership_category if ownership_category != "N/A" else "",
+                        )
+                    else:
+                        config = await conn.fetchrow(
+                            f"""
+                            SELECT display_name, amount, description, is_active
+                            FROM {DB_SCHEMA}.payment_config
+                            WHERE upper(trim(entity_type)) = upper(trim($1::text))
+                              AND upper(trim(config_type)) = 'PRICE'
+                              AND (
+                                  upper(trim(value)) = upper(trim($2::text))
+                                  OR upper(trim(value)) = 'DEFAULT'
+                              )
+                              AND (filter IS NULL OR trim(filter) = '')
+                            ORDER BY
+                              CASE WHEN upper(trim(value)) = upper(trim($2::text)) THEN 0 ELSE 1 END ASC
+                            LIMIT 1
+                            """,
+                            pricing_lookup_entity_type,
+                            ownership_category,
+                        )
 
                     if not config:
                         original_amount = 0.0
@@ -642,6 +783,8 @@ async def get_payment_amount(
                     if entity_type_norm == "GST_REGISTRATION":
                         display_name = "GST Registration"
                         description = "Remaining payment for GST registration"
+                    elif entity_type_norm == "CUSTOMER_SERVICE":
+                        description = f"Remaining payment for {display_name}"
                     else:
                         description = f"Remaining payment for {display_name}"
 

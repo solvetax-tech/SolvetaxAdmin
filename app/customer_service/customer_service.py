@@ -21,6 +21,7 @@ from app.customer_service.schemas import (
     CustomerServiceDetailOut,
     CustomerServiceListItemOut,
     CustomerServicePatchIn,
+    CustomerServiceStatusPatchIn,
 )
 from app.redis_cache import (
     build_cache_key,
@@ -28,7 +29,7 @@ from app.redis_cache import (
     invalidate_tag as redis_invalidate_tag,
 )
 from app.logger import logger
-from app.security.rbac import require_permission
+from app.security.rbac import require_admin, require_permission
 from app.utils import (
     DB_SCHEMA,
     build_customer_service_visibility,
@@ -265,8 +266,14 @@ async def bulk_assign_candidates(
     service_codes: Optional[List[str]] = Query(None),
     service_statuses: Optional[List[str]] = Query(None),
     is_active: Optional[bool] = Query(True),
-    null_rm: Optional[bool] = Query(None, description="If true, only rows with rm_id IS NULL"),
-    null_op: Optional[bool] = Query(None, description="If true, only rows with op_id IS NULL"),
+    null_rm: Optional[bool] = Query(
+        None,
+        description="If true, only rows with rm_id IS NULL (e.g. before bulk RM assign).",
+    ),
+    null_op: Optional[bool] = Query(
+        None,
+        description="If true, only rows with op_id IS NULL (e.g. before bulk OP assign).",
+    ),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -288,6 +295,10 @@ async def bulk_assign_candidates(
 @router.post(
     "/bulk-assign/execute",
     summary="Bulk assign RM or OP (ADMIN only, round-robin)",
+    description=(
+        "Sets rm_id when assignment_role is RM, op_id when assignment_role is OP. "
+        "Each selected_employee_ids entry must be an active employee with matching role (RM or OP)."
+    ),
 )
 async def bulk_assign_execute(
     payload: CustomerServiceBulkAssignExecuteIn,
@@ -299,11 +310,11 @@ async def bulk_assign_execute(
 @router.get(
     "/{customer_service_id}",
     response_model=CustomerServiceDetailOut,
-    summary="Get one customer service (service-level)",
+    summary="Get one customer service (service-level, ADMIN only)",
 )
 async def get_customer_service_detail(
     customer_service_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+    current_user=Depends(require_admin()),
 ):
     role, emp_id = _ctx(current_user)
     _require_emp(role, emp_id)
@@ -451,6 +462,12 @@ async def soft_delete_customer_service(
                         detail="Cannot deactivate service with pending followups.",
                     )
 
+                if str(old_row.get("service_status") or "").upper() == "PROVIDED":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cannot deactivate completed service.",
+                    )
+
                 deleted_row = await conn.fetchrow(
                     f"""
                     UPDATE {DB_SCHEMA}.customer_services
@@ -594,12 +611,6 @@ async def activate_customer_service_row(
                 if cs_row.get("is_active") is True:
                     raise HTTPException(status_code=400, detail="Customer service already active.")
 
-                if cs_row.get("service_status") == "PROVIDED":
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Cannot activate completed service.",
-                    )
-
                 cust_active = await conn.fetchval(
                     f"""
                     SELECT c.is_active
@@ -692,13 +703,102 @@ async def activate_customer_service_row(
 
 
 @router.patch(
+    "/{customer_service_id}/service-status",
+    summary="Update customer service status only (EMPLOYEE WRITE, visibility applies)",
+)
+async def patch_customer_service_status(
+    customer_service_id: int,
+    payload: CustomerServiceStatusPatchIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    role, emp_id = _ctx(current_user)
+    _require_emp(role, emp_id)
+
+    raw = current_user.get("emp_id") or current_user.get("sub") or "-"
+    emp_id_ctx = int(raw) if str(raw).isdigit() else None
+
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                old_row = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                      FROM {DB_SCHEMA}.customer_services
+                     WHERE id = $1
+                     FOR UPDATE
+                    """,
+                    customer_service_id,
+                )
+                if not old_row:
+                    raise HTTPException(404, "Customer service not found.")
+
+                await _assert_customer_service_row_visibility(
+                    conn,
+                    customer_service_id=customer_service_id,
+                    role=role,
+                    emp_id=emp_id,
+                )
+
+                new_row = await conn.fetchrow(
+                    f"""
+                    UPDATE {DB_SCHEMA}.customer_services
+                       SET service_status = $1,
+                           updated_at = NOW()
+                     WHERE id = $2
+                     RETURNING *
+                    """,
+                    payload.service_status,
+                    customer_service_id,
+                )
+
+                await conn.execute(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions
+                    (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    emp_id_ctx,
+                    "CUSTOMER_SERVICE",
+                    customer_service_id,
+                    new_row["customer_id"],
+                    "UPDATE",
+                    json.dumps(dict(old_row), default=str),
+                    json.dumps(dict(new_row), default=str),
+                )
+
+        await _invalidate_customer_services_index_caches()
+        await redis_invalidate_tag(_customer_service_list_tag())
+        await redis_invalidate_tag(_customer_service_detail_tag(customer_service_id))
+
+        return {
+            "message": "Customer service status updated.",
+            "data": dict(new_row),
+            "request_id": generate_uuid(),
+        }
+    except HTTPException:
+        raise
+    except asyncpg.PostgresError:
+        logger.exception("patch customer_service status DB error")
+        raise HTTPException(500, "Database error.")
+
+
+@router.patch(
     "/{customer_service_id}",
-    summary="Patch customer service (RM/OP/service_status/is_active only)",
+    summary="Patch customer service (RM/OP/service_status/is_active only, ADMIN only)",
 )
 async def patch_customer_service(
     customer_service_id: int,
     payload: CustomerServicePatchIn,
-    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+    current_user=Depends(require_admin()),
 ):
     role, emp_id = _ctx(current_user)
     _require_emp(role, emp_id)

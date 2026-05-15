@@ -40,6 +40,8 @@ class CustomerSnapshotForGstOut(BaseModel):
     language: Optional[str] = None
     op_id: Optional[int] = None
     rm_id: Optional[int] = None
+    rm_name: Optional[str] = None
+    op_name: Optional[str] = None
     mobile: Optional[str] = None
 
     model_config = {"from_attributes": True}

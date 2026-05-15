@@ -664,10 +664,14 @@ async def list_gst_filings_table(
                COALESCE(f.business_name, r.business_name) AS business_name,
                COALESCE(f.business_type, r.business_type) AS business_type,
                COALESCE(f.state, r.state) AS state,
-               COALESCE(f.language, r.language) AS language
+               COALESCE(f.language, r.language) AS language,
+               erm.first_name AS rm_name,
+               eop.first_name AS op_name
         FROM {DB_SCHEMA}.gst_filings f
         LEFT JOIN {DB_SCHEMA}.gst_registration r
             ON r.id = f.gst_registration_id
+        LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = f.rm_id
+        LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = f.op_id
         {where_clause}
         ORDER BY f.created_at DESC
         LIMIT ${lim_idx} OFFSET ${off_idx}

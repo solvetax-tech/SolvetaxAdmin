@@ -83,15 +83,6 @@ def custom_openapi():
         "/api/v1/event-logs/debug/smoke",
         "/api/v1/payments_config/payment-config/public",
         "/api/v1/payments_config/payment-config/public/service-prices",
-        "/app/v1/customer-otp/request",
-        "/app/v1/customer-otp/verify",
-        "/app/v1/customer-profile",
-        "/app/v1/customer-profile/signup",
-        "/app/v1/customer-profile/login",
-        "/app/v1/customer-profile/refresh",
-        "/app/v1/customer-profile/logout",
-        "/app/v1/customer-profile/forgot-password/request",
-        "/app/v1/customer-profile/forgot-password/verify",
     }
 
     for path_key, path_item in openapi_schema["paths"].items():
@@ -111,8 +102,6 @@ from app.sign_up.email_verification import router as email_verification
 from app.sign_up.signup import router as signup_router
 from app.sign_up.login import router as login_router
 from app.sign_up.forgot import router as forgot_password_router
-from app.customer_profile.verify_customer_otp import router as verify_customer_otp_router
-from app.customer_profile import router as customer_profile_router
 from app.sign_up.employee_edit import router as employee_edit_router
 from app.customer_registration.customer import router as customer_router
 from app.gst_registration.gst_registration import router as gst_registration_router
@@ -122,12 +111,17 @@ from app.gst_registration.gst_registration_config import router as gst_registrat
 from app.Dashboard.dashboard import router as dashboard_router
 from app.version.version import router as version_router
 from app.payments.registration_payments import router as registration_payments_router
-from app.payments.filing_payments import router as filing_payments_router
+from app.payments.gst_filing_payments import router as gst_filing_payments_router
+from app.payments.gst_filing_return_details_payments import (
+    router as gst_filing_return_details_payments_router,
+)
 from app.payments.income_tax_payments import router as income_tax_payments_router
+from app.payments.customer_service_payments import router as customer_service_payments_router
 from app.payments.payments_config import router as payments_config
 from app.gst_registration.gst_blob import router as gst_blob
 from app.gst_registration.document_config import router as document_config
 from app.follow_ups.customer_service_followups import router as customer_service_followups_router
+from app.follow_ups.payments_followup import router as payments_followup_router
 from app.customer_registration.entity_types import router as entity_types_router
 from app.gst_registration_filing.gst_filing_config import router as gst_filing_config
 from app.gst_registration_filing.gst_registration_filing import router as gst_registration_filing
@@ -153,10 +147,6 @@ if login_router:
     app.include_router(login_router)
 if forgot_password_router:
     app.include_router(forgot_password_router)
-if verify_customer_otp_router:
-    app.include_router(verify_customer_otp_router)
-if customer_profile_router:
-    app.include_router(customer_profile_router)
 if customer_router:
     app.include_router(customer_router)
 if gst_registration_router:
@@ -181,10 +171,14 @@ if version_router:
     app.include_router(version_router)
 if registration_payments_router:
     app.include_router(registration_payments_router)
-if filing_payments_router:
-    app.include_router(filing_payments_router)
+if gst_filing_payments_router:
+    app.include_router(gst_filing_payments_router)
+if gst_filing_return_details_payments_router:
+    app.include_router(gst_filing_return_details_payments_router)
 if income_tax_payments_router:
     app.include_router(income_tax_payments_router)
+if customer_service_payments_router:
+    app.include_router(customer_service_payments_router)
 if payments_config:
     app.include_router(payments_config)
 if gst_blob:
@@ -193,6 +187,8 @@ if document_config:
     app.include_router(document_config)
 if customer_service_followups_router:
     app.include_router(customer_service_followups_router)
+if payments_followup_router:
+    app.include_router(payments_followup_router)
 if entity_types_router:
     app.include_router(entity_types_router)
 if crm_leads_router:

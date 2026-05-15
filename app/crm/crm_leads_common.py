@@ -245,7 +245,15 @@ async def _fetch_crm_lead_visible(
         where.append(f"upper(trim(l.entity_type)) = ${len(params)}")
     lock = " FOR UPDATE" if for_update else ""
     return await conn.fetchrow(
-        f"SELECT l.* FROM {DB_SCHEMA}.crm_leads l WHERE {' AND '.join(where)}{lock}",
+        f"""
+        SELECT l.*,
+               erm.first_name AS rm_name,
+               eop.first_name AS op_name
+          FROM {DB_SCHEMA}.crm_leads l
+          LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
+          LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
+         WHERE {' AND '.join(where)}{lock}
+        """,
         *params,
     )
 
@@ -805,8 +813,12 @@ async def _svc_filter_crm_leads(
                 params.extend([limit, offset])
                 count_sql = f"SELECT COUNT(*) FROM {DB_SCHEMA}.crm_leads l WHERE {' AND '.join(where)}"
                 list_sql = f"""
-                    SELECT l.*
+                    SELECT l.*,
+                           erm.first_name AS rm_name,
+                           eop.first_name AS op_name
                     FROM {DB_SCHEMA}.crm_leads l
+                    LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
+                    LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
                     WHERE {' AND '.join(where)}
                     ORDER BY l.updated_at DESC, l.id DESC
                     LIMIT ${len(params)-1} OFFSET ${len(params)}
@@ -1167,8 +1179,12 @@ async def _svc_get_bulk_assign_candidates(
             count_sql = f"SELECT COUNT(*) FROM {DB_SCHEMA}.crm_leads l {where_sql}"
             params_with_page = list(params) + [limit, offset]
             list_sql = f"""
-                SELECT l.*
+                SELECT l.*,
+                       erm.first_name AS rm_name,
+                       eop.first_name AS op_name
                 FROM {DB_SCHEMA}.crm_leads l
+                LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
+                LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
                 {where_sql}
                 ORDER BY l.updated_at DESC, l.id DESC
                 LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
@@ -1442,6 +1458,8 @@ async def _svc_filter_crm_activities(
                 base_from = f"""
                     FROM {DB_SCHEMA}.crm_activities a
                     INNER JOIN {DB_SCHEMA}.crm_leads l ON l.id = a.lead_id
+                    LEFT JOIN {DB_SCHEMA}.employees lead_rm ON lead_rm.emp_id = l.rm_id
+                    LEFT JOIN {DB_SCHEMA}.employees lead_op ON lead_op.emp_id = l.op_id
                 """
                 where_sql = " AND ".join(where)
                 count_params = list(params)
@@ -1450,7 +1468,10 @@ async def _svc_filter_crm_activities(
 
                 count_sql = f"SELECT COUNT(*) {base_from} WHERE {where_sql}"
                 list_sql = f"""
-                    SELECT a.* {base_from}
+                    SELECT a.*,
+                           lead_rm.first_name AS lead_rm_name,
+                           lead_op.first_name AS lead_op_name
+                    {base_from}
                     WHERE {where_sql}
                     ORDER BY a.performed_at DESC, a.id DESC
                     LIMIT ${n + 1} OFFSET ${n + 2}
@@ -1551,7 +1572,12 @@ async def _svc_get_crm_lead_by_entity(
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
                     f"""
-                    SELECT l.* FROM {DB_SCHEMA}.crm_leads l
+                    SELECT l.*,
+                           erm.first_name AS rm_name,
+                           eop.first_name AS op_name
+                    FROM {DB_SCHEMA}.crm_leads l
+                    LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
+                    LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
                     WHERE l.entity_type = $1 AND l.entity_id = $2 AND l.is_active = TRUE
                     ORDER BY l.updated_at DESC NULLS LAST, l.id DESC
                     LIMIT 1

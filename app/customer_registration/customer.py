@@ -40,6 +40,41 @@ from app.redis_cache import (
 
 IST = ZoneInfo("Asia/Kolkata")
 
+_CUSTOMERS_ROW_COLS: tuple[str, ...] = (
+    "customer_id",
+    "full_name",
+    "email",
+    "mobile",
+    "service_required",
+    "language",
+    "business_name",
+    "business_description",
+    "business_image_url",
+    "business_type",
+    "state",
+    "city",
+    "remark",
+    "rm_id",
+    "op_id",
+    "is_active",
+    "referral_id",
+    "referral_entity",
+    "lead_source",
+    "tag",
+    "lead_type",
+    "created_at",
+    "updated_at",
+)
+
+
+def _customers_cols_sql(alias: Optional[str] = None) -> str:
+    if alias:
+        return ", ".join(f"{alias}.{c}" for c in _CUSTOMERS_ROW_COLS)
+    return ", ".join(_CUSTOMERS_ROW_COLS)
+
+
+_CUSTOMERS_RETURNING_SQL = ", ".join(_CUSTOMERS_ROW_COLS)
+
 router = APIRouter(
     prefix="/api/v1/customers",
     tags=["Customers"]
@@ -836,7 +871,7 @@ async def create_customer(
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
                     )
-                    RETURNING *
+                    RETURNING {_CUSTOMERS_RETURNING_SQL}
                 """
 
                 customer_row = await conn.fetchrow(
@@ -904,7 +939,7 @@ async def create_customer(
                         UPDATE {DB_SCHEMA}.customers
                            SET service_required = $2
                          WHERE customer_id = $1
-                         RETURNING *
+                         RETURNING {_CUSTOMERS_RETURNING_SQL}
                         """,
                         customer_id,
                         new_sr,
@@ -1326,7 +1361,7 @@ async def get_customer_by_id(
             where_clause = " AND ".join(conditions)
 
             query = f"""
-                SELECT c.*,
+                SELECT {_customers_cols_sql('c')},
                        e_rm.first_name AS rm_name,
                        e_op.first_name AS op_name
                 FROM {DB_SCHEMA}.customers c
@@ -1673,7 +1708,7 @@ async def filter_customers(
                 values_with_pagination = values + [limit, offset]
 
             main_sql = f"""
-                SELECT c.*,
+                SELECT {_customers_cols_sql('c')},
                        e_rm.first_name AS rm_name,
                        e_op.first_name AS op_name
                 FROM {DB_SCHEMA}.customers c
@@ -1883,7 +1918,7 @@ async def edit_customer(
 
                 old_row = await conn.fetchrow(
                     f"""
-                    SELECT *
+                    SELECT {_customers_cols_sql()}
                     FROM {DB_SCHEMA}.customers
                     WHERE customer_id = $1
                     FOR UPDATE
@@ -2019,7 +2054,7 @@ async def edit_customer(
                     UPDATE {DB_SCHEMA}.customers
                     SET {', '.join(fields)}
                     WHERE customer_id = ${idx}
-                    RETURNING *
+                    RETURNING {_CUSTOMERS_RETURNING_SQL}
                 """
 
                 new_row = await conn.fetchrow(update_sql, *values)
@@ -2160,7 +2195,7 @@ async def soft_delete_customer(
                 # --------------------------------------------------
                 customer = await conn.fetchrow(
                     f"""
-                    SELECT *
+                    SELECT {_customers_cols_sql()}
                       FROM {DB_SCHEMA}.customers
                      WHERE customer_id = $1
                      FOR UPDATE
@@ -2253,7 +2288,7 @@ async def soft_delete_customer(
                        SET is_active = FALSE,
                            updated_at = NOW()
                      WHERE customer_id = $1
-                     RETURNING *
+                     RETURNING {_CUSTOMERS_RETURNING_SQL}
                     """,
                     customer_id,
                 )
@@ -2442,7 +2477,7 @@ async def activate_customer(
                 # --------------------------------------------------
                 customer = await conn.fetchrow(
                     f"""
-                    SELECT *
+                    SELECT {_customers_cols_sql()}
                       FROM {DB_SCHEMA}.customers
                      WHERE customer_id = $1
                      FOR UPDATE
@@ -2533,7 +2568,7 @@ async def activate_customer(
                            updated_at = NOW()
                      WHERE customer_id = $1
                        AND is_active = FALSE
-                     RETURNING *
+                     RETURNING {_CUSTOMERS_RETURNING_SQL}
                     """,
                     customer_id,
                 )

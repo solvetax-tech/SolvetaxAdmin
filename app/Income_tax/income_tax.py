@@ -406,8 +406,12 @@ async def filter_income_tax(
                 )
                 rows = await conn.fetch(
                     f"""
-                    SELECT i.*
+                    SELECT i.*,
+                           e_rm.first_name AS rm_name,
+                           e_op.first_name AS op_name
                     FROM {DB_SCHEMA}.income_tax i
+                    LEFT JOIN {DB_SCHEMA}.employees e_rm ON e_rm.emp_id = i.rm_id
+                    LEFT JOIN {DB_SCHEMA}.employees e_op ON e_op.emp_id = i.op_id
                     {where_sql}
                     ORDER BY i.updated_at DESC, i.id DESC
                     LIMIT ${idx} OFFSET ${idx + 1}
@@ -462,7 +466,15 @@ async def get_income_tax(
                     conditions.append(f"({visibility_sql})")
                     args.extend(visibility_values)
                 row = await conn.fetchrow(
-                    f"SELECT i.* FROM {DB_SCHEMA}.income_tax i WHERE {' AND '.join(conditions)}",
+                    f"""
+                    SELECT i.*,
+                           e_rm.first_name AS rm_name,
+                           e_op.first_name AS op_name
+                    FROM {DB_SCHEMA}.income_tax i
+                    LEFT JOIN {DB_SCHEMA}.employees e_rm ON e_rm.emp_id = i.rm_id
+                    LEFT JOIN {DB_SCHEMA}.employees e_op ON e_op.emp_id = i.op_id
+                    WHERE {' AND '.join(conditions)}
+                    """,
                     *args,
                 )
             if not row:
@@ -514,8 +526,12 @@ async def get_income_tax_full(
 
                 income_tax_row = await conn.fetchrow(
                     f"""
-                    SELECT i.*
+                    SELECT i.*,
+                           e_rm.first_name AS rm_name,
+                           e_op.first_name AS op_name
                     FROM {DB_SCHEMA}.income_tax i
+                    LEFT JOIN {DB_SCHEMA}.employees e_rm ON e_rm.emp_id = i.rm_id
+                    LEFT JOIN {DB_SCHEMA}.employees e_op ON e_op.emp_id = i.op_id
                     WHERE {' AND '.join(conditions)}
                     """,
                     *args,

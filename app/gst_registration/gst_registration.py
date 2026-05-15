@@ -1001,7 +1001,8 @@ async def get_customer_fields_for_gst(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
-    Returns `business_name`, `business_type`, `state`, `language`, `op_id`, `rm_id`, `mobile`
+    Returns `business_name`, `business_type`, `state`, `language`, `op_id`, `rm_id`,
+    `rm_name`, `op_name`, `mobile`
     from `customers` where `customers.customer_id` = `customer_id`.
     Visibility matches customer list (RM/OP/manager scoping).
     """
@@ -1038,8 +1039,12 @@ async def get_customer_fields_for_gst(
                c.op_id,
                c.rm_id,
                c.mobile,
-               c.is_active
+               c.is_active,
+               e_rm.first_name AS rm_name,
+               e_op.first_name AS op_name
         FROM {DB_SCHEMA}.customers c
+        LEFT JOIN {DB_SCHEMA}.employees e_rm ON e_rm.emp_id = c.rm_id
+        LEFT JOIN {DB_SCHEMA}.employees e_op ON e_op.emp_id = c.op_id
         WHERE c.customer_id = $1
         {where_extra}
         LIMIT 1
@@ -1076,6 +1081,8 @@ async def get_customer_fields_for_gst(
             "language": row["language"],
             "op_id": row["op_id"],
             "rm_id": row["rm_id"],
+            "rm_name": row["rm_name"],
+            "op_name": row["op_name"],
             "mobile": row["mobile"],
         }
 
