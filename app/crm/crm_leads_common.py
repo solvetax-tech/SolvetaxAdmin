@@ -243,7 +243,7 @@ async def _fetch_crm_lead_visible(
     if entity_type:
         params.append(_normalize_code(entity_type))
         where.append(f"upper(trim(l.entity_type)) = ${len(params)}")
-    lock = " FOR UPDATE" if for_update else ""
+    lock = " FOR UPDATE OF l" if for_update else ""
     return await conn.fetchrow(
         f"""
         SELECT l.*,

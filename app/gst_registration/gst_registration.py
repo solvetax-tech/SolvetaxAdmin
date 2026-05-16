@@ -836,9 +836,8 @@ async def get_gst_registration_full(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     """
-    Returns the `gst_registration` row (with RM/creator names), all linked
-    `gst_registration_persons`, `gst_registration_documents`, and
-    `customer_services` for `entity_type = 'GST_REGISTRATION'`.
+    Returns the `gst_registration` row (with RM/creator names) and all linked
+    `gst_registration_persons`.
 
     `registration_id` is the primary key `gst_registration.id`.
     """
@@ -895,9 +894,6 @@ async def get_gst_registration_full(
         """
 
         person_active = "" if include_inactive else " AND p.is_active = TRUE"
-        doc_active = ""
-        if not include_inactive:
-            doc_active = " AND p.is_active = TRUE AND d.is_active = TRUE"
 
         persons_sql = f"""
             SELECT p.*,
@@ -917,38 +913,6 @@ async def get_gst_registration_full(
              ORDER BY p.created_at ASC NULLS LAST, p.person_id ASC
         """
 
-        documents_sql = f"""
-            SELECT d.*,
-                   p.full_name,
-                   g.rm_id,
-                   g.created_by,
-                   e_rm.first_name AS rm_name,
-                   e_creator.first_name AS created_by_name,
-                   e_verify.first_name AS verified_by_name
-              FROM {DB_SCHEMA}.gst_registration_documents d
-              JOIN {DB_SCHEMA}.gst_registration_persons p
-                    ON d.person_id = p.person_id
-              JOIN {DB_SCHEMA}.gst_registration g
-                    ON p.gst_registration_id = g.id
-              LEFT JOIN {DB_SCHEMA}.employees e_rm
-                     ON g.rm_id = e_rm.emp_id
-              LEFT JOIN {DB_SCHEMA}.employees e_creator
-                     ON g.created_by = e_creator.emp_id
-              LEFT JOIN {DB_SCHEMA}.employees e_verify
-                     ON d.verified_by = e_verify.emp_id
-             WHERE p.gst_registration_id = $1
-             {doc_active}
-             ORDER BY d.created_at ASC NULLS LAST, d.document_id ASC
-        """
-
-        services_sql = f"""
-            SELECT *
-              FROM {DB_SCHEMA}.customer_services
-             WHERE entity_type = 'GST_REGISTRATION'
-               AND entity_id = $1
-             ORDER BY created_at DESC NULLS LAST
-        """
-
         try:
             async with pool.acquire() as conn:
                 reg_row = await conn.fetchrow(reg_sql, *reg_values)
@@ -958,8 +922,6 @@ async def get_gst_registration_full(
                         detail="GST registration not found or not accessible.",
                     )
                 persons = await conn.fetch(persons_sql, registration_id)
-                documents = await conn.fetch(documents_sql, registration_id)
-                services = await conn.fetch(services_sql, registration_id)
         except HTTPException:
             raise
         except asyncpg.PostgresError:
@@ -969,8 +931,6 @@ async def get_gst_registration_full(
         return {
             "registration": dict(reg_row),
             "persons": [dict(r) for r in persons],
-            "documents": [dict(r) for r in documents],
-            "customer_services": [dict(r) for r in services],
             "request_id": request_id,
         }
 
