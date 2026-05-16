@@ -1,7 +1,7 @@
 import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
-from typing import Optional, List
+from typing import List, Optional
 from datetime import datetime, timedelta
 from app.gst_registration_filing.schemas import (
     GSTFilingIn,
@@ -919,6 +919,115 @@ async def list_gst_filing_return_details_table(
         ttl_seconds=300,
         tags=[_gst_filing_table_return_details_tag()],
     )
+
+
+def _format_period_label(dt: datetime, frequency: str) -> Optional[str]:
+    """Ported from frontend formatPeriodLabel to align derived period strings (v58.8)."""
+    if not dt:
+        return None
+    months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+    m = dt.month - 1
+    y = dt.year
+    freq = (frequency or "QUARTERLY").upper()
+
+    if freq == "MONTHLY":
+        target_month = m - 1
+        target_year = y
+        if target_month < 0:
+            target_month = 11
+            target_year -= 1
+        return f"{months[target_month]}-{target_year}"
+
+    if freq in ("QUARTERLY", "QRMP"):
+        q = 4
+        q_year = y
+        if 1 <= m <= 3:
+            q = 1
+        elif 4 <= m <= 6:
+            q = 2
+        elif 7 <= m <= 9:
+            q = 3
+        else:
+            q = 4
+            if m == 0:
+                q_year = y - 1
+        return f"Q{q}-{q_year}"
+
+    if freq in ("YEARLY", "ANNUAL", "ANUAL"):
+        fy_start = y - 2 if m <= 2 else y - 1
+        return f"{fy_start}-{str(fy_start + 1)[-2:]}"
+    return None
+
+
+@router.get(
+    "/gst-registration/{gst_registration_id}/occupied-periods",
+    summary="Get occupied filing periods for a registration (collision detection, v58.8)",
+)
+async def get_occupied_periods(
+    gst_registration_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    Labels already taken by any filing (explicit ``filing_period``) plus periods derived from
+    return-detail due dates using the same rules as the legacy frontend helper.
+    """
+    request_id = generate_uuid()
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
+
+    async with pool.acquire() as conn:
+        try:
+            sql_filings = f"""
+                SELECT DISTINCT filing_period
+                FROM {DB_SCHEMA}.gst_filings
+                WHERE gst_registration_id = $1
+                  AND filing_period IS NOT NULL
+                  AND filing_period != ''
+            """
+            rows_filings = await conn.fetch(sql_filings, gst_registration_id)
+
+            sql_details = f"""
+                SELECT
+                    f.filing_frequency,
+                    d.gstr1_due_date, d.gstr3b_due_date,
+                    d.cmp08_due_date, d.gstr9_due_date, d.gstr4_due_date
+                FROM {DB_SCHEMA}.gst_filing_return_details d
+                JOIN {DB_SCHEMA}.gst_filings f ON f.id = d.gst_filing_id
+                WHERE f.gst_registration_id = $1
+            """
+            rows_details = await conn.fetch(sql_details, gst_registration_id)
+
+            periods = set()
+            for r in rows_filings:
+                p = r["filing_period"]
+                if p:
+                    periods.add(p.strip().upper())
+
+            for r in rows_details:
+                freq = r["filing_frequency"] or "QUARTERLY"
+                due = (
+                    r["gstr1_due_date"]
+                    or r["gstr3b_due_date"]
+                    or r["cmp08_due_date"]
+                    or r["gstr9_due_date"]
+                    or r["gstr4_due_date"]
+                )
+                if due:
+                    derived = _format_period_label(due, freq)
+                    if derived:
+                        periods.add(derived.upper())
+
+            return {
+                "data": sorted(list(periods)),
+                "count": len(periods),
+                "request_id": request_id,
+            }
+
+        except Exception:
+            logger.exception("Error fetching occupied periods")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
 
 
 def _upper_or_none(v) -> Optional[str]:

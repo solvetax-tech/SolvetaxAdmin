@@ -416,6 +416,7 @@ class GSTRegistrationOut(BaseSchema):
     created_by: Optional[int]
     rm_id: Optional[int]
     rm_name: Optional[str] = None
+    op_name: Optional[str] = None
     filing_preference: Optional[str] = None
     approved_at: Optional[datetime]
     created_at: datetime

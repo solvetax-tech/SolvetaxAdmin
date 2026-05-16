@@ -44,8 +44,26 @@ async def create_income_tax_document(
                 row = await conn.fetchrow(
                     f"""
                     INSERT INTO {DB_SCHEMA}.income_tax_documents
-                    (income_tax_id, document_type, document_url, remarks, verified, is_active, created_at, updated_at)
-                    VALUES ($1,$2,$3,$4,$5,TRUE,NOW(),NOW())
+                    (
+                        income_tax_id,
+                        document_type,
+                        document_url,
+                        remarks,
+                        verified,
+                        verified_at,
+                        verified_by,
+                        is_active,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        $1,$2,$3,$4,$5,
+                        CASE WHEN $5 THEN NOW() ELSE NULL END,
+                        CASE WHEN $5 THEN $6 ELSE NULL END,
+                        TRUE,
+                        NOW(),
+                        NOW()
+                    )
                     RETURNING *
                     """,
                     payload.income_tax_id,
@@ -53,6 +71,7 @@ async def create_income_tax_document(
                     payload.document_url,
                     payload.remarks,
                     payload.verified,
+                    emp_id,
                 )
                 await conn.execute(
                     f"""
@@ -191,6 +210,13 @@ async def edit_income_tax_document(
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields provided for update.")
+    if "verified" in update_data:
+        if update_data["verified"] is True:
+            update_data["verified_at"] = "NOW_SENTINEL"
+            update_data["verified_by"] = emp_id
+        else:
+            update_data["verified_at"] = None
+            update_data["verified_by"] = None
 
     try:
         pool = await get_db_pool()
@@ -207,9 +233,12 @@ async def edit_income_tax_document(
                 values = []
                 idx = 1
                 for k, v in update_data.items():
-                    fields.append(f"{k} = ${idx}")
-                    values.append(v)
-                    idx += 1
+                    if k == "verified_at" and v == "NOW_SENTINEL":
+                        fields.append("verified_at = NOW()")
+                    else:
+                        fields.append(f"{k} = ${idx}")
+                        values.append(v)
+                        idx += 1
                 fields.append("updated_at = NOW()")
                 values.append(document_id)
                 row = await conn.fetchrow(

@@ -753,12 +753,17 @@ async def list_gst_registrations(
         data_sql = f"""
             SELECT g.*,
                    e_rm.first_name AS rm_name,
-                   e_creator.first_name AS created_by_name
+                   e_creator.first_name AS created_by_name,
+                   e_op.first_name AS op_name
               FROM {DB_SCHEMA}.gst_registration g
+              LEFT JOIN {DB_SCHEMA}.customers c
+                     ON g.customer_id = c.customer_id
               LEFT JOIN {DB_SCHEMA}.employees e_rm
                      ON g.rm_id = e_rm.emp_id
               LEFT JOIN {DB_SCHEMA}.employees e_creator
                      ON g.created_by = e_creator.emp_id
+              LEFT JOIN {DB_SCHEMA}.employees e_op
+                     ON c.op_id = e_op.emp_id
               {join_sql}
               {where_clause}
              ORDER BY g.created_at DESC, g.id DESC
