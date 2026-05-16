@@ -681,6 +681,8 @@ async def _svc_filter_crm_leads(
     tag: Optional[str] = None,
     lead_source: Optional[str] = None,
     is_active: Optional[bool] = None,
+    followup_at_from: Optional[datetime] = Query(None, description="Inclusive lower bound on crm_leads.followup_at."),
+    followup_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.followup_at."),
     entity_type: Optional[str] = Query(None, description="Filter by crm_leads.entity_type (e.g. GST_REGISTRATION)."),
     entity_id: Optional[int] = Query(None, ge=1, description="Filter by crm_leads.entity_id."),
     limit: int = Query(50, ge=1, le=200),
@@ -736,6 +738,8 @@ async def _svc_filter_crm_leads(
         tag=tag_norm,
         lead_source=lead_source_norm,
         is_active=is_active,
+        followup_at_from=followup_at_from,
+        followup_at_to=followup_at_to,
         entity_type=et_filter or _entity_type_query(entity_type) if entity_type is not None else None,
         entity_id=entity_id,
         limit=limit,
@@ -795,6 +799,12 @@ async def _svc_filter_crm_leads(
                 if is_active is not None:
                     params.append(is_active)
                     where.append(f"l.is_active = ${len(params)}")
+                if followup_at_from is not None:
+                    params.append(followup_at_from)
+                    where.append(f"l.followup_at >= ${len(params)}")
+                if followup_at_to is not None:
+                    params.append(followup_at_to)
+                    where.append(f"l.followup_at <= ${len(params)}")
                 if entity_id is not None:
                     params.append(entity_id)
                     where.append(f"l.entity_id = ${len(params)}")
@@ -2020,6 +2030,8 @@ async def filter_crm_leads(
     tag: Optional[str] = None,
     lead_source: Optional[str] = None,
     is_active: Optional[bool] = None,
+    followup_at_from: Optional[datetime] = Query(None),
+    followup_at_to: Optional[datetime] = Query(None),
     entity_type: str = Query(...),
     entity_id: Optional[int] = Query(None, ge=1),
     limit: int = Query(50, ge=1, le=200),
@@ -2037,6 +2049,8 @@ async def filter_crm_leads(
         tag=tag,
         lead_source=lead_source,
         is_active=is_active,
+        followup_at_from=followup_at_from,
+        followup_at_to=followup_at_to,
         entity_type=entity_type,
         entity_id=entity_id,
         limit=limit,
