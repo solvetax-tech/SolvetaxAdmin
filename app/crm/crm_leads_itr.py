@@ -24,6 +24,7 @@ from app.crm.crm_leads_common import (
     _normalize_code,
     _performed_by_emp_id,
     _require_crm_row_context,
+    _closed_stage_blocks_call_update,
     _validate_call_config,
     _validate_crm_call_against_mappings,
     _validation_error,
@@ -37,13 +38,15 @@ from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
 
 router = APIRouter(prefix="/api/v1/crm/itr/leads", tags=["CRM Leads ITR"])
 ITR_ENTITY_TYPE = "INCOME_TAX"
-ITR_CLOSED_STAGES = {"SUBSCRIBED", "NOT_INTERESTED"}
 ITR_STATUSES_NO_STAGE_CHANGE = frozenset(
     {"CALL_NOT_ANSWERED", "CALL_NOT_CONNECTED", "CALL_BUSY", "CALL_DONE"}
 )
 ITR_FIRST_PITCH_CONNECTED_STAGES = frozenset(
     {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}
 )
+
+# ITR UI may send this; all downstream logic uses SEND_DOCS.
+ITR_CALL_STATUS_SEND_DOCS_ALIAS = "PAYMENT_DONE_SERVICE_PENDING"
 
 
 @router.post(
@@ -234,7 +237,7 @@ def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_c
     """
     FINAL_PITCH_CALL: only SCHEDULED_PAYMENT → SCHEDULED_PAYMENTS; all other outcomes keep stage.
 
-    FIRST_PITCH_CALL: same early-funnel rules as GST (FOLLOW_UP, NOT_INTERESTED, PENDING_ITR_DATA, etc.).
+    FIRST_PITCH_CALL: same early-funnel rules as GST; SEND_DOCS from NOT_INTERESTED re-opens to PENDING_ITR_DATA.
     """
     ctc = (call_type_code or "").strip().upper()
 
@@ -286,13 +289,13 @@ def _itr_transition_stage(current_stage: str, call_type_code: str, call_status_c
         return "NOT_INTERESTED"
 
     if call_status_code == "SEND_DOCS":
-        if current_stage in {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}:
+        if current_stage in {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED", "NOT_INTERESTED"}:
             return "PENDING_ITR_DATA"
         raise _validation_error(
             "Invalid stage for SEND_DOCS.",
             {
                 "stage": (
-                    f"SEND_DOCS applies only from FRESH_LEAD, FOLLOW_UP, or INTERESTED; "
+                    "SEND_DOCS applies only from FRESH_LEAD, FOLLOW_UP, INTERESTED, or NOT_INTERESTED; "
                     f"current is {current_stage}."
                 )
             },
@@ -318,11 +321,14 @@ async def _crm_itr_apply_call_update(
 
     await _validate_call_config(conn, call_type_code, call_status_code, ITR_ENTITY_TYPE)
 
+    if call_status_code == ITR_CALL_STATUS_SEND_DOCS_ALIAS:
+        call_status_code = "SEND_DOCS"
+
     if not lead["is_active"]:
         raise _validation_error("Inactive lead cannot be updated via call flow.")
 
     current_stage = lead["stage"]
-    if current_stage in ITR_CLOSED_STAGES:
+    if _closed_stage_blocks_call_update(current_stage, call_status_code):
         raise _validation_error(
             "Lead is closed; stage updates are not allowed.",
             {"stage": f"Current stage is {current_stage}."},

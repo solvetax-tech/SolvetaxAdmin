@@ -97,6 +97,16 @@ class FilingPaymentIn(BaseSchema):
 
     entity_id: int = Field(..., example=55)
 
+    customer_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Optional. Used for INCOME_TAX payments when linking to solvetax.customers; "
+            "stored on payments.customer_id. Omit or null when the ITR row has no customer."
+        ),
+        example=42,
+    )
+
     amount: condecimal(max_digits=12, decimal_places=2) = Field(
         ...,
         example=699.00

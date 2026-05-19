@@ -8,6 +8,9 @@ from app.utils import get_db_pool, DB_SCHEMA
 from app.gst_registration_filing.gst_filing_auto_policy import (
     disable_gst_filings_auto_over_missed_threshold,
 )
+from app.crm.crm_leads_common import _invalidate_crm_cache
+
+ITR_CRM_ENTITY_TYPE = "INCOME_TAX"
 
 # Cap rows touched per scheduler tick so one run cannot scan/update the whole table.
 SCHEDULER_SQL_BATCH_LIMIT = 500
@@ -378,6 +381,92 @@ async def _mark_overdue_gst_return_statuses(conn) -> str:
     )
 
 
+async def _sync_itr_crm_subscribed_when_filed_and_paid(conn) -> int:
+    """
+    Catch-up for INCOME_TAX when payment was PAID before ITR was FILED.
+
+    Triggers handle each event separately (ITR_DONE on file, payment stage on pay).
+    This job promotes to SUBSCRIBED only when both are true and the lead is not already closed.
+    Does not change GST or other entity types.
+    """
+    lim = SCHEDULER_SQL_BATCH_LIMIT
+    rows = await conn.fetch(
+        f"""
+        SELECT l.id AS lead_id, l.stage AS old_stage
+          FROM {DB_SCHEMA}.crm_leads l
+          INNER JOIN {DB_SCHEMA}.income_tax i
+                  ON i.id = l.entity_id
+         WHERE l.is_active = TRUE
+           AND l.entity_id IS NOT NULL
+           AND upper(btrim(l.entity_type::text)) = $1
+           AND l.stage NOT IN ('SUBSCRIBED', 'NOT_INTERESTED')
+           AND i.is_active = TRUE
+           AND upper(btrim(i.filed_status::text)) = 'FILED'
+           AND EXISTS (
+               SELECT 1
+                 FROM {DB_SCHEMA}.payments p
+                WHERE p.entity_id = l.entity_id
+                  AND upper(btrim(p.entity_type::text)) = $1
+                  AND p.is_active = TRUE
+                  AND p.payment_status = 'PAID'
+           )
+         ORDER BY l.id ASC
+         LIMIT {lim}
+         FOR UPDATE OF l SKIP LOCKED
+        """,
+        ITR_CRM_ENTITY_TYPE,
+    )
+    if not rows:
+        return 0
+
+    activity_remarks = (
+        "Scheduler: income tax FILED and payment PAID — stage set to SUBSCRIBED."
+    )
+    async with conn.transaction():
+        for row in rows:
+            lead_id = int(row["lead_id"])
+            old_stage = row["old_stage"]
+            updated = await conn.fetchrow(
+                f"""
+                UPDATE {DB_SCHEMA}.crm_leads
+                   SET stage = 'SUBSCRIBED',
+                       updated_at = NOW()
+                 WHERE id = $1
+                   AND is_active = TRUE
+                   AND stage NOT IN ('SUBSCRIBED', 'NOT_INTERESTED')
+                 RETURNING id, stage
+                """,
+                lead_id,
+            )
+            if not updated:
+                continue
+            if old_stage == updated["stage"]:
+                continue
+            await conn.execute(
+                f"""
+                INSERT INTO {DB_SCHEMA}.crm_activities (
+                    lead_id,
+                    entity_type,
+                    activity_type,
+                    old_stage,
+                    new_stage,
+                    remarks,
+                    performed_by,
+                    performed_at,
+                    created_at
+                )
+                VALUES ($1, $2, 'SYSTEM', $3, 'SUBSCRIBED', $4, NULL, NOW(), NOW())
+                """,
+                lead_id,
+                ITR_CRM_ENTITY_TYPE,
+                old_stage,
+                activity_remarks,
+            )
+            await _invalidate_crm_cache(lead_id)
+
+    return len(rows)
+
+
 async def _expire_customer_otps(conn) -> str:
     lim = SCHEDULER_SQL_BATCH_LIMIT
     return await conn.execute(
@@ -581,6 +670,14 @@ async def background_jobs():
                 generated = await _run_gst_filing_auto_generation(conn)
                 if generated:
                     logging.info("Auto generated gst filing return-detail rows: %s", generated)
+
+                # 11) ITR: FILED + PAID → SUBSCRIBED (pay-first-then-file catch-up; triggers unchanged)
+                itr_subscribed = await _sync_itr_crm_subscribed_when_filed_and_paid(conn)
+                if itr_subscribed:
+                    logging.info(
+                        "CRM ITR leads promoted to SUBSCRIBED (filed + paid): count=%s",
+                        itr_subscribed,
+                    )
 
                 logging.info("Scheduler completed successfully")
 

@@ -539,6 +539,13 @@ async def get_payment_amount(
         description="GST_REGISTRATION | GST_FILING | GST_FILING_RETURN_DETAILS | INCOME_TAX | CUSTOMER_SERVICE "
         "(CUSTOMER_SERVICE: customer_services.id; GST_FILING_RETURN_DETAILS: gst_filing_return_details.id).",
     ),
+    customer_id: Optional[int] = Query(
+        None,
+        gt=0,
+        description=(
+            "Optional for INCOME_TAX only: matches payments.customer_id (use null/omit when ITR has no customer)."
+        ),
+    ),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     request_id = generate_uuid()
@@ -548,10 +555,12 @@ async def get_payment_amount(
         "payments_config:get_amount",
         entity_id=entity_id,
         entity_type=entity_type_norm,
+        customer_id=customer_id,
         emp_id=emp_id,
     )
 
     pool = await get_db_pool()
+    itr_payment_customer_id = customer_id if entity_type_norm == "INCOME_TAX" else None
 
     async def _load_payment_amount():
         async with pool.acquire() as conn:
@@ -640,7 +649,7 @@ async def get_payment_amount(
                 elif entity_type_norm == "INCOME_TAX":
                     income_tax_row = await conn.fetchrow(
                         f"""
-                        SELECT id, customer_id, financial_year, is_active
+                        SELECT id, financial_year, is_active
                         FROM {DB_SCHEMA}.income_tax
                         WHERE id = $1
                         LIMIT 1
@@ -652,9 +661,15 @@ async def get_payment_amount(
                     if not income_tax_row["is_active"]:
                         raise HTTPException(400, "Income tax record is inactive.")
 
-                    customer_id = income_tax_row["customer_id"]
-                    display_name = f"Income Tax ({income_tax_row['financial_year']})"
-                    ownership_category = income_tax_row["financial_year"] or "N/A"
+                    # ITR rows have no customer_id; use optional query param for payment history.
+                    customer_id = itr_payment_customer_id
+                    fy = income_tax_row["financial_year"]
+                    if isinstance(fy, (list, tuple)):
+                        fy_label = ", ".join(str(x) for x in fy if x)
+                    else:
+                        fy_label = str(fy) if fy else ""
+                    display_name = f"Income Tax ({fy_label or 'N/A'})"
+                    ownership_category = fy_label or "N/A"
 
                 elif entity_type_norm == "CUSTOMER_SERVICE":
                     cs_row = await conn.fetchrow(
@@ -808,6 +823,7 @@ async def get_payment_amount(
                 return {
                     "entity_id": entity_id,
                     "entity_type": entity_type_norm,
+                    "customer_id": customer_id,
                     "ownership_category": ownership_category,
                     "display_name": display_name,
                     "original_amount": round(original_amount, 2),

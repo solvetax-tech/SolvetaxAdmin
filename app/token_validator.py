@@ -28,7 +28,6 @@ PUBLIC_PATHS = [
 
 PUBLIC_EXACT_ENDPOINTS = {
     ("POST", "/api/v1/crm/leads/marketing"),
-    ("POST", "/api/v1/income-tax"),
     ("POST", "/api/v1/customers"),
     ("POST", "/api/v1/contact-support"),
     ("POST", "/api/v1/event-logs"),

@@ -15,7 +15,8 @@ psycopg==3.2.10
 gunicorn==22.0.0
 python-dotenv==1.1.1
 deepdiff
-pandas==2.3.3 
+pandas==2.3.3
+openpyxl==3.1.5
 pytz==2025.2
 python-multipart==0.0.20
 aiohttp==3.13.1

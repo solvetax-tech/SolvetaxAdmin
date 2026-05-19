@@ -77,7 +77,6 @@ def custom_openapi():
     public_api_key_paths = {
         "/api/v1/crm/leads/marketing",
         "/api/v1/customers",
-        "/api/v1/income-tax",
         "/api/v1/contact-support",
         "/api/v1/event-logs",
         "/api/v1/event-logs/debug/smoke",
@@ -131,7 +130,6 @@ from app.crm.crm_leads_common import router as crm_leads_common_router
 from app.crm.crm_leads_itr import router as crm_leads_itr_router
 from app.gst_registration_filing.gst_filing_rule_engine import router as gst_filing_rule_engine_router
 from app.Income_tax.income_tax import router as income_tax_router
-from app.Income_tax.income_tax_documents import router as income_tax_documents_router
 from app.Income_tax.income_tax_config import router as income_tax_config_router
 from app.contact_support.contact_support import router as contact_support_router
 from app.campaign.campaign import router as campaign_router
@@ -201,8 +199,6 @@ if gst_filing_rule_engine_router:
     app.include_router(gst_filing_rule_engine_router)
 if income_tax_router:
     app.include_router(income_tax_router)
-if income_tax_documents_router:
-    app.include_router(income_tax_documents_router)
 if income_tax_config_router:
     app.include_router(income_tax_config_router)
 if contact_support_router:

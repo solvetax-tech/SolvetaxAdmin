@@ -1,7 +1,11 @@
-from datetime import datetime
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Any
 
-from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, EmailStr, field_validator, model_validator
+
+from app.Income_tax.income_tax_helpers import (
+    normalize_financial_year_list,
+    normalize_source_of_income_list,
+)
 
 
 class BaseSchema(BaseModel):
@@ -16,54 +20,35 @@ class BaseSchema(BaseModel):
 class IncomeTaxIn(BaseSchema):
     client_name: str = Field(..., min_length=2, max_length=150)
     mobile: str = Field(..., pattern=r"^\d{10}$")
-    language: Optional[str] = Field(None, max_length=50)
-    state: Optional[str] = Field(None, max_length=100)
-    priority: Literal["LOW", "NORMAL", "HIGH"] = "NORMAL"
-    remarks: Optional[str] = None
     pan_number: Optional[str] = Field(None, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
-    password: Optional[str] = None
-    financial_year: str = Field(..., pattern=r"^[0-9]{4}-[0-9]{2}$")
-    filed_status: Literal["FILED", "NOT_FILED"] = "NOT_FILED"
-    referral_id: Optional[int] = Field(None, gt=0)
-    referral_entity: Optional[str] = Field(None, max_length=100)
+    priority: Literal["LOW", "NORMAL", "HIGH"] = "NORMAL"
+    financial_year: List[str] = Field(..., min_length=1)
     email_id: Optional[EmailStr] = None
-    source_of_income: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=100)
+    language: Optional[str] = Field(None, max_length=50)
+    source_of_income: Optional[List[str]] = None
+    filed_status: Literal["FILED", "NOT_FILED"] = "NOT_FILED"
     refund_amount: Optional[float] = Field(None, ge=0)
+    referral_phone_number: Optional[str] = Field(None, pattern=r"^\d{10}$")
+    remarks: Optional[str] = None
     rm_id: Optional[int] = Field(None, gt=0)
     op_id: Optional[int] = Field(None, gt=0)
-    tag: Optional[str] = Field(None, max_length=100)
-    lead_source: Optional[str] = Field(
-        None,
-        max_length=120,
-        description="Stored on crm_leads when CRM sync runs (e.g. WEBSITE, PAID_GOOGLE, or UTM-derived code).",
-    )
 
-    utm_source: Optional[str] = Field(None, max_length=120)
-    utm_medium: Optional[str] = Field(None, max_length=120)
-    utm_campaign: Optional[str] = Field(None, max_length=200)
-    utm_content: Optional[str] = Field(None, max_length=200)
-    capture_page_path: Optional[str] = Field(None, max_length=1024)
-    capture_page_url: Optional[str] = None
-    capture_page_query: Optional[str] = None
-    capture_referrer_url: Optional[str] = None
-    platform: Optional[str] = Field(None, max_length=20)
-    device_type: Optional[str] = Field(None, max_length=20)
-    device_model: Optional[str] = Field(None, max_length=200)
-    os_name: Optional[str] = Field(None, max_length=64)
-    os_version: Optional[str] = Field(None, max_length=32)
-    browser_name: Optional[str] = Field(None, max_length=64)
-    browser_version: Optional[str] = Field(None, max_length=32)
-    app_version: Optional[str] = Field(None, max_length=64)
-    environment: Optional[str] = Field(None, max_length=32)
-    release_tag: Optional[str] = Field(None, max_length=64)
-    user_agent: Optional[str] = None
-    viewport_width: Optional[int] = None
-    viewport_height: Optional[int] = None
-    screen_width: Optional[int] = None
-    screen_height: Optional[int] = None
-    capture_language: Optional[str] = Field(None, max_length=32, description="Browser language at submit (avoid clash with ITR language).")
-    timezone_offset_min: Optional[int] = None
-    ingestion_source: Optional[str] = Field(None, max_length=40)
+    @field_validator("financial_year", mode="before")
+    @classmethod
+    def validate_financial_year(cls, v: Any) -> List[str]:
+        try:
+            return normalize_financial_year_list(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("source_of_income", mode="before")
+    @classmethod
+    def validate_source_of_income(cls, v: Any) -> Optional[List[str]]:
+        try:
+            return normalize_source_of_income_list(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
     @field_validator("pan_number", mode="before")
     @classmethod
@@ -73,61 +58,27 @@ class IncomeTaxIn(BaseSchema):
             return v or None
         return v
 
-    @field_validator("priority", mode="before")
+    @field_validator("priority", "filed_status", mode="before")
     @classmethod
-    def normalize_priority(cls, v):
+    def normalize_upper_enum(cls, v):
         return v.strip().upper() if isinstance(v, str) else v
 
-    @field_validator("filed_status", mode="before")
-    @classmethod
-    def normalize_filed_status(cls, v):
-        return v.strip().upper() if isinstance(v, str) else v
-
-    @field_validator("language", "state", "source_of_income", "referral_entity", mode="before")
+    @field_validator("language", "state", mode="before")
     @classmethod
     def normalize_upper_fields(cls, v):
         return v.strip().upper() if isinstance(v, str) and v.strip() else None
 
-    @field_validator("tag", mode="before")
+    @field_validator("mobile", "referral_phone_number", mode="before")
     @classmethod
-    def normalize_tag(cls, v):
+    def normalize_phone(cls, v):
         if isinstance(v, str):
             v = v.strip()
             return v or None
         return v
 
-    @field_validator("lead_source", mode="before")
+    @field_validator("remarks", mode="before")
     @classmethod
-    def normalize_lead_source(cls, v):
-        if isinstance(v, str):
-            s = v.strip().upper()
-            return s[:120] if s else None
-        return v
-
-    @field_validator(
-        "utm_source",
-        "utm_medium",
-        "utm_campaign",
-        "utm_content",
-        "capture_language",
-        "ingestion_source",
-        mode="before",
-    )
-    @classmethod
-    def normalize_upper_marketing(cls, v):
-        if isinstance(v, str):
-            s = v.strip().upper()
-            return s[:200] if s else None
-        return v
-
-    @field_validator("mobile", mode="before")
-    @classmethod
-    def normalize_mobile(cls, v):
-        return v.strip() if isinstance(v, str) else v
-
-    @field_validator("password", "remarks", mode="before")
-    @classmethod
-    def normalize_optional_text(cls, v):
+    def normalize_remarks(cls, v):
         if isinstance(v, str):
             v = v.strip()
             return v or None
@@ -142,67 +93,153 @@ class IncomeTaxIn(BaseSchema):
         return v
 
 
+class IncomeTaxLeadCreateIn(BaseSchema):
+    """
+    ITR intake: creates income_tax and links CRM.
+
+    - With ``crm_lead_id``: creates income_tax only and sets that lead's ``entity_id``.
+    - Without ``crm_lead_id``: creates income_tax + new crm_leads row (standalone intake).
+
+    Push from CRM: ``{ "crm_lead_id": 45 }`` (aliases ``lead_id``, ``id``). Extra CRM fields are ignored.
+    """
+
+    model_config = {
+        **BaseSchema.model_config,
+        "extra": "ignore",
+    }
+
+    crm_lead_id: Optional[int] = Field(
+        None,
+        gt=0,
+        validation_alias=AliasChoices("crm_lead_id", "lead_id", "id"),
+        description="Existing CRM ITR lead to link (Push from CRM table).",
+    )
+    mobile: Optional[str] = Field(None, pattern=r"^\d{10}$")
+    full_name: Optional[str] = Field(None, min_length=2, max_length=150)
+    email: Optional[EmailStr] = None
+    preferred_language: Optional[str] = Field(None, max_length=50)
+    rm_id: Optional[int] = Field(None, gt=0)
+    op_id: Optional[int] = Field(None, gt=0)
+    remarks: Optional[str] = None
+
+    @model_validator(mode="after")
+    def require_identity_fields(self):
+        if self.crm_lead_id is None:
+            if not self.mobile:
+                raise ValueError("mobile is required when crm_lead_id is not provided")
+            if not self.full_name:
+                raise ValueError("full_name is required when crm_lead_id is not provided")
+        return self
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def normalize_full_name(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @field_validator("preferred_language", mode="before")
+    @classmethod
+    def normalize_preferred_language(cls, v):
+        return v.strip().upper() if isinstance(v, str) and v.strip() else None
+
+    @field_validator("mobile", mode="before")
+    @classmethod
+    def normalize_mobile(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip().lower()
+            if not v or v in {"string", "null", "undefined", "none", "na", "n/a"}:
+                return None
+            if "@" not in v:
+                return None
+        return v
+
+    @field_validator("remarks", mode="before")
+    @classmethod
+    def normalize_remarks(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
+
 class IncomeTaxEditIn(BaseSchema):
+    """Edit payload. ``year`` is create-only and cannot be sent or updated here."""
+
     client_name: Optional[str] = Field(None, min_length=2, max_length=150)
     mobile: Optional[str] = Field(None, pattern=r"^\d{10}$")
-    language: Optional[str] = Field(None, max_length=50)
-    state: Optional[str] = Field(None, max_length=100)
-    priority: Optional[Literal["LOW", "NORMAL", "HIGH"]] = None
-    remarks: Optional[str] = None
     pan_number: Optional[str] = Field(None, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
-    password: Optional[str] = None
-    financial_year: Optional[str] = Field(None, pattern=r"^[0-9]{4}-[0-9]{2}$")
-    filed_status: Optional[Literal["FILED", "NOT_FILED"]] = None
-    referral_id: Optional[int] = Field(None, gt=0)
-    referral_entity: Optional[str] = Field(None, max_length=100)
+    priority: Optional[Literal["LOW", "NORMAL", "HIGH"]] = None
+    financial_year: Optional[List[str]] = Field(None, min_length=1)
     email_id: Optional[EmailStr] = None
-    source_of_income: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=100)
+    language: Optional[str] = Field(None, max_length=50)
+    source_of_income: Optional[List[str]] = None
+    filed_status: Optional[Literal["FILED", "NOT_FILED"]] = None
     refund_amount: Optional[float] = Field(None, ge=0)
+    referral_phone_number: Optional[str] = Field(None, pattern=r"^\d{10}$")
+    remarks: Optional[str] = None
     rm_id: Optional[int] = Field(None, gt=0)
     op_id: Optional[int] = Field(None, gt=0)
     is_active: Optional[bool] = None
+
+    @field_validator("financial_year", mode="before")
+    @classmethod
+    def validate_financial_year(cls, v: Any) -> Optional[List[str]]:
+        if v is None:
+            return None
+        try:
+            return normalize_financial_year_list(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("source_of_income", mode="before")
+    @classmethod
+    def validate_source_of_income(cls, v: Any) -> Optional[List[str]]:
+        try:
+            return normalize_source_of_income_list(v)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
     @field_validator("pan_number", mode="before")
     @classmethod
     def normalize_pan(cls, v):
         return v.strip().upper() if isinstance(v, str) else v
 
-    @field_validator("language", "state", "source_of_income", "referral_entity", mode="before")
+    @field_validator("priority", "filed_status", mode="before")
+    @classmethod
+    def normalize_upper_enum(cls, v):
+        return v.strip().upper() if isinstance(v, str) else v
+
+    @field_validator("language", "state", mode="before")
     @classmethod
     def normalize_upper_fields(cls, v):
         return v.strip().upper() if isinstance(v, str) and v.strip() else None
 
-    @model_validator(mode="after")
-    def validate_any_field(self):
-        if not self.model_fields_set:
-            raise ValueError("At least one field must be provided for update")
-        return self
-
-
-class IncomeTaxDocumentIn(BaseSchema):
-    income_tax_id: int = Field(..., gt=0)
-    document_type: str = Field(..., min_length=2, max_length=50)
-    document_url: str = Field(..., min_length=5, max_length=1000)
-    remarks: Optional[str] = None
-    verified: bool = False
-
-    @field_validator("document_type", mode="before")
+    @field_validator("mobile", "referral_phone_number", mode="before")
     @classmethod
-    def normalize_document_type(cls, v):
-        return v.strip().upper() if isinstance(v, str) else v
+    def normalize_phone(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
 
-
-class IncomeTaxDocumentEditIn(BaseSchema):
-    document_type: Optional[str] = Field(None, min_length=2, max_length=50)
-    document_url: Optional[str] = Field(None, min_length=5, max_length=1000)
-    remarks: Optional[str] = None
-    verified: Optional[bool] = None
-    is_active: Optional[bool] = None
-
-    @field_validator("document_type", mode="before")
+    @field_validator("remarks", mode="before")
     @classmethod
-    def normalize_document_type(cls, v):
-        return v.strip().upper() if isinstance(v, str) and v.strip() else None
+    def normalize_remarks(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
 
     @model_validator(mode="after")
     def validate_any_field(self):

@@ -556,6 +556,27 @@ class GSTReturnDetailsBulkDeleteIn(BaseSchema):
         # dedupe while preserving order
         return list(dict.fromkeys(cleaned))
 
+
+def _is_allowed_spreadsheet_url(url: str) -> bool:
+    """Accept direct file links, Google Sheets, and SharePoint/OneDrive Excel URLs."""
+    low = url.lower()
+    if not (low.startswith("http://") or low.startswith("https://")):
+        return False
+    if any(ext in low for ext in (".xlsx", ".xls", ".csv")):
+        return True
+    if "docs.google.com/spreadsheets" in low:
+        return True
+    # SharePoint Excel sharing links use :x:/ (no .xlsx in the URL path)
+    if "sharepoint.com" in low and ":x:" in low:
+        return True
+    # OneDrive Excel short / personal links
+    if "1drv.ms/x/" in low:
+        return True
+    if "onedrive.live.com" in low and ":x:" in low:
+        return True
+    return False
+
+
 class GSTFilingDocumentIn(BaseSchema):
 
     # =====================================================
@@ -595,18 +616,11 @@ class GSTFilingDocumentIn(BaseSchema):
     @field_validator("document_url")
     @classmethod
     def validate_excel_link(cls, v):
-        low = v.lower()
-        is_web_link = low.startswith("http://") or low.startswith("https://")
-        is_excel_like = (
-            ".xlsx" in low
-            or ".xls" in low
-            or ".csv" in low
-            or "docs.google.com/spreadsheets" in low
-        )
-        if not is_web_link:
-            raise ValueError("document_url must be an http/https link")
-        if not is_excel_like:
-            raise ValueError("document_url must be an Excel/CSV/Google Sheets link")
+        if not _is_allowed_spreadsheet_url(v):
+            raise ValueError(
+                "document_url must be an Excel/CSV/Google Sheets link "
+                "(including SharePoint/OneDrive Excel sharing URLs)"
+            )
         return v
 
     @field_validator("gstin", mode="before")
@@ -662,18 +676,11 @@ class GSTFilingDocumentEditIn(BaseSchema):
     def validate_excel_link(cls, v):
         if v is None:
             return v
-        low = v.lower()
-        is_web_link = low.startswith("http://") or low.startswith("https://")
-        is_excel_like = (
-            ".xlsx" in low
-            or ".xls" in low
-            or ".csv" in low
-            or "docs.google.com/spreadsheets" in low
-        )
-        if not is_web_link:
-            raise ValueError("document_url must be an http/https link")
-        if not is_excel_like:
-            raise ValueError("document_url must be an Excel/CSV/Google Sheets link")
+        if not _is_allowed_spreadsheet_url(v):
+            raise ValueError(
+                "document_url must be an Excel/CSV/Google Sheets link "
+                "(including SharePoint/OneDrive Excel sharing URLs)"
+            )
         return v
 
     # ---------------- VALIDATION ----------------

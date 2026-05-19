@@ -170,8 +170,68 @@ FIRST_PITCH_CONNECTED = {
 FINAL_PITCH_CONNECTED = {"SCHEDULED_PAYMENT", "CALL_BACK", "CALL_DONE"}
 FOLLOWUP_STATUSES = {"PENDING", "COMPLETED", "MISSED"}
 
+# Re-engage from NOT_INTERESTED when the client agrees to send documents.
+SEND_DOCS_REOPEN_FROM_STAGE = "NOT_INTERESTED"
+
+
+def _is_send_docs_reopen_from_not_interested(current_stage: str, call_status_code: str) -> bool:
+    stage = (current_stage or "").strip().upper()
+    status = (call_status_code or "").strip().upper()
+    return stage == SEND_DOCS_REOPEN_FROM_STAGE and status == "SEND_DOCS"
+
+
+def _closed_stage_blocks_call_update(current_stage: str, call_status_code: str) -> bool:
+    """SUBSCRIBED stays closed; NOT_INTERESTED allows SEND_DOCS to move back to pending data."""
+    stage = (current_stage or "").strip().upper()
+    if stage not in CLOSED_STAGES:
+        return False
+    if _is_send_docs_reopen_from_not_interested(stage, call_status_code):
+        return False
+    return True
+
+
+def _allows_first_pitch_call_from_stage(current_stage: str, call_status_code: str) -> bool:
+    stage = (current_stage or "").strip().upper()
+    if stage in FIRST_PITCH_ALLOWED_STAGES:
+        return True
+    return _is_send_docs_reopen_from_not_interested(stage, call_status_code)
+
+
 def _normalize_code(value: str) -> str:
     return value.strip().upper()
+
+
+_REMARKS_FILTER_ALIASES = {
+    "PAYMENT DONE SERVICE PENDING": [
+        "PAYMENT DONE SERVICE PENDING",
+        "Payment done but service pending",
+    ],
+}
+
+
+def _append_remarks_filter(where: list, params: list, remarks: Optional[str]) -> None:
+    """Match crm_leads.remarks (ILIKE). Known presets match legacy remark text variants too."""
+    if remarks is None:
+        return
+    raw = str(remarks).strip()
+    if not raw:
+        return
+    if len(raw) < 2:
+        raise _validation_error(
+            "Invalid remarks filter.",
+            {"remarks": "Must be at least 2 characters."},
+        )
+    key = raw.upper()
+    aliases = _REMARKS_FILTER_ALIASES.get(key)
+    if aliases:
+        parts = []
+        for alias in aliases:
+            params.append(f"%{alias}%")
+            parts.append(f"l.remarks ILIKE ${len(params)}")
+        where.append(f"({' OR '.join(parts)})")
+        return
+    params.append(f"%{raw}%")
+    where.append(f"l.remarks ILIKE ${len(params)}")
 
 
 def _validation_error(message: str, fields: Optional[dict] = None) -> HTTPException:
@@ -405,6 +465,19 @@ async def _validate_crm_call_against_mappings(
     entity_type: Optional[str] = None,
 ) -> None:
     et = _entity_type_query(entity_type)
+
+    # Re-open from NOT_INTERESTED: code path is fixed; DB mappings may omit this combo.
+    if _is_send_docs_reopen_from_not_interested(current_stage, call_status_code):
+        if call_type_code != "FIRST_PITCH_CALL":
+            raise _validation_error(
+                "Call type does not match re-open from not interested.",
+                {
+                    "call_type_code": (
+                        f"Expected FIRST_PITCH_CALL for SEND_DOCS from NOT_INTERESTED, got {call_type_code}."
+                    ),
+                },
+            )
+        return
     try:
         has_stage_map = await conn.fetchval(
             f"""
@@ -490,7 +563,9 @@ async def _validate_crm_call_against_mappings(
                 "Unsupported call type.",
                 {"call_type_code": call_type_code},
             )
-        if call_type_code == "FIRST_PITCH_CALL" and current_stage not in FIRST_PITCH_ALLOWED_STAGES:
+        if call_type_code == "FIRST_PITCH_CALL" and not _allows_first_pitch_call_from_stage(
+            current_stage, call_status_code
+        ):
             raise _validation_error(
                 "Invalid stage for first pitch.",
                 {"stage": f"{current_stage} is not allowed for FIRST_PITCH_CALL."},
@@ -680,6 +755,10 @@ async def _svc_filter_crm_leads(
     lead_type: Optional[str] = None,
     tag: Optional[str] = None,
     lead_source: Optional[str] = None,
+    remarks: Optional[str] = Query(
+        None,
+        description="Filter crm_leads.remarks (case-insensitive contains).",
+    ),
     is_active: Optional[bool] = None,
     followup_at_from: Optional[datetime] = Query(None, description="Inclusive lower bound on crm_leads.followup_at."),
     followup_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.followup_at."),
@@ -691,6 +770,7 @@ async def _svc_filter_crm_leads(
 ):
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
+    remarks_norm = remarks.strip() if isinstance(remarks, str) and remarks.strip() else None
     if stage and stages:
         raise _validation_error(
             "Provide either stage or stages.",
@@ -737,6 +817,7 @@ async def _svc_filter_crm_leads(
         lead_type=lead_type_norm,
         tag=tag_norm,
         lead_source=lead_source_norm,
+        remarks=remarks_norm,
         is_active=is_active,
         followup_at_from=followup_at_from,
         followup_at_to=followup_at_to,
@@ -796,6 +877,7 @@ async def _svc_filter_crm_leads(
                 if lead_source_norm:
                     params.append(lead_source_norm)
                     where.append(f"upper(trim(l.lead_source)) = ${len(params)}")
+                _append_remarks_filter(where, params, remarks_norm)
                 if is_active is not None:
                     params.append(is_active)
                     where.append(f"l.is_active = ${len(params)}")
@@ -2029,6 +2111,10 @@ async def filter_crm_leads(
     lead_type: Optional[str] = None,
     tag: Optional[str] = None,
     lead_source: Optional[str] = None,
+    remarks: Optional[str] = Query(
+        None,
+        description="Filter crm_leads.remarks (case-insensitive contains).",
+    ),
     is_active: Optional[bool] = None,
     followup_at_from: Optional[datetime] = Query(None),
     followup_at_to: Optional[datetime] = Query(None),
@@ -2048,6 +2134,7 @@ async def filter_crm_leads(
         lead_type=lead_type,
         tag=tag,
         lead_source=lead_source,
+        remarks=remarks,
         is_active=is_active,
         followup_at_from=followup_at_from,
         followup_at_to=followup_at_to,

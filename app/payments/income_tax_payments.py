@@ -39,7 +39,7 @@ async def create_income_tax_payment(
         try:
             entity_row = await conn.fetchrow(
                 f"""
-                SELECT id, customer_id, is_active
+                SELECT id, is_active
                 FROM {DB_SCHEMA}.income_tax
                 WHERE id = $1
                 """,
@@ -50,7 +50,8 @@ async def create_income_tax_payment(
             if not entity_row["is_active"]:
                 raise HTTPException(400, "Income tax record is inactive.")
 
-            customer_id = entity_row["customer_id"]
+            # income_tax has no customer_id column; optional on payment payload only.
+            customer_id = payload.customer_id
 
             already_paid = await conn.fetchrow(
                 f"""

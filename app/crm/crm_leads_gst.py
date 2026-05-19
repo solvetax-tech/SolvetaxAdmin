@@ -26,6 +26,7 @@ from app.crm.crm_leads_common import (
     _normalize_code,
     _performed_by_emp_id,
     _require_crm_row_context,
+    _closed_stage_blocks_call_update,
     _validate_call_config,
     _validate_crm_call_against_mappings,
     _validation_error,
@@ -50,7 +51,7 @@ def _transition_stage(current_stage: str, call_type_code: str, call_status_code:
     (incl. ``CALL_BACK``, ``NOT_INTERESTED``, no-connect, ``CALL_DONE``) leave ``stage`` unchanged.
 
     **FIRST_PITCH_CALL** (early funnel): ``CALL_BACK`` → ``FOLLOW_UP``; ``NOT_INTERESTED`` →
-    ``NOT_INTERESTED``; ``SEND_DOCS`` from FRESH_LEAD / FOLLOW_UP / INTERESTED →
+    ``NOT_INTERESTED``; ``SEND_DOCS`` from FRESH_LEAD / FOLLOW_UP / INTERESTED / NOT_INTERESTED →
     ``PENDING_REGISTRATION_DATA``; ``CONNECTED_AND_SCHEDULED`` → ``INTERESTED`` as before;
     ``CALL_NOT_*`` / ``CALL_DONE`` → no change.
     """
@@ -104,13 +105,13 @@ def _transition_stage(current_stage: str, call_type_code: str, call_status_code:
         return "NOT_INTERESTED"
 
     if call_status_code == "SEND_DOCS":
-        if current_stage in {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}:
+        if current_stage in {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED", "NOT_INTERESTED"}:
             return "PENDING_REGISTRATION_DATA"
         raise _validation_error(
             "Invalid stage for SEND_DOCS.",
             {
                 "stage": (
-                    f"SEND_DOCS applies only from FRESH_LEAD, FOLLOW_UP, or INTERESTED; "
+                    "SEND_DOCS applies only from FRESH_LEAD, FOLLOW_UP, INTERESTED, or NOT_INTERESTED; "
                     f"current is {current_stage}."
                 )
             },
@@ -145,7 +146,7 @@ async def _crm_apply_call_update(
         raise _validation_error("Inactive lead cannot be updated via call flow.")
 
     current_stage = lead["stage"]
-    if current_stage in CLOSED_STAGES:
+    if _closed_stage_blocks_call_update(current_stage, call_status_code):
         raise _validation_error(
             "Lead is closed; stage updates are not allowed.",
             {"stage": f"Current stage is {current_stage}."},
