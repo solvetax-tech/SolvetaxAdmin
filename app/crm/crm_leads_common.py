@@ -97,6 +97,47 @@ def _entity_type_query(value: Optional[str]) -> str:
     return v if v else DEFAULT_CRM_ENTITY_TYPE
 
 
+def _smart_board_stages(entity_type: Optional[str]) -> tuple[str, ...]:
+    et = _entity_type_query(entity_type)
+    if et == "INCOME_TAX":
+        return SMART_BOARD_STAGES_ITR
+    return SMART_BOARD_STAGES_GST
+
+
+def _smart_board_stage_order_sql(entity_type: Optional[str]) -> str:
+    """ORDER BY expression: PENDING_* → INTERESTED → FOLLOW_UP → FRESH_LEAD."""
+    stages = _smart_board_stages(entity_type)
+    cases = ", ".join(f"WHEN '{code}' THEN {i + 1}" for i, code in enumerate(stages))
+    return f"CASE upper(trim(l.stage)) {cases} ELSE 99 END"
+
+
+def _smart_board_call_priority_sql() -> str:
+    """
+    Within the same stage, sort by dial/connect pattern (lower = higher priority):
+      1) 0 attempted, 0 connected — never called
+      2) N attempted, 0 connected — dialed but never connected (1-0, 2-0, 3-0, …)
+      3) N attempted, N connected — equal counts (1-1, 2-2, …)
+      4) everything else (e.g. 3-2)
+    """
+    a = "COALESCE(l.call_attempted_count, 0)"
+    c = "COALESCE(l.call_connected_count, 0)"
+    return f"""CASE
+        WHEN {a} = 0 AND {c} = 0 THEN 1
+        WHEN {c} = 0 AND {a} > 0 THEN 2
+        WHEN {a} = {c} AND {a} > 0 THEN 3
+        ELSE 4
+    END"""
+
+
+def _smart_board_order_sql(entity_type: Optional[str]) -> str:
+    """Full Smart Board ORDER BY: stage tier, then call tier, then recency."""
+    return (
+        f"{_smart_board_stage_order_sql(entity_type)} ASC, "
+        f"{_smart_board_call_priority_sql()} ASC, "
+        "l.updated_at DESC NULLS LAST, l.id DESC"
+    )
+
+
 def _mapping_row_entity_type(row: asyncpg.Record) -> Optional[str]:
     if "entity_type" not in row.keys():
         return None
@@ -115,6 +156,20 @@ def _crm_mapping_type_precedence_sql(param_idx: int) -> str:
 FIRST_PITCH_ALLOWED_STAGES = {"FRESH_LEAD", "FOLLOW_UP", "INTERESTED"}
 FINAL_PITCH_ALLOWED_STAGES = {"GST_REGISTRATION_DONE", "SCHEDULED_PAYMENTS"}
 CLOSED_STAGES = {"SUBSCRIBED", "NOT_INTERESTED"}
+
+# Smart Board: show only these stages, highest priority first (see _smart_board_stage_order_sql).
+SMART_BOARD_STAGES_GST = (
+    "PENDING_REGISTRATION_DATA",
+    "INTERESTED",
+    "FOLLOW_UP",
+    "FRESH_LEAD",
+)
+SMART_BOARD_STAGES_ITR = (
+    "PENDING_ITR_DATA",
+    "INTERESTED",
+    "FOLLOW_UP",
+    "FRESH_LEAD",
+)
 # Fallback when DB has no configured rows yet; union of GST + ITR funnel stage codes used in this app.
 ALL_STAGES = (
     FIRST_PITCH_ALLOWED_STAGES
@@ -409,6 +464,18 @@ def _parse_optional_int(v):
     if s == "" or s.lower() in {"none", "null", "na", "nan"}:
         return None
     return int(s)
+
+
+def _csv_nullish_to_none(v):
+    """Treat spreadsheet empty cells and literal 'null' / 'none' as NULL."""
+    if v is None:
+        return None
+    if isinstance(v, float) and pd.isna(v):
+        return None
+    s = str(v).strip()
+    if not s or s.lower() in {"null", "none", "na", "nan"}:
+        return None
+    return v if not isinstance(v, str) else s
 
 
 async def _validate_call_config(
@@ -764,6 +831,13 @@ async def _svc_filter_crm_leads(
     followup_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.followup_at."),
     entity_type: Optional[str] = Query(None, description="Filter by crm_leads.entity_type (e.g. GST_REGISTRATION)."),
     entity_id: Optional[int] = Query(None, ge=1, description="Filter by crm_leads.entity_id."),
+    smart_board: bool = Query(
+        False,
+        description=(
+            "Smart Board mode: early-funnel stages only, ordered by stage priority then "
+            "call pattern (0-0, then N-0, then N-N, then other), then updated_at."
+        ),
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -771,6 +845,11 @@ async def _svc_filter_crm_leads(
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
     remarks_norm = remarks.strip() if isinstance(remarks, str) and remarks.strip() else None
+    if smart_board and (stage or stages):
+        raise _validation_error(
+            "Smart Board mode cannot combine with stage or stages filters.",
+            {"smart_board": "Remove stage/stages or set smart_board=false."},
+        )
     if stage and stages:
         raise _validation_error(
             "Provide either stage or stages.",
@@ -779,7 +858,9 @@ async def _svc_filter_crm_leads(
     if stage:
         stage = _normalize_code(stage)
     stages_norm: Optional[List[str]] = None
-    if stages:
+    if smart_board:
+        stages_norm = list(_smart_board_stages(entity_type))
+    elif stages:
         stages_norm = []
         for s in stages:
             if not isinstance(s, str) or not s.strip():
@@ -807,9 +888,10 @@ async def _svc_filter_crm_leads(
     lead_source_norm = _normalize_code(lead_source) if isinstance(lead_source, str) and lead_source.strip() else None
     et_filter = _entity_type_query(entity_type) if (entity_type is not None or entity_id is not None) else None
     cache_key = build_cache_key(
-        "crm:leads:filter",
+        "crm:leads:filter:v2",
         stage=stage,
         stages=stages_norm,
+        smart_board=smart_board,
         follow_up_status=follow_up_status,
         mobile=mobile,
         rm_id=rm_id,
@@ -904,6 +986,10 @@ async def _svc_filter_crm_leads(
                 count_params = list(params)
                 params.extend([limit, offset])
                 count_sql = f"SELECT COUNT(*) FROM {DB_SCHEMA}.crm_leads l WHERE {' AND '.join(where)}"
+                if smart_board:
+                    order_sql = _smart_board_order_sql(entity_type)
+                else:
+                    order_sql = "l.updated_at DESC NULLS LAST, l.id DESC"
                 list_sql = f"""
                     SELECT l.*,
                            erm.first_name AS rm_name,
@@ -912,7 +998,7 @@ async def _svc_filter_crm_leads(
                     LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
                     LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
                     WHERE {' AND '.join(where)}
-                    ORDER BY l.updated_at DESC, l.id DESC
+                    ORDER BY {order_sql}
                     LIMIT ${len(params)-1} OFFSET ${len(params)}
                 """
                 total = await conn.fetchval(count_sql, *count_params)
@@ -941,7 +1027,6 @@ async def _bulk_import_crm_leads(
     pool = await get_db_pool()
     request_id = generate_uuid()
     inserted_count = 0
-    updated_count = 0
     skipped_count = 0
     failed_count = 0
     errors = []
@@ -967,7 +1052,11 @@ async def _bulk_import_crm_leads(
                         lead_type = (_normalize_optional_upper(row.lead_type) or "")[:50]
                         tag_stripped = row.tag.strip() if isinstance(row.tag, str) else ""
                         tag = tag_stripped or None
-                        lead_source = (_normalize_optional_upper(row.lead_source) or "")[:100]
+                        lead_source = (
+                            (_normalize_optional_upper(row.lead_source) or "")[:100]
+                            if row.lead_source
+                            else None
+                        )
                         preferred_language = row.preferred_language.strip()[:50]
                         email = row.email
                         full_name_bulk = row.full_name
@@ -1007,45 +1096,8 @@ async def _bulk_import_crm_leads(
                         )
 
                         if existing:
-                            if payload.update_if_exists:
-                                if not payload.validate_only:
-                                    await conn.execute(
-                                        f"""
-                                        UPDATE {DB_SCHEMA}.crm_leads
-                                        SET full_name = COALESCE($1, full_name),
-                                            email = COALESCE($2, email),
-                                            preferred_language = COALESCE($3, preferred_language),
-                                            stage = $4,
-                                            followup_at = $5,
-                                            rm_id = $6,
-                                            op_id = $7,
-                                            remarks = $8,
-                                            is_active = COALESCE($9, is_active),
-                                            follow_up_status = COALESCE($10, follow_up_status),
-                                            lead_type = $11,
-                                            tag = $12,
-                                            lead_source = $13,
-                                            updated_at = NOW()
-                                        WHERE id = $14
-                                        """,
-                                        full_name_bulk,
-                                        email,
-                                        preferred_language,
-                                        stage,
-                                        row.followup_at,
-                                        row.rm_id,
-                                        row.op_id,
-                                        row.remarks,
-                                        row.is_active,
-                                        row.follow_up_status,
-                                        lead_type,
-                                        tag,
-                                        lead_source,
-                                        existing["id"],
-                                    )
-                                updated_count += 1
-                            else:
-                                skipped_count += 1
+                            # Duplicate (mobile + entity_type): skip — never update existing rows.
+                            skipped_count += 1
                         else:
                             if not payload.validate_only:
                                 await conn.fetchval(
@@ -1090,14 +1142,35 @@ async def _bulk_import_crm_leads(
                         errors.append({"row_number": i, "detail": str(ex)})
 
         await _invalidate_crm_cache()
+        total_rows = len(payload.rows)
+        new_leads = inserted_count
+        duplicates_found = skipped_count
         return {
-            "message": "CRM bulk import processed.",
+            "message": (
+                f"Successfully imported {new_leads} new lead(s). "
+                f"{duplicates_found} duplicate(s) skipped."
+            ),
             "request_id": request_id,
             "validate_only": payload.validate_only,
-            "inserted_count": inserted_count,
-            "updated_count": updated_count,
-            "skipped_count": skipped_count,
+            "total_rows": total_rows,
+            "new_leads": new_leads,
+            "duplicates_found": duplicates_found,
+            "duplicates_skipped": duplicates_found,
+            "duplicates_updated": 0,
             "failed_count": failed_count,
+            "inserted_count": inserted_count,
+            "updated_count": 0,
+            "skipped_count": skipped_count,
+            "success_count": new_leads,
+            "imported_count": new_leads,
+            "stats": {
+                "total_rows": total_rows,
+                "new_leads": new_leads,
+                "duplicates_found": duplicates_found,
+                "duplicates_skipped": duplicates_found,
+                "duplicates_updated": 0,
+                "failed": failed_count,
+            },
             "errors": errors,
         }
     except asyncpg.PostgresError:
@@ -1307,22 +1380,60 @@ async def _svc_execute_bulk_assign(
         raise HTTPException(status_code=403, detail="Only ADMIN can bulk assign leads.")
 
     unique_lead_ids = list(dict.fromkeys(payload.lead_ids))
-    unique_emp_ids = list(dict.fromkeys(payload.selected_employee_ids))
     pool = await get_db_pool()
+
+    if payload.selected_usernames:
+        unique_usernames = list(dict.fromkeys(u.strip() for u in payload.selected_usernames if u and str(u).strip()))
+        if not unique_usernames:
+            raise _validation_error(
+                "Invalid selected_usernames.",
+                {"selected_usernames": "At least one username is required."},
+            )
+        role_filter = payload.assignment_role
+    else:
+        unique_usernames = None
+        unique_emp_ids = list(dict.fromkeys(payload.selected_employee_ids or []))
 
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                valid_rows = await conn.fetch(
-                    f"SELECT emp_id FROM {DB_SCHEMA}.employees WHERE is_active = TRUE AND emp_id = ANY($1::bigint[])",
-                    unique_emp_ids,
-                )
-                valid_emp_ids = [int(r["emp_id"]) for r in valid_rows]
-                if len(valid_emp_ids) != len(unique_emp_ids):
-                    raise _validation_error(
-                        "Invalid selected_employee_ids.",
-                        {"selected_employee_ids": "One or more employees are invalid/inactive."},
+                if unique_usernames is not None:
+                    valid_rows = await conn.fetch(
+                        f"""
+                        SELECT emp_id, lower(username) AS username_key
+                          FROM {DB_SCHEMA}.employees
+                         WHERE is_active = TRUE
+                           AND role = $1
+                           AND lower(username) = ANY($2::text[])
+                        """,
+                        role_filter,
+                        [u.lower() for u in unique_usernames],
                     )
+                    username_to_emp = {r["username_key"]: int(r["emp_id"]) for r in valid_rows}
+                    valid_emp_ids = []
+                    for uname in unique_usernames:
+                        key = uname.lower()
+                        if key not in username_to_emp:
+                            raise _validation_error(
+                                "Invalid selected_usernames.",
+                                {
+                                    "selected_usernames": (
+                                        f"Unknown or inactive {role_filter} username: {uname}"
+                                    )
+                                },
+                            )
+                        valid_emp_ids.append(username_to_emp[key])
+                else:
+                    valid_rows = await conn.fetch(
+                        f"SELECT emp_id FROM {DB_SCHEMA}.employees WHERE is_active = TRUE AND emp_id = ANY($1::bigint[])",
+                        unique_emp_ids,
+                    )
+                    valid_emp_ids = [int(r["emp_id"]) for r in valid_rows]
+                    if len(valid_emp_ids) != len(unique_emp_ids):
+                        raise _validation_error(
+                            "Invalid selected_employee_ids.",
+                            {"selected_employee_ids": "One or more employees are invalid/inactive."},
+                        )
 
                 vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, 2)
                 vis_clause = f" AND {vis_sql}" if vis_sql else ""
@@ -1644,24 +1755,56 @@ async def _svc_get_crm_lead_stages(
 
 
 async def _svc_get_crm_lead_by_entity(
-    entity_id: int = Query(..., ge=1),
-    entity_type: Optional[str] = Query(None, description="Defaults to GST_REGISTRATION."),
+    entity_id: Optional[int] = Query(None, ge=1, description="crm_leads.entity_id."),
+    entity_type: Optional[str] = Query(
+        None,
+        description="crm_leads.entity_type (e.g. GST_REGISTRATION, INCOME_TAX). When entity_id is set and this is omitted, defaults to GST_REGISTRATION.",
+    ),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
+    """Return the latest active visible CRM lead matching optional entity_id / entity_type (at least one required)."""
     role, emp_id = _get_user_context(current_user)
     _require_crm_row_context(role, emp_id)
-    et = _entity_type_query(entity_type)
+    if entity_id is None and entity_type is None:
+        raise _validation_error(
+            "Provide entity_id and/or entity_type.",
+            {
+                "entity_id": "At least one of entity_id or entity_type is required.",
+                "entity_type": "At least one of entity_id or entity_type is required.",
+            },
+        )
+
+    et_for_cache = _entity_type_query(entity_type) if entity_type is not None else None
+    if entity_id is not None and entity_type is None:
+        et_for_cache = _entity_type_query(None)
     cache_key = build_cache_key(
-        "crm:lead:by_entity",
-        entity_type=et,
+        "crm:lead:by_entity:v2",
+        entity_type=et_for_cache,
         entity_id=entity_id,
         role=role,
         emp_id=emp_id,
     )
     pool = await get_db_pool()
+
     async def _load_crm_lead_by_entity():
         try:
             async with pool.acquire() as conn:
+                where = ["l.is_active = TRUE"]
+                params: list = []
+                if entity_id is not None:
+                    params.append(entity_id)
+                    where.append(f"l.entity_id = ${len(params)}")
+                    params.append(_entity_type_query(entity_type))
+                    where.append(f"l.entity_type = ${len(params)}")
+                elif entity_type is not None:
+                    params.append(_entity_type_query(entity_type))
+                    where.append(f"l.entity_type = ${len(params)}")
+
+                vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
+                if vis_sql:
+                    where.append(vis_sql)
+                    params.extend(vis_vals)
+
                 row = await conn.fetchrow(
                     f"""
                     SELECT l.*,
@@ -1670,20 +1813,15 @@ async def _svc_get_crm_lead_by_entity(
                     FROM {DB_SCHEMA}.crm_leads l
                     LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
                     LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
-                    WHERE l.entity_type = $1 AND l.entity_id = $2 AND l.is_active = TRUE
+                    WHERE {' AND '.join(where)}
                     ORDER BY l.updated_at DESC NULLS LAST, l.id DESC
                     LIMIT 1
                     """,
-                    et,
-                    entity_id,
+                    *params,
                 )
                 if not row:
-                    raise HTTPException(status_code=404, detail="CRM lead not found for this entity.")
-                lead_id = row["id"]
-                vis = await _fetch_crm_lead_visible(conn, role, emp_id, lead_id)
-                if not vis:
                     raise HTTPException(status_code=404, detail="CRM lead not found.")
-                return dict(vis)
+                return dict(row)
         except HTTPException:
             raise
         except asyncpg.PostgresError:
@@ -2120,6 +2258,7 @@ async def filter_crm_leads(
     followup_at_to: Optional[datetime] = Query(None),
     entity_type: str = Query(...),
     entity_id: Optional[int] = Query(None, ge=1),
+    smart_board: bool = Query(False, description="Smart Board stage filter and priority sort."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -2140,16 +2279,68 @@ async def filter_crm_leads(
         followup_at_to=followup_at_to,
         entity_type=entity_type,
         entity_id=entity_id,
+        smart_board=smart_board,
         limit=limit,
         offset=offset,
         current_user=current_user,
     )
 
 
-@router.post("/bulk-import/file", summary="Bulk import CRM leads by CSV/XLSX upload")
+@router.get(
+    "/smart-board",
+    summary="CRM Smart Board leads (priority stage order)",
+)
+async def smart_board_crm_leads(
+    follow_up_status: Optional[str] = None,
+    mobile: Optional[str] = None,
+    rm_id: Optional[int] = None,
+    op_id: Optional[int] = None,
+    lead_type: Optional[str] = None,
+    tag: Optional[str] = None,
+    lead_source: Optional[str] = None,
+    remarks: Optional[str] = Query(None),
+    is_active: Optional[bool] = True,
+    followup_at_from: Optional[datetime] = Query(None),
+    followup_at_to: Optional[datetime] = Query(None),
+    entity_type: str = Query(...),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """
+    Early-funnel leads only. Sort: stage priority, then call tier (0-0 → N-0 → N-N → other), then recency.
+    """
+    return await _svc_filter_crm_leads(
+        follow_up_status=follow_up_status,
+        mobile=mobile,
+        rm_id=rm_id,
+        op_id=op_id,
+        lead_type=lead_type,
+        tag=tag,
+        lead_source=lead_source,
+        remarks=remarks,
+        is_active=is_active,
+        followup_at_from=followup_at_from,
+        followup_at_to=followup_at_to,
+        entity_type=entity_type,
+        smart_board=True,
+        limit=limit,
+        offset=offset,
+        current_user=current_user,
+    )
+
+
+@router.post(
+    "/bulk-import/file",
+    summary="Bulk import CRM leads by CSV/XLSX upload",
+)
+@router.post(
+    "/import",
+    summary="Bulk import CRM leads by CSV/XLSX upload (CRM UI)",
+    include_in_schema=True,
+)
 async def bulk_import_crm_leads_file(
     file: UploadFile = File(...),
-    update_if_exists: bool = Form(True),
     validate_only: bool = Form(False),
     current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
 ):
@@ -2198,8 +2389,6 @@ async def bulk_import_crm_leads_file(
         "entity_type",
         "preferred_language",
         "lead_type",
-        "tag",
-        "lead_source",
     }
     missing = [c for c in required if c not in df.columns]
     if missing:
@@ -2249,7 +2438,9 @@ async def bulk_import_crm_leads_file(
             row["op_id"] = _parse_optional_int(row.get("op_id"))
             row["remarks"] = None if row.get("remarks") is None else str(row["remarks"]).strip()
             row["is_active"] = _parse_optional_bool(row.get("is_active"))
-            row["follow_up_status"] = None if row.get("follow_up_status") is None else str(row["follow_up_status"]).strip()
+            row["follow_up_status"] = _csv_nullish_to_none(row.get("follow_up_status"))
+            if row["follow_up_status"] is not None:
+                row["follow_up_status"] = str(row["follow_up_status"]).strip().upper()
             row["entity_type"] = None if row.get("entity_type") is None else str(row["entity_type"]).strip()
             row["preferred_language"] = (
                 None
@@ -2257,15 +2448,19 @@ async def bulk_import_crm_leads_file(
                 else str(row["preferred_language"]).strip()
             )
             row["entity_id"] = _parse_optional_int(row.get("entity_id"))
-            row["lead_type"] = None if row.get("lead_type") is None else str(row["lead_type"]).strip()
-            row["tag"] = None if row.get("tag") is None else str(row["tag"]).strip()
-            row["lead_source"] = None if row.get("lead_source") is None else str(row["lead_source"]).strip()
-            row["email"] = None if row.get("email") in (None, "") else str(row["email"]).strip().lower()
-            row["full_name"] = (
-                None
-                if row.get("full_name") in (None, "")
-                else str(row["full_name"]).strip()[:200]
-            )
+            row["lead_type"] = _csv_nullish_to_none(row.get("lead_type"))
+            if row["lead_type"] is not None:
+                row["lead_type"] = str(row["lead_type"]).strip()
+            row["tag"] = _csv_nullish_to_none(row.get("tag"))
+            if row["tag"] is not None:
+                row["tag"] = str(row["tag"]).strip()
+            row["lead_source"] = _csv_nullish_to_none(row.get("lead_source"))
+            if row["lead_source"] is not None:
+                row["lead_source"] = str(row["lead_source"]).strip()
+            email_raw = _csv_nullish_to_none(row.get("email"))
+            row["email"] = str(email_raw).strip().lower() if email_raw is not None else None
+            name_raw = _csv_nullish_to_none(row.get("full_name"))
+            row["full_name"] = str(name_raw).strip()[:200] if name_raw is not None else None
             rows.append(row)
         except Exception as ex:
             raise _validation_error(
@@ -2276,7 +2471,6 @@ async def bulk_import_crm_leads_file(
     try:
         payload = CRMBulkImportIn(
             rows=rows,
-            update_if_exists=update_if_exists,
             validate_only=validate_only,
         )
     except ValidationError as ex:
@@ -2383,10 +2577,16 @@ async def get_crm_lead_stages(
     return await _svc_get_crm_lead_stages(entity_type=entity_type, current_user=current_user)
 
 
-@router.get("/by-entity", summary="Get CRM lead by entity_type + entity_id (visible to caller)")
+@router.get(
+    "/by-entity",
+    summary="Get one CRM lead by optional entity_type and/or entity_id (visible to caller)",
+)
 async def get_crm_lead_by_entity(
-    entity_id: int = Query(..., ge=1),
-    entity_type: str = Query(...),
+    entity_id: Optional[int] = Query(None, ge=1, description="crm_leads.entity_id."),
+    entity_type: Optional[str] = Query(
+        None,
+        description="crm_leads.entity_type. When entity_id is omitted, returns the latest lead for this type.",
+    ),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     return await _svc_get_crm_lead_by_entity(

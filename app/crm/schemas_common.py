@@ -117,8 +117,8 @@ class CRMBulkImportRowIn(CRMBaseSchema):
     entity_type: CRM_MARKETING_ENTITY_TYPES
     preferred_language: str = Field(..., min_length=1, max_length=50)
     lead_type: str = Field(..., min_length=1, max_length=50)
-    tag: str = Field(..., min_length=1, max_length=100)
-    lead_source: str = Field(..., min_length=1, max_length=100)
+    tag: Optional[str] = Field(default=None, max_length=100)
+    lead_source: Optional[str] = Field(default=None, max_length=100)
     email: Optional[str] = Field(default=None, max_length=255)
     full_name: Optional[str] = Field(default=None, max_length=200)
 
@@ -145,23 +145,23 @@ class CRMBulkImportRowIn(CRMBaseSchema):
             return v.strip().upper()
         return v
 
-    @field_validator(
-        "preferred_language",
-        "lead_type",
-        "lead_source",
-        mode="before",
-    )
+    @field_validator("preferred_language", "lead_type", mode="before")
     @classmethod
-    def strip_nonempty_strings_upper_codes(cls, v):
+    def strip_required_strings(cls, v):
         if isinstance(v, str):
             return v.strip()
         return v
 
-    @field_validator("tag", mode="before")
+    @field_validator("tag", "lead_source", mode="before")
     @classmethod
-    def normalize_tag(cls, v):
+    def normalize_optional_tag_source(cls, v):
+        if v is None:
+            return None
         if isinstance(v, str):
-            return v.strip()
+            s = v.strip()
+            if not s or s.lower() in {"null", "none", "na", "nan"}:
+                return None
+            return s
         return v
 
     @field_validator("stage", mode="before")
@@ -172,6 +172,18 @@ class CRMBulkImportRowIn(CRMBaseSchema):
             return s.upper() if s else None
         return v
 
+    @field_validator("follow_up_status", mode="before")
+    @classmethod
+    def normalize_follow_up_status(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip().upper()
+            if not s or s in {"NULL", "NONE", "NA", "NAN"}:
+                return None
+            return s
+        return v
+
     @field_validator("email", mode="before")
     @classmethod
     def normalize_email_optional(cls, v):
@@ -179,7 +191,9 @@ class CRMBulkImportRowIn(CRMBaseSchema):
             return None
         if isinstance(v, str):
             s = v.strip().lower()
-            return s if s else None
+            if not s or s in {"null", "none", "na", "nan"}:
+                return None
+            return s
         return v
 
     @field_validator("full_name", mode="before")
@@ -189,7 +203,9 @@ class CRMBulkImportRowIn(CRMBaseSchema):
             return None
         if isinstance(v, str):
             s = v.strip()
-            return s[:200] if s else None
+            if not s or s.lower() in {"null", "none", "na", "nan"}:
+                return None
+            return s[:200]
         return v
 
     @model_validator(mode="after")
@@ -201,15 +217,37 @@ class CRMBulkImportRowIn(CRMBaseSchema):
 
 class CRMBulkImportIn(CRMBaseSchema):
     rows: List[CRMBulkImportRowIn] = Field(..., min_length=1, max_length=5000)
-    update_if_exists: bool = True
     validate_only: bool = False
+
+
+class CRMBulkImportStatsOut(CRMBaseSchema):
+    """Summary returned by CSV/XLSX bulk import (``POST /crm/leads/import``)."""
+
+    total_rows: int
+    new_leads: int
+    duplicates_found: int
+    duplicates_skipped: int
+    duplicates_updated: int
+    failed_count: int
+    inserted_count: int
+    updated_count: int
+    skipped_count: int
 
 
 class CRMBulkAssignExecuteIn(CRMBaseSchema):
     lead_ids: List[int] = Field(..., min_length=1, max_length=10000)
-    selected_employee_ids: List[int] = Field(..., min_length=1, max_length=500)
+    selected_employee_ids: Optional[List[int]] = Field(default=None, min_length=1, max_length=500)
+    selected_usernames: Optional[List[str]] = Field(default=None, min_length=1, max_length=500)
     assignment_role: Literal["RM", "OP"]
     per_employee_limit: Optional[int] = Field(default=None, ge=1, le=10000)
+
+    @model_validator(mode="after")
+    def _require_assignees(self):
+        has_ids = bool(self.selected_employee_ids)
+        has_usernames = bool(self.selected_usernames)
+        if has_ids == has_usernames:
+            raise ValueError("Provide exactly one of selected_employee_ids or selected_usernames.")
+        return self
 
 
 class CRMUIStagePitchItem(CRMBaseSchema):

@@ -1,4 +1,5 @@
 from pydantic import (
+    AliasChoices,
     BaseModel,
     EmailStr,
     Field,
@@ -30,23 +31,6 @@ class GSTConfigOut(BaseModel):
     sort_order: int
 
 
-class CustomerSnapshotForGstOut(BaseModel):
-    """Customer fields from `customers` for GST registration flows (`customers.customer_id`)."""
-
-    customer_id: int
-    business_name: Optional[str] = None
-    business_type: Optional[str] = None
-    state: Optional[str] = None
-    language: Optional[str] = None
-    op_id: Optional[int] = None
-    rm_id: Optional[int] = None
-    rm_name: Optional[str] = None
-    op_name: Optional[str] = None
-    mobile: Optional[str] = None
-
-    model_config = {"from_attributes": True}
-
-
 class GSTRegistrationIn(BaseModel):
 
     # ----------------------------
@@ -60,7 +44,9 @@ class GSTRegistrationIn(BaseModel):
     username: Optional[Annotated[str, Field(min_length=0, max_length=100)]] = None
     password: Optional[Annotated[str, Field(min_length=0, max_length=128)]] = None
 
-    pan: Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
+    pan: Optional[
+        Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]
+    ] = None
     gstin: Optional[
         Annotated[str, Field(
             pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$"
@@ -76,8 +62,8 @@ class GSTRegistrationIn(BaseModel):
     business_type: Optional[str] = Field(None, max_length=100)
     state: Annotated[str, Field(..., max_length=100)]
     language: Optional[str] = Field(None, max_length=50)
-    referral_id: Optional[int] = Field(None, gt=0)
-    referral_entity: Optional[str] = Field(None, max_length=100)
+    client_name: Optional[str] = Field(None, max_length=200)
+    referral_phone_number: Optional[str] = Field(None, pattern=r"^\d{10}$")
     turnover_details: Annotated[str, Field(..., max_length=50)]
 
     # ----------------------------
@@ -164,7 +150,6 @@ class GSTRegistrationIn(BaseModel):
         "business_type",
         "state",
         "language",
-        "referral_entity",
         "turnover_details",
         mode="before",
     )
@@ -184,11 +169,24 @@ class GSTRegistrationIn(BaseModel):
             return v.strip().lower()
         return v
 
-    @field_validator("mobile", mode="before")
+    @field_validator("mobile", "referral_phone_number", mode="before")
     @classmethod
     def normalize_mobile(cls, v):
-        if v:
-            return v.strip()
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
+    @field_validator("client_name", mode="before")
+    @classmethod
+    def normalize_client_name(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
         return v
 
     @field_validator("filing_preference", mode="before")
@@ -219,6 +217,68 @@ class GSTRegistrationIn(BaseModel):
             )
 
         return self
+
+    @model_validator(mode="after")
+    def validate_pan_gstin_match(self):
+        pan = self.pan
+        gstin = self.gstin
+        if pan and gstin and pan != gstin[2:12]:
+            raise ValueError("PAN does not match GSTIN.")
+        return self
+
+
+class GSTRegistrationLeadCreateIn(BaseModel):
+    """
+    GST intake: creates gst_registration and links CRM.
+
+    - With ``crm_lead_id``: creates gst_registration only and sets that lead's ``entity_id``.
+    - Without ``crm_lead_id``: creates gst_registration + new crm_leads row (standalone intake).
+
+    Push from CRM: ``{ "crm_lead_id": 45 }``. Extra CRM fields are ignored.
+    """
+
+    model_config = {
+        "extra": "ignore",
+        "str_strip_whitespace": True,
+        "validate_assignment": True,
+    }
+
+    crm_lead_id: Optional[int] = Field(
+        None,
+        gt=0,
+        validation_alias=AliasChoices("crm_lead_id", "lead_id", "id"),
+        description="Existing CRM GST lead to link (Push from CRM table).",
+    )
+    mobile: Optional[str] = Field(None, pattern=r"^\d{10}$")
+    full_name: Optional[str] = Field(None, min_length=2, max_length=200)
+    email: Optional[EmailStr] = None
+    preferred_language: Optional[str] = Field(None, max_length=50)
+    rm_id: Optional[int] = Field(None, gt=0)
+    op_id: Optional[int] = Field(None, gt=0)
+    remarks: Optional[str] = None
+
+    @model_validator(mode="after")
+    def require_identity_fields(self):
+        if self.crm_lead_id is None:
+            if not self.mobile:
+                raise ValueError("mobile is required when crm_lead_id is not provided")
+            if not self.full_name:
+                raise ValueError("full_name is required when crm_lead_id is not provided")
+        return self
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def normalize_full_name(cls, v):
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @field_validator("preferred_language", mode="before")
+    @classmethod
+    def normalize_preferred_language(cls, v):
+        return v.strip().upper() if isinstance(v, str) and v.strip() else None
+
+
 class GSTRegistrationEditIn(BaseModel):
 
     customer_id: Optional[int] = Field(
@@ -247,8 +307,8 @@ class GSTRegistrationEditIn(BaseModel):
     business_type: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=100)
     language: Optional[str] = Field(None, max_length=50)
-    referral_id: Optional[int] = Field(None, gt=0)
-    referral_entity: Optional[str] = Field(None, max_length=100)
+    client_name: Optional[str] = Field(None, max_length=200)
+    referral_phone_number: Optional[str] = Field(None, pattern=r"^\d{10}$")
     turnover_details: Optional[str] = Field(None, max_length=50)
 
     registration_status: Optional[
@@ -321,7 +381,6 @@ class GSTRegistrationEditIn(BaseModel):
         "business_type",
         "state",
         "language",
-        "referral_entity",
         "turnover_details",
         mode="before",
     )
@@ -346,9 +405,21 @@ class GSTRegistrationEditIn(BaseModel):
             return v.lower()
         return v
 
-    @field_validator("mobile", mode="before")
+    @field_validator("mobile", "referral_phone_number", mode="before")
     @classmethod
     def normalize_mobile(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            return v
+        return v
+
+    @field_validator("client_name", mode="before")
+    @classmethod
+    def normalize_client_name_edit(cls, v):
         if v is None:
             return None
         if isinstance(v, str):
@@ -386,6 +457,16 @@ class GSTRegistrationEditIn(BaseModel):
             )
 
         return self
+
+    @model_validator(mode="after")
+    def validate_pan_gstin_match(self):
+        pan = self.pan
+        gstin = self.gstin
+        if pan and gstin and pan != gstin[2:12]:
+            raise ValueError("PAN does not match GSTIN.")
+        return self
+
+
 # =========================================================
 # GST Registration - Response
 # =========================================================
@@ -395,15 +476,15 @@ class GSTRegistrationOut(BaseSchema):
     customer_id: Optional[int] = None
     gstin: Optional[str]
     username: Optional[str] = None
-    pan: str
+    pan: Optional[str] = None
     mobile: Optional[str] = None
     registration_type: Optional[str]
     ownership_category: Optional[str]
     business_type: Optional[str]
     state: Optional[str]
     language: Optional[str]
-    referral_id: Optional[int]
-    referral_entity: Optional[str]
+    client_name: Optional[str] = None
+    referral_phone_number: Optional[str] = None
     turnover_details: Optional[str]
     registration_status: Optional[str]
     suspension_reason: Optional[str]

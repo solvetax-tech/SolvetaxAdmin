@@ -6,9 +6,17 @@ from datetime import datetime, timezone
 from app.gst_registration.schemas import (
     GSTRegistrationIn,
     GSTRegistrationEditIn,
-    CustomerSnapshotForGstOut,
+    GSTRegistrationLeadCreateIn,
 )
-from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility, build_customer_visibility
+from app.gst_registration.gst_registration_helpers import (
+    CRM_LEAD_STAGE_PENDING_REGISTRATION_DATA,
+    DEFAULT_GST_INTAKE_OWNERSHIP_CATEGORY,
+    DEFAULT_GST_INTAKE_REGISTRATION_TYPE,
+    DEFAULT_GST_INTAKE_TURNOVER_DETAILS,
+    GST_CRM_ENTITY_TYPE,
+)
+from app.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
+from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
 from app.redis_cache import (
@@ -43,10 +51,6 @@ def _gst_filter_tag() -> str:
     return "gst_registration:filter:index"
 
 
-def _gst_customer_fields_tag(customer_id: int) -> str:
-    return f"gst_registration:customer_fields:index:{customer_id}"
-
-
 def _gst_detail_tag(registration_id: int) -> str:
     return f"gst_registration:detail:index:{registration_id}"
 
@@ -56,8 +60,6 @@ async def _invalidate_gst_registration_cache(
     registration_id: Optional[int] = None,
 ) -> None:
     await redis_invalidate_tag(_gst_filter_tag())
-    if customer_id is not None:
-        await redis_invalidate_tag(_gst_customer_fields_tag(customer_id))
     if registration_id is not None:
         await redis_invalidate_tag(_gst_detail_tag(registration_id))
 
@@ -153,6 +155,7 @@ async def create_gst_registration(
                     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", secondary_email_value):
                         field_errors["secondary_email"] = "Invalid secondary email format."
 
+                # PAN ↔ GSTIN: validate only when both are provided (NULL either side is allowed).
                 if gstin_value and pan_value:
                     gstin_pan = gstin_value[2:12]
                     if gstin_pan != pan_value:
@@ -265,8 +268,8 @@ async def create_gst_registration(
                         secondary_email,
                         is_filing_needed,
                         filing_preference,
-                        referral_id,
-                        referral_entity,
+                        client_name,
+                        referral_phone_number,
                         created_at,
                         updated_at
                     )
@@ -305,8 +308,8 @@ async def create_gst_registration(
                     secondary_email_value,
                     payload.is_filing_needed,
                     getattr(payload, "filing_preference", None),
-                    payload.referral_id,
-                    payload.referral_entity,
+                    payload.client_name,
+                    payload.referral_phone_number,
                     now,
                     now,
                 )
@@ -419,6 +422,448 @@ async def create_gst_registration(
         except Exception:
             log.exception("Unexpected error during GST registration create")
             raise HTTPException(500, "Internal server error.")
+
+
+def _raise_gst_validation_error(
+    fields: dict,
+    status_code: int = 400,
+    message: str = "Validation failed",
+) -> None:
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "type": "validation_error",
+                "message": message,
+                "fields": fields,
+            }
+        },
+    )
+
+
+async def _find_active_gst_by_mobile(
+    conn: asyncpg.Connection,
+    mobile: str,
+) -> Optional[int]:
+    return await conn.fetchval(
+        f"""
+        SELECT id
+        FROM {DB_SCHEMA}.gst_registration
+        WHERE is_active = TRUE
+          AND btrim(mobile) = btrim($1::text)
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        mobile.strip(),
+    )
+
+
+# -------------------------------------------------------------------
+# CREATE GST REGISTRATION + LINK CRM LEAD (PUSH)
+# -------------------------------------------------------------------
+@router.post(
+    "/lead",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create GST registration and linked CRM GST lead",
+    description=(
+        "Creates a minimal gst_registration row and links crm_leads.entity_id "
+        "(GST funnel / push from PENDING_REGISTRATION_DATA)."
+    ),
+)
+async def create_gst_registration_lead(
+    payload: GSTRegistrationLeadCreateIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    request_id = str(uuid.uuid4())
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else ""
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "create_gst_registration_lead"},
+    )
+
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                link_existing_lead = payload.crm_lead_id is not None
+                crm_lead_row = None
+
+                if link_existing_lead:
+                    crm_lead_row = await conn.fetchrow(
+                        f"""
+                        SELECT *
+                        FROM {DB_SCHEMA}.crm_leads
+                        WHERE id = $1
+                        FOR UPDATE
+                        """,
+                        payload.crm_lead_id,
+                    )
+                    if not crm_lead_row:
+                        raise HTTPException(status_code=404, detail="CRM lead not found.")
+                    if not crm_lead_row["is_active"]:
+                        _raise_gst_validation_error(
+                            {"crm_lead_id": "Cannot push an inactive CRM lead."},
+                            status_code=400,
+                        )
+                    lead_et = (crm_lead_row.get("entity_type") or "").strip().upper()
+                    if lead_et and lead_et != GST_CRM_ENTITY_TYPE:
+                        _raise_gst_validation_error(
+                            {
+                                "crm_lead_id": (
+                                    f"Lead entity_type must be {GST_CRM_ENTITY_TYPE}, "
+                                    f"not {lead_et}."
+                                )
+                            },
+                            status_code=400,
+                        )
+                    lead_stage = (crm_lead_row.get("stage") or "").strip().upper()
+                    if lead_stage != CRM_LEAD_STAGE_PENDING_REGISTRATION_DATA:
+                        _raise_gst_validation_error(
+                            {
+                                "stage": (
+                                    f"Push is only allowed from stage "
+                                    f"{CRM_LEAD_STAGE_PENDING_REGISTRATION_DATA}; "
+                                    f"current stage is {lead_stage or 'unset'}."
+                                )
+                            },
+                            status_code=400,
+                        )
+                    if crm_lead_row.get("entity_id") is not None:
+                        _raise_gst_validation_error(
+                            {
+                                "crm_lead_id": (
+                                    f"Lead is already linked to GST registration id "
+                                    f"{crm_lead_row['entity_id']}."
+                                )
+                            },
+                            status_code=409,
+                            message="This CRM lead was already pushed to GST registration.",
+                        )
+
+                mobile = (payload.mobile or (crm_lead_row or {}).get("mobile") or "").strip()
+                if not mobile:
+                    _raise_gst_validation_error(
+                        {"mobile": "Mobile number is required."},
+                        status_code=400,
+                    )
+                if not re.fullmatch(r"[0-9]{10}", mobile):
+                    _raise_gst_validation_error(
+                        {"mobile": "Invalid mobile number format."},
+                        status_code=400,
+                    )
+
+                # CRM full_name → gst_registration.client_name (not business_name)
+                raw_name = payload.full_name or (crm_lead_row or {}).get("full_name") or mobile
+                client_name_val = str(raw_name).strip()[:200]
+                if len(client_name_val) < 2:
+                    client_name_val = mobile[:200]
+
+                language = payload.preferred_language or (crm_lead_row or {}).get(
+                    "preferred_language"
+                )
+                if isinstance(language, str):
+                    language = language.strip().upper() or None
+
+                email = payload.email
+                if email is None and crm_lead_row is not None:
+                    email = crm_lead_row.get("email")
+                if isinstance(email, str):
+                    email = email.strip().lower() or None
+
+                rm_id = payload.rm_id
+                if rm_id is None and crm_lead_row is not None:
+                    rm_id = crm_lead_row.get("rm_id")
+                if role_norm == "RM" and rm_id is None:
+                    rm_id = emp_id
+
+                created_by_val = payload.op_id
+                if created_by_val is None and crm_lead_row is not None:
+                    created_by_val = crm_lead_row.get("op_id")
+                if role_norm == "OP" and created_by_val is None:
+                    created_by_val = emp_id
+
+                if rm_id is None:
+                    _raise_gst_validation_error(
+                        {"rm_id": "rm_id is required (or sign in as RM to default to yourself)."},
+                        status_code=400,
+                    )
+
+                default_remarks = (
+                    "Pushed from CRM GST lead."
+                    if link_existing_lead
+                    else "Created from GST lead intake."
+                )
+                gst_remarks = payload.remarks or default_remarks
+
+                existing_gst_id = await _find_active_gst_by_mobile(conn, mobile)
+                if existing_gst_id is not None:
+                    _raise_gst_validation_error(
+                        {
+                            "mobile": (
+                                f"A GST registration already exists for this mobile "
+                                f"(id={existing_gst_id}). Open that record instead."
+                            )
+                        },
+                        status_code=409,
+                        message="GST registration already exists for this mobile.",
+                    )
+
+                if not link_existing_lead:
+                    existing_lead = await conn.fetchrow(
+                        f"""
+                        SELECT id, entity_id
+                        FROM {DB_SCHEMA}.crm_leads
+                        WHERE is_active = TRUE
+                          AND btrim(mobile) = btrim($1::text)
+                          AND upper(btrim(entity_type)) = $2
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        mobile,
+                        GST_CRM_ENTITY_TYPE,
+                    )
+                    if existing_lead:
+                        _raise_gst_validation_error(
+                            {
+                                "mobile": (
+                                    f"An active CRM GST lead already exists for this mobile "
+                                    f"(lead id={existing_lead['id']})."
+                                )
+                            },
+                            status_code=409,
+                            message="CRM GST lead already exists for this mobile.",
+                        )
+
+                    valid_stages = await _fetch_valid_stage_codes(conn, GST_CRM_ENTITY_TYPE)
+                    intake_stage = "FRESH_LEAD"
+                    if valid_stages and intake_stage not in valid_stages:
+                        _raise_gst_validation_error(
+                            {
+                                "stage": (
+                                    f"{intake_stage} must be configured for "
+                                    f"{GST_CRM_ENTITY_TYPE} in crm_lead_stages."
+                                )
+                            },
+                            status_code=400,
+                        )
+
+                gst_row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.gst_registration (
+                        customer_id,
+                        gstin,
+                        username,
+                        {_gst_reg_sql_col("password")},
+                        pan,
+                        mobile,
+                        {_gst_reg_sql_col("language")},
+                        state,
+                        business_name,
+                        registration_type,
+                        ownership_category,
+                        business_type,
+                        turnover_details,
+                        registration_status,
+                        suspension_reason,
+                        cancellation_reason,
+                        approved_at,
+                        is_rcm_applicable,
+                        is_active,
+                        created_by,
+                        rm_id,
+                        email,
+                        secondary_email,
+                        is_filing_needed,
+                        filing_preference,
+                        client_name,
+                        referral_phone_number,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        NULL, NULL, NULL, NULL, NULL, $1, $2, NULL, $3,
+                        $4, $5, NULL, $6, 'DRAFT',
+                        NULL, NULL, NULL,
+                        FALSE, TRUE, $7, $8, $9, NULL,
+                        FALSE, NULL, $10, NULL,
+                        $11, $11
+                    )
+                    RETURNING *
+                    """,
+                    mobile,
+                    language,
+                    None,  # business_name filled later during registration
+                    DEFAULT_GST_INTAKE_REGISTRATION_TYPE,
+                    DEFAULT_GST_INTAKE_OWNERSHIP_CATEGORY,
+                    DEFAULT_GST_INTAKE_TURNOVER_DETAILS,
+                    created_by_val,
+                    rm_id,
+                    email,
+                    client_name_val,
+                    now,
+                )
+                if not gst_row or not gst_row["is_active"]:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="GST registration was not created as active.",
+                    )
+
+                gst_id = int(gst_row["id"])
+
+                if link_existing_lead:
+                    lead_row = await conn.fetchrow(
+                        f"""
+                        UPDATE {DB_SCHEMA}.crm_leads
+                        SET entity_id = $1,
+                            full_name = COALESCE(NULLIF(btrim($2::text), ''), full_name),
+                            email = COALESCE($3, email),
+                            preferred_language = COALESCE($4, preferred_language),
+                            rm_id = COALESCE($5, rm_id),
+                            op_id = COALESCE($6, op_id),
+                            remarks = COALESCE(NULLIF(btrim($7::text), ''), remarks),
+                            updated_at = NOW()
+                        WHERE id = $8
+                          AND is_active = TRUE
+                        RETURNING *
+                        """,
+                        gst_id,
+                        client_name_val,
+                        email,
+                        language,
+                        rm_id,
+                        created_by_val,
+                        gst_remarks,
+                        payload.crm_lead_id,
+                    )
+                    if not lead_row:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="CRM lead could not be linked to GST registration.",
+                        )
+                else:
+                    lead_row = await conn.fetchrow(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.crm_leads (
+                            mobile,
+                            full_name,
+                            email,
+                            entity_id,
+                            entity_type,
+                            preferred_language,
+                            stage,
+                            follow_up_status,
+                            rm_id,
+                            op_id,
+                            remarks,
+                            is_active,
+                            lead_type,
+                            tag,
+                            lead_source,
+                            created_at,
+                            updated_at
+                        ) VALUES (
+                            $1, $2, $3, $4, $5, $6,
+                            'FRESH_LEAD',
+                            'PENDING',
+                            $7, $8,
+                            $9,
+                            TRUE,
+                            NULL, NULL, NULL,
+                            NOW(), NOW()
+                        )
+                        RETURNING *
+                        """,
+                        mobile,
+                        client_name_val[:200],
+                        email,
+                        gst_id,
+                        GST_CRM_ENTITY_TYPE,
+                        language,
+                        rm_id,
+                        created_by_val,
+                        gst_remarks,
+                    )
+                    if not lead_row or not lead_row["is_active"]:
+                        raise HTTPException(
+                            status_code=500,
+                            detail="CRM lead was not created as active.",
+                        )
+
+                await conn.execute(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.versions (
+                        emp_id,
+                        entity_type,
+                        entity_id,
+                        customer_id,
+                        action,
+                        json,
+                        updated_json
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                    """,
+                    emp_id,
+                    "GST_REGISTRATION",
+                    gst_id,
+                    None,
+                    "CREATE",
+                    json.dumps(dict(gst_row), default=str),
+                    None,
+                )
+
+            lead_id = int(lead_row["id"])
+            await _invalidate_gst_registration_cache(None, gst_id)
+            await _invalidate_crm_cache(lead_id)
+
+            msg = (
+                "GST registration linked to CRM lead successfully."
+                if link_existing_lead
+                else "GST registration and CRM lead created successfully."
+            )
+            return {
+                "message": msg,
+                "request_id": request_id,
+                "gst_registration_id": gst_id,
+                "crm_lead_id": lead_id,
+                "data": dict(gst_row),
+                "lead": dict(lead_row),
+            }
+        except HTTPException:
+            raise
+        except asyncpg.exceptions.UniqueViolationError as e:
+            constraint = getattr(e, "constraint_name", "")
+            if "crm" in (constraint or "").lower():
+                _raise_gst_validation_error(
+                    {"mobile": "CRM lead unique constraint violated for this mobile."},
+                    status_code=409,
+                    message="CRM GST lead already exists.",
+                )
+            _raise_gst_validation_error(
+                {"mobile": "Duplicate GST registration for this mobile."},
+                status_code=409,
+                message="GST registration already exists.",
+            )
+        except asyncpg.exceptions.ForeignKeyViolationError:
+            _raise_gst_validation_error(
+                {"non_field_error": "Invalid rm_id or op_id reference."},
+                status_code=400,
+            )
+        except asyncpg.PostgresError:
+            log.exception("Database error while creating GST registration lead")
+            raise HTTPException(status_code=500, detail="Database error.")
+
+
 # -------------------------------------------------------------------
 # FILTER GST REGISTRATIONS (ENTERPRISE PRODUCTION READY)
 # -------------------------------------------------------------------
@@ -451,8 +896,8 @@ async def list_gst_registrations(
     ownership_category: Optional[str] = None,
     state: Optional[str] = None,
     language: Optional[str] = None,
-    referral_id: Optional[int] = None,
-    referral_entity: Optional[str] = None,
+    client_name: Optional[str] = None,
+    referral_phone_number: Optional[str] = None,
     filing_preference: Optional[str] = None,  # ✅ ADDED
     has_service: Optional[bool] = None,       # ✅ ADDED
     is_active: Optional[bool] = None,
@@ -526,8 +971,9 @@ async def list_gst_registrations(
     ownership_category_norm = ownership_category.strip().upper() if ownership_category and ownership_category.strip() else None
     state_norm = state.strip().upper() if state and state.strip() else None
     language_norm = language.strip().upper() if language and language.strip() else None
-    referral_entity_norm = (
-        referral_entity.strip().upper() if referral_entity and referral_entity.strip() else None
+    client_name_clean = client_name.strip() if client_name and client_name.strip() else None
+    referral_phone_clean = (
+        referral_phone_number.strip() if referral_phone_number and referral_phone_number.strip() else None
     )
     filing_preference_norm = filing_preference.strip().upper() if filing_preference and filing_preference.strip() else None
     cache_key = build_cache_key(
@@ -551,8 +997,8 @@ async def list_gst_registrations(
         ownership_category=ownership_category_norm,
         state=state_norm,
         language=language_norm,
-        referral_id=referral_id,
-        referral_entity=referral_entity_norm,
+        client_name=client_name_clean,
+        referral_phone_number=referral_phone_clean,
         filing_preference=filing_preference_norm,
         has_service=has_service,
         is_active=is_active,
@@ -672,14 +1118,14 @@ async def list_gst_registrations(
             values.append(language_norm)
             param_index += 1
 
-        if referral_id is not None:
-            conditions.append(f"g.referral_id = ${param_index}")
-            values.append(referral_id)
+        if client_name_clean:
+            conditions.append(f"lower(g.client_name) LIKE ${param_index}")
+            values.append(f"%{client_name_clean.lower()}%")
             param_index += 1
 
-        if referral_entity_norm:
-            conditions.append(f"g.referral_entity = ${param_index}")
-            values.append(referral_entity_norm)
+        if referral_phone_clean:
+            conditions.append(f"g.referral_phone_number = ${param_index}")
+            values.append(referral_phone_clean)
             param_index += 1
 
         if filing_preference_norm:
@@ -948,119 +1394,6 @@ async def get_gst_registration_full(
 
 
 # -------------------------------------------------------------------
-# CUSTOMER SNAPSHOT FOR GST (from customers.customer_id)
-# -------------------------------------------------------------------
-@router.get(
-    "/customer/{customer_id}/fields",
-    response_model=CustomerSnapshotForGstOut,
-    summary="Get customer fields for GST registration",
-    responses={
-        200: {"description": "Customer fields returned."},
-        400: {"description": "Customer inactive."},
-        404: {"description": "Customer not found or not visible for current user."},
-        500: {"description": "Database or internal error."},
-    },
-)
-async def get_customer_fields_for_gst(
-    customer_id: int,
-    current_user=Depends(require_permission("EMPLOYEE", "READ")),
-):
-    """
-    Returns `business_name`, `business_type`, `state`, `language`, `op_id`, `rm_id`,
-    `rm_name`, `op_name`, `mobile`
-    from `customers` where `customers.customer_id` = `customer_id`.
-    Visibility matches customer list (RM/OP/manager scoping).
-    """
-    request_id = str(uuid.uuid4())
-    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
-    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
-    role_norm = str(role).strip().upper() if role is not None else ""
-
-    log = logging.LoggerAdapter(
-        logger,
-        {"request_id": request_id, "emp_id": emp_id, "api": "get_customer_fields_for_gst"},
-    )
-
-    try:
-        pool = await get_db_pool()
-    except Exception:
-        log.exception("Database pool acquisition failed")
-        raise HTTPException(status_code=500, detail="Database connection error.")
-
-    vis_sql, vis_vals, _next_idx = build_customer_visibility(role_norm, emp_id, 2, DB_SCHEMA)
-    values = [customer_id]
-    where_extra = ""
-    if vis_sql:
-        where_extra = f" AND ({vis_sql})"
-        values.extend(vis_vals)
-
-    sql = f"""
-        SELECT c.customer_id,
-               c.business_name,
-               c.business_type,
-               c.state,
-               c.language,
-               c.op_id,
-               c.rm_id,
-               c.mobile,
-               c.is_active,
-               e_rm.first_name AS rm_name,
-               e_op.first_name AS op_name
-        FROM {DB_SCHEMA}.customers c
-        LEFT JOIN {DB_SCHEMA}.employees e_rm ON e_rm.emp_id = c.rm_id
-        LEFT JOIN {DB_SCHEMA}.employees e_op ON e_op.emp_id = c.op_id
-        WHERE c.customer_id = $1
-        {where_extra}
-        LIMIT 1
-    """
-    cache_key = build_cache_key(
-        "gst_registration:customer_fields",
-        customer_id=customer_id,
-        role=role_norm,
-        emp_id=emp_id,
-    )
-
-    async def _load_customer_fields_for_gst():
-        try:
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow(sql, *values)
-        except asyncpg.PostgresError:
-            log.exception("Database error fetching customer snapshot for GST")
-            raise HTTPException(status_code=500, detail="Database error.")
-
-        if not row:
-            raise HTTPException(
-                status_code=404,
-                detail="Customer not found or not accessible.",
-            )
-
-        if not row["is_active"]:
-            raise HTTPException(status_code=400, detail="Customer is inactive.")
-
-        return {
-            "customer_id": row["customer_id"],
-            "business_name": row["business_name"],
-            "business_type": row["business_type"],
-            "state": row["state"],
-            "language": row["language"],
-            "op_id": row["op_id"],
-            "rm_id": row["rm_id"],
-            "rm_name": row["rm_name"],
-            "op_name": row["op_name"],
-            "mobile": row["mobile"],
-        }
-
-    cached = await redis_get_or_set_json(
-        cache_key,
-        loader=_load_customer_fields_for_gst,
-        ttl_seconds=300,
-        tags=[_gst_customer_fields_tag(customer_id)],
-    )
-    return CustomerSnapshotForGstOut(**cached)
-
-
-# -------------------------------------------------------------------
 # EDIT GST REGISTRATION (Enterprise Production + Version Audit)
 # -------------------------------------------------------------------
 @router.post(
@@ -1201,6 +1534,7 @@ async def edit_gst_registration(
                     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", secondary_email_value):
                         field_errors["secondary_email"] = "Invalid secondary email format."
 
+                # PAN ↔ GSTIN: validate only when both are provided (NULL either side is allowed).
                 if gstin_value and pan_value:
                     gstin_pan = gstin_value[2:12]
                     if gstin_pan != pan_value:

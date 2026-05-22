@@ -310,7 +310,7 @@ async def filter_employees(
     include_inactive: bool = Query(False),
     from_date: Optional[datetime] = None,
     to_date: Optional[datetime] = None,
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
@@ -622,16 +622,18 @@ async def get_active_rms(
 
     log.info("Fetching active Relationship Managers")
     cache_key = build_cache_key(
-        "employees:active_rm",
+        "employees:active_rm:v3",
         current_emp_id=current_emp_id,
     )
 
     sql = f"""
-        SELECT *
+        SELECT emp_id, username
           FROM {DB_SCHEMA}.employees
          WHERE is_active = TRUE
            AND role = 'RM'
-         ORDER BY created_at DESC
+           AND username IS NOT NULL
+           AND trim(username) <> ''
+         ORDER BY username ASC
     """
 
     try:
@@ -645,10 +647,7 @@ async def get_active_rms(
             async with pool.acquire() as conn:
                 rows = await conn.fetch(sql)
             log.info("Active RMs retrieved count=%s", len(rows))
-            return [
-                {**dict(row), "message": "Active managers retrieved successfully."}
-                for row in rows
-            ]
+            return [{"username": row["username"]} for row in rows]
         except asyncpg.PostgresError:
             log.exception("Database error while fetching active RMs")
             raise HTTPException(
@@ -690,16 +689,18 @@ async def get_active_ops(
 
     log.info("Fetching active Operations personnel")
     cache_key = build_cache_key(
-        "employees:active_op",
+        "employees:active_op:v2",
         current_emp_id=current_emp_id,
     )
 
     sql = f"""
-        SELECT *
+        SELECT username
           FROM {DB_SCHEMA}.employees
          WHERE is_active = TRUE
            AND role = 'OP'
-         ORDER BY created_at DESC
+           AND username IS NOT NULL
+           AND trim(username) <> ''
+         ORDER BY username ASC
     """
 
     try:
@@ -713,10 +714,7 @@ async def get_active_ops(
             async with pool.acquire() as conn:
                 rows = await conn.fetch(sql)
             log.info("Active OPs retrieved count=%s", len(rows))
-            return [
-                {**dict(row), "message": "Active managers retrieved successfully."}
-                for row in rows
-            ]
+            return [{"username": row["username"]} for row in rows]
         except asyncpg.PostgresError:
             log.exception("Database error while fetching active OPs")
             raise HTTPException(
@@ -758,16 +756,18 @@ async def get_active_managers(
 
     log.info("Fetching active managers")
     cache_key = build_cache_key(
-        "employees:active_managers",
+        "employees:active_managers:v2",
         current_emp_id=current_emp_id,
     )
 
     sql = f"""
-        SELECT *
+        SELECT username, role
           FROM {DB_SCHEMA}.employees
          WHERE is_active = TRUE
            AND role IN ('ADMIN', 'SALES_MANAGER', 'OP_MANAGER')
-         ORDER BY created_at DESC
+           AND username IS NOT NULL
+           AND trim(username) <> ''
+         ORDER BY role ASC, username ASC
     """
 
     try:
@@ -782,7 +782,7 @@ async def get_active_managers(
                 rows = await conn.fetch(sql)
             log.info("Active managers retrieved count=%s", len(rows))
             return [
-                {**dict(row), "message": "Active managers retrieved successfully."}
+                {"username": row["username"], "role": row["role"]}
                 for row in rows
             ]
         except asyncpg.PostgresError:
