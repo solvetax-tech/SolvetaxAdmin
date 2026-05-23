@@ -355,6 +355,7 @@ async def get_customer_service_detail(
                 cs.updated_at,
                 c.full_name,
                 c.mobile,
+                c.business_name,
                 sc.service_name,
                 rm.first_name AS rm_first_name,
                 op.first_name AS op_first_name
@@ -1115,6 +1116,8 @@ async def filter_customer_services_extended(
                 cs.updated_at,
 
                 c.full_name,
+                c.mobile,
+                c.business_name,
                 sc.service_name,
 
                 rm.first_name AS rm_name,

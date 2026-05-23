@@ -4,6 +4,15 @@ from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from app.security.rbac import require_permission
 from app.payments.schemas import RegistrationPaymentIn
+from app.payments.payment_ledger import PaymentLedgerError
+from app.payments.payment_ledger_db import (
+    fetch_entity_payment_totals,
+    has_completed_payment,
+    insert_payment_from_ledger,
+    ledger_error_to_http,
+    lock_entity_payment_rows,
+    resolve_ledger_for_create,
+)
 from app.utils import (
     get_db_pool,
     DB_SCHEMA,
@@ -77,205 +86,42 @@ async def create_registration_payment(
 
             customer_id = entity_row["customer_id"]
 
-            # --------------------------------------------------
-            # 2️⃣ Reject if already PAID
-            # --------------------------------------------------
-
-            already_paid = await conn.fetchrow(
-                f"""
-                SELECT 1
-                FROM {DB_SCHEMA}.payments
-                WHERE customer_id IS NOT DISTINCT FROM $1
-                AND entity_id = $2
-                AND entity_type = $3
-                AND payment_status = 'PAID'
-                AND is_active = TRUE
-                LIMIT 1
-                """,
-                customer_id,
-                payload.entity_id,
-                entity_type,
-            )
-
-            if already_paid:
+            if await has_completed_payment(
+                conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
+            ):
                 raise HTTPException(409, "Payment already completed.")
 
-            # --------------------------------------------------
-            # 3️⃣ LOCK rows (race condition safety)
-            # --------------------------------------------------
+            await lock_entity_payment_rows(
+                conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
+            )
 
-            await conn.fetch(
-                f"""
-                SELECT id
-                FROM {DB_SCHEMA}.payments
-                WHERE customer_id IS NOT DISTINCT FROM $1
-                AND entity_id = $2
-                AND entity_type = $3
-                FOR UPDATE
-                """,
+            totals = await fetch_entity_payment_totals(
+                conn,
+                DB_SCHEMA,
                 customer_id,
                 payload.entity_id,
                 entity_type,
+                first_payment_amount=float(payload.amount),
             )
 
-            # --------------------------------------------------
-            # 4️⃣ Fetch ORIGINAL + TOTAL DISCOUNT (FIXED)
-            # --------------------------------------------------
-
-            base_row = await conn.fetchrow(
-                f"""
-                SELECT
-                    (
-                        SELECT amount
-                        FROM {DB_SCHEMA}.payments
-                        WHERE customer_id IS NOT DISTINCT FROM $1
-                        AND entity_id = $2
-                        AND entity_type = $3
-                        AND is_active = TRUE
-                        AND payment_status != 'CANCELLED'
-                        ORDER BY created_at ASC
-                        LIMIT 1
-                    ) AS original_amount,
-
-                    COALESCE(SUM(discount), 0) AS total_discount
-
-                FROM {DB_SCHEMA}.payments
-                WHERE customer_id IS NOT DISTINCT FROM $1
-                AND entity_id = $2
-                AND entity_type = $3
-                AND is_active = TRUE
-                AND payment_status != 'CANCELLED'
-                """,
-                customer_id,
-                payload.entity_id,
-                entity_type,
-            )
-
-            # First payment
-            if not base_row or base_row["original_amount"] is None:
-                original_amount = float(payload.amount)
-                total_discount = 0.0
-            else:
-                original_amount = float(base_row["original_amount"])
-                total_discount = float(base_row["total_discount"] or 0)
-
-            # --------------------------------------------------
-            # 5️⃣ Total paid
-            # --------------------------------------------------
-
-            paid_row = await conn.fetchrow(
-                f"""
-                SELECT COALESCE(SUM(paid_amount),0) AS total_paid
-                FROM {DB_SCHEMA}.payments
-                WHERE customer_id IS NOT DISTINCT FROM $1
-                AND entity_id = $2
-                AND entity_type = $3
-                AND is_active = TRUE
-                AND payment_status != 'CANCELLED'
-                """,
-                customer_id,
-                payload.entity_id,
-                entity_type,
-            )
-
-            total_paid = float(paid_row["total_paid"])
-
-            # --------------------------------------------------
-            # 6️⃣ Remaining BEFORE discount
-            # --------------------------------------------------
-
-            remaining_before_discount = original_amount - total_discount - total_paid
-
-            if remaining_before_discount <= 0:
-                raise HTTPException(409, "Payment already completed.")
-
-            # --------------------------------------------------
-            # 7️⃣ Apply NEW discount
-            # --------------------------------------------------
-
-            new_discount = float(payload.discount or 0)
-
-            if new_discount < 0:
-                raise HTTPException(400, "Discount cannot be negative.")
-
-            if new_discount > remaining_before_discount:
-                raise HTTPException(
-                    400,
-                    f"Discount cannot exceed remaining amount ({remaining_before_discount}).",
+            try:
+                ledger = resolve_ledger_for_create(
+                    totals,
+                    new_discount=float(payload.discount or 0),
+                    paid_amount=float(payload.paid_amount or 0),
                 )
-
-            total_discount += new_discount
-
-            # --------------------------------------------------
-            # 8️⃣ Remaining AFTER discount
-            # --------------------------------------------------
-
-            remaining_after_discount = original_amount - total_discount - total_paid
-
-            paid_amount = float(payload.paid_amount or 0)
-
-            if paid_amount <= 0:
-                raise HTTPException(400, "Paid amount must be greater than 0.")
-
-            if paid_amount > remaining_after_discount:
-                raise HTTPException(
-                    400,
-                    f"Paid amount exceeds remaining balance ({remaining_after_discount}).",
-                )
-
-            # --------------------------------------------------
-            # 9️⃣ Net amount
-            # --------------------------------------------------
-
-            net_amount = original_amount - total_discount
-
-            # --------------------------------------------------
-            # 🔟 Status
-            # --------------------------------------------------
-
-            if paid_amount == remaining_after_discount:
-                payment_status = "PAID"
-            else:
-                payment_status = "PENDING"
-
-            # --------------------------------------------------
-            # 1️⃣1️⃣ INSERT
-            # --------------------------------------------------
+            except PaymentLedgerError as exc:
+                raise ledger_error_to_http(exc) from exc
 
             async with conn.transaction():
-
-                payment_row = await conn.fetchrow(
-                    f"""
-                    INSERT INTO {DB_SCHEMA}.payments
-                    (
-                        transaction_id,
-                        customer_id,
-                        entity_id,
-                        entity_type,
-                        amount,
-                        discount,
-                        paid_amount,
-                        net_amount,
-                        payment_status,
-                        remarks,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES
-                    (
-                        NULL,$1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW()
-                    )
-                    RETURNING *
-                    """,
-                    customer_id,
-                    payload.entity_id,
-                    entity_type,
-                    original_amount,
-                    total_discount,
-                    paid_amount,
-                    net_amount,
-                    payment_status,
-                    payload.remarks,
+                payment_row = await insert_payment_from_ledger(
+                    conn,
+                    DB_SCHEMA,
+                    customer_id=customer_id,
+                    entity_id=payload.entity_id,
+                    entity_type=entity_type,
+                    ledger=ledger,
+                    remarks=payload.remarks,
                 )
 
                 # --------------------------------------------------
@@ -549,6 +395,21 @@ async def list_registration_payments(
             conditions.append(f"rp.payment_status = ${param_index}")
             values.append(payment_status)
             param_index += 1
+            # Installment rows stay PENDING historically; hide when entity is already settled.
+            if payment_status == "PENDING":
+                conditions.append(
+                    f"""
+                    NOT EXISTS (
+                        SELECT 1
+                          FROM {DB_SCHEMA}.payments p_settled
+                         WHERE p_settled.customer_id IS NOT DISTINCT FROM rp.customer_id
+                           AND p_settled.entity_id = rp.entity_id
+                           AND p_settled.entity_type = rp.entity_type
+                           AND p_settled.is_active IS TRUE
+                           AND p_settled.payment_status = 'PAID'
+                    )
+                    """
+                )
 
         if payment_mode:
             conditions.append(f"rp.payment_mode = ${param_index}")

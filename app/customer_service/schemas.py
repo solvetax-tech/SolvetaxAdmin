@@ -75,6 +75,7 @@ class CustomerServiceDetailOut(CustomerServiceBaseSchema):
     updated_at: Optional[datetime] = None
     full_name: Optional[str] = None
     mobile: Optional[str] = None
+    business_name: Optional[str] = None
     service_name: Optional[str] = None
     rm_first_name: Optional[str] = None
     op_first_name: Optional[str] = None
@@ -93,6 +94,7 @@ class CustomerServiceListItemOut(CustomerServiceBaseSchema):
     updated_at: Optional[datetime] = None
     full_name: Optional[str] = None
     mobile: Optional[str] = None
+    business_name: Optional[str] = None
     service_name: Optional[str] = None
 
     @field_validator("service_code", mode="before")

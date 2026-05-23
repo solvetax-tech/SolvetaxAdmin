@@ -210,3 +210,14 @@ class EmployeeOut(BaseSchema):
     manager_emp_id: Optional[int] = None
     employee_image_url: Optional[HttpUrl] = None
     message: Optional[str] = None
+
+
+# =========================================================
+# Active RM / OP dropdown (staff assignment pickers)
+# =========================================================
+
+class ActiveAssigneeOption(BaseSchema):
+    """GET /employees/active-rm and /employees/active-op — value for forms is emp_id."""
+
+    emp_id: int = Field(..., gt=0)
+    username: str = Field(..., min_length=1, max_length=100)

@@ -9,6 +9,8 @@ from app.gst_registration_filing.gst_filing_auto_policy import (
     disable_gst_filings_auto_over_missed_threshold,
 )
 from app.crm.crm_leads_common import _invalidate_crm_cache
+from app.payments.payment_scheduler import sync_settled_payment_entities
+from app.redis_cache import invalidate_tag as redis_invalidate_tag
 
 ITR_CRM_ENTITY_TYPE = "INCOME_TAX"
 
@@ -677,6 +679,19 @@ async def background_jobs():
                     logging.info(
                         "CRM ITR leads promoted to SUBSCRIBED (filed + paid): count=%s",
                         itr_subscribed,
+                    )
+
+                # 12) Payments: close superseded PENDING rows when entity is PAID
+                pay_sync = await sync_settled_payment_entities(conn, batch_limit=lim)
+                if any(pay_sync.values()):
+                    await redis_invalidate_tag("registration_payments:filter:index")
+                    await redis_invalidate_tag("payments_config:get_amount:index")
+                    logging.info(
+                        "Payment entity settlement sync: duplicate_paid_demoted=%s "
+                        "latest_promoted_to_paid=%s superseded_pending_closed=%s",
+                        pay_sync["duplicate_paid_demoted"],
+                        pay_sync["latest_promoted_to_paid"],
+                        pay_sync["superseded_pending_closed"],
                     )
 
                 logging.info("Scheduler completed successfully")

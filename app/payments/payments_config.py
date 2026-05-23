@@ -809,8 +809,11 @@ async def get_payment_amount(
                             f"Payment already completed for this {entity_type_norm.lower().replace('_', ' ')}.",
                         )
 
-                net_amount = original_amount - total_discount
-                remaining_amount = net_amount - total_paid
+                from app.payments.payment_ledger import compute_entity_balance
+
+                net_amount, remaining_amount = compute_entity_balance(
+                    original_amount, total_discount, total_paid
+                )
 
                 if remaining_amount <= 0 and (
                     original_amount > 0 or total_paid > 0

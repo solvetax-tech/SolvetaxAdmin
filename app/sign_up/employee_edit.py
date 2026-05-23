@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
 from datetime import datetime
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, hash_password, is_password_strong
-from app.sign_up.schemas import EmployeeEditIn, EmployeeOut,  ChangePasswordRequest
+from app.sign_up.schemas import EmployeeEditIn, EmployeeOut, ChangePasswordRequest, ActiveAssigneeOption
 from app.security.rbac import require_permission
 from app.logger import logger
 from app.redis_cache import (
@@ -608,6 +608,11 @@ async def get_employee(
 @router.get(
     "/active-rm",
     summary="Get list of active Relationship Managers",
+    response_model=List[ActiveAssigneeOption],
+    responses={
+        200: {"description": "Active RMs for staff assignment dropdowns (emp_id + username)."},
+        500: {"description": "Database or internal error."},
+    },
 )
 async def get_active_rms(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -622,7 +627,7 @@ async def get_active_rms(
 
     log.info("Fetching active Relationship Managers")
     cache_key = build_cache_key(
-        "employees:active_rm:v3",
+        "employees:active_rm:v4",
         current_emp_id=current_emp_id,
     )
 
@@ -647,7 +652,14 @@ async def get_active_rms(
             async with pool.acquire() as conn:
                 rows = await conn.fetch(sql)
             log.info("Active RMs retrieved count=%s", len(rows))
-            return [{"username": row["username"]} for row in rows]
+            return [
+                ActiveAssigneeOption(
+                    emp_id=int(row["emp_id"]),
+                    username=str(row["username"]).strip(),
+                ).model_dump()
+                for row in rows
+                if row["emp_id"] is not None and row["username"]
+            ]
         except asyncpg.PostgresError:
             log.exception("Database error while fetching active RMs")
             raise HTTPException(
@@ -675,6 +687,11 @@ async def get_active_rms(
 @router.get(
     "/active-op",
     summary="Get list of active Operations personnel",
+    response_model=List[ActiveAssigneeOption],
+    responses={
+        200: {"description": "Active OPs for staff assignment dropdowns (emp_id + username)."},
+        500: {"description": "Database or internal error."},
+    },
 )
 async def get_active_ops(
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -689,12 +706,12 @@ async def get_active_ops(
 
     log.info("Fetching active Operations personnel")
     cache_key = build_cache_key(
-        "employees:active_op:v2",
+        "employees:active_op:v3",
         current_emp_id=current_emp_id,
     )
 
     sql = f"""
-        SELECT username
+        SELECT emp_id, username
           FROM {DB_SCHEMA}.employees
          WHERE is_active = TRUE
            AND role = 'OP'
@@ -714,7 +731,14 @@ async def get_active_ops(
             async with pool.acquire() as conn:
                 rows = await conn.fetch(sql)
             log.info("Active OPs retrieved count=%s", len(rows))
-            return [{"username": row["username"]} for row in rows]
+            return [
+                ActiveAssigneeOption(
+                    emp_id=int(row["emp_id"]),
+                    username=str(row["username"]).strip(),
+                ).model_dump()
+                for row in rows
+                if row["emp_id"] is not None and row["username"]
+            ]
         except asyncpg.PostgresError:
             log.exception("Database error while fetching active OPs")
             raise HTTPException(

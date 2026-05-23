@@ -41,17 +41,16 @@ class CustomerIn(BaseSchema):
         gt=0,
         description="Operations emp_id. Omitted + JWT role OP → API sets to current emp_id.",
     )
-    referral_id: Optional[int] = Field(None, gt=0)
-    referral_entity: Optional[str] = Field(
+    referral_phone_number: Optional[str] = Field(
         None,
-        max_length=100,
-        description="Entity type for referral_id (e.g. CUSTOMER, GST_REGISTRATION).",
+        pattern=r"^\d{10}$",
+        description="10-digit mobile of the referring party.",
     )
 
     lead_source: Optional[str] = Field(
         None,
         max_length=120,
-        description="Stored on customers and crm_leads (e.g. WEBSITE, PAID_GOOGLE).",
+        description="Lead source on customers (e.g. WEBSITE, PAID_GOOGLE).",
     )
     tag: Optional[str] = Field(None, max_length=100)
     lead_type: Optional[str] = Field(
@@ -59,33 +58,6 @@ class CustomerIn(BaseSchema):
         max_length=100,
         description="Lead classification (e.g. INBOUND, REFERRAL).",
     )
-
-    utm_source: Optional[str] = Field(None, max_length=120)
-    utm_medium: Optional[str] = Field(None, max_length=120)
-    utm_campaign: Optional[str] = Field(None, max_length=200)
-    utm_content: Optional[str] = Field(None, max_length=200)
-    capture_page_path: Optional[str] = Field(None, max_length=1024)
-    capture_page_url: Optional[str] = None
-    capture_page_query: Optional[str] = None
-    capture_referrer_url: Optional[str] = None
-    platform: Optional[str] = Field(None, max_length=20)
-    device_type: Optional[str] = Field(None, max_length=20)
-    device_model: Optional[str] = Field(None, max_length=200)
-    os_name: Optional[str] = Field(None, max_length=64)
-    os_version: Optional[str] = Field(None, max_length=32)
-    browser_name: Optional[str] = Field(None, max_length=64)
-    browser_version: Optional[str] = Field(None, max_length=32)
-    app_version: Optional[str] = Field(None, max_length=64)
-    environment: Optional[str] = Field(None, max_length=32)
-    release_tag: Optional[str] = Field(None, max_length=64)
-    user_agent: Optional[str] = None
-    viewport_width: Optional[int] = None
-    viewport_height: Optional[int] = None
-    screen_width: Optional[int] = None
-    screen_height: Optional[int] = None
-    capture_language: Optional[str] = Field(None, max_length=32, description="Browser language at submit.")
-    timezone_offset_min: Optional[int] = None
-    ingestion_source: Optional[str] = Field(None, max_length=40)
 
     # -----------------------------------------------------
     # Normalize email
@@ -98,10 +70,12 @@ class CustomerIn(BaseSchema):
     # -----------------------------------------------------
     # Normalize mobile
     # -----------------------------------------------------
-    @field_validator("mobile", mode="before")
+    @field_validator("mobile", "referral_phone_number", mode="before")
     @classmethod
     def normalize_mobile(cls, v):
-        return v.strip()
+        if v is None:
+            return None
+        return str(v).strip()
 
     # -----------------------------------------------------
     # Sanitize text fields
@@ -116,7 +90,6 @@ class CustomerIn(BaseSchema):
         "language",
         "remark",
         "tag",
-        "referral_entity",
         mode="before",
     )
     @classmethod
@@ -137,22 +110,6 @@ class CustomerIn(BaseSchema):
         if isinstance(v, str):
             s = v.strip().upper()
             return s[:100] if s else None
-        return v
-
-    @field_validator(
-        "utm_source",
-        "utm_medium",
-        "utm_campaign",
-        "utm_content",
-        "capture_language",
-        "ingestion_source",
-        mode="before",
-    )
-    @classmethod
-    def normalize_upper_marketing_customer(cls, v):
-        if isinstance(v, str):
-            s = v.strip().upper()
-            return s[:200] if s else None
         return v
 
 
@@ -212,8 +169,7 @@ class CustomerOut(BaseSchema):
     op_id: Optional[int]
     op_name: Optional[str] = None
     is_active: bool
-    referral_id: Optional[int]
-    referral_entity: Optional[str] = None
+    referral_phone_number: Optional[str] = None
     lead_source: Optional[str] = None
     tag: Optional[str] = None
     lead_type: Optional[str] = None
@@ -257,11 +213,10 @@ class CustomerEditIn(BaseSchema):
         gt=0,
         description="When set, updates OP emp_id; omit to leave unchanged (see edit_customer handler).",
     )
-    referral_id: Optional[int] = Field(None, gt=0)
-    referral_entity: Optional[str] = Field(
+    referral_phone_number: Optional[str] = Field(
         None,
-        max_length=100,
-        description="Entity type for referral_id (e.g. CUSTOMER, GST_REGISTRATION).",
+        pattern=r"^\d{10}$",
+        description="10-digit mobile of the referring party.",
     )
     lead_source: Optional[str] = Field(None, max_length=120)
     tag: Optional[str] = Field(None, max_length=100)
@@ -279,7 +234,7 @@ class CustomerEditIn(BaseSchema):
     # -----------------------------------------------------
     # Normalize Mobile (Safe for int or str input)
     # -----------------------------------------------------
-    @field_validator("mobile", mode="before")
+    @field_validator("mobile", "referral_phone_number", mode="before")
     @classmethod
     def normalize_mobile(cls, v):
         if v is None:
@@ -298,7 +253,6 @@ class CustomerEditIn(BaseSchema):
         "city",
         "language",
         "remark",
-        "referral_entity",
         "tag",
         mode="before",
     )

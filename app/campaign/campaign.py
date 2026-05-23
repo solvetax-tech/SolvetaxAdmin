@@ -2,8 +2,7 @@
 Public marketing capture: one append-only row per successful submit in d_customer_session
 (keyed by mobile + entity_type; correlate with customers / income_tax / crm_leads by mobile).
 
-Also invoked from Customer create and Income Tax create when payloads include the optional
-capture fields (same names as CampaignSubmitIn).
+Optional session capture uses POST /api/v1/event-logs (CampaignSubmitIn), not customer create.
 
 DDL: see sql/d_customer_session.sql (replace schema name with DB_SCHEMA / search_path).
 """
