@@ -13,6 +13,15 @@ from app.utils import DB_SCHEMA, build_customer_service_visibility, get_db_pool
 
 logger = logging.getLogger(__name__)
 
+NULL_FIELD_SQL = {
+    "RM_ID": "cs.rm_id",
+    "OP_ID": "cs.op_id",
+    "SERVICE_CODE": "cs.service_code",
+    "SERVICE_STATUS": "cs.service_status",
+    "PROVIDED_AT": "cs.provided_at",
+    "CUSTOMER_ID": "cs.customer_id",
+}
+
 
 def _user_ctx(current_user):
     role = (current_user.get("role") or "").strip().upper()
@@ -31,6 +40,33 @@ def _require_row_context(role: str, emp_id: int) -> None:
         )
 
 
+def _normalize_code(value: str) -> str:
+    return str(value or "").strip().upper()
+
+
+def _norm_str_list(vals: Optional[List[str]]) -> List[str]:
+    return list(
+        dict.fromkeys(
+            [_normalize_code(v) for v in (vals or []) if isinstance(v, str) and v.strip()]
+        )
+    )
+
+
+def _norm_int_list(vals: Optional[List[int]]) -> List[int]:
+    out: List[int] = []
+    seen = set()
+    for raw in vals or []:
+        try:
+            num = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if num <= 0 or num in seen:
+            continue
+        seen.add(num)
+        out.append(num)
+    return out
+
+
 async def _invalidate_customer_services_index_caches() -> None:
     for tag in (
         "customer_services:filter:index",
@@ -46,11 +82,18 @@ async def _invalidate_customer_services_index_caches() -> None:
 async def svc_bulk_assign_candidates(
     *,
     customer_id: Optional[int],
+    customer_ids: Optional[List[int]],
     service_codes: Optional[List[str]],
     service_statuses: Optional[List[str]],
+    rm_ids: Optional[List[int]],
+    op_ids: Optional[List[int]],
     is_active: Optional[bool],
     null_rm: Optional[bool],
     null_op: Optional[bool],
+    null_fields: Optional[List[str]],
+    not_null_fields: Optional[List[str]],
+    match_mode: str,
+    filter_mode: str,
     limit: int,
     offset: int,
     current_user: dict,
@@ -58,31 +101,47 @@ async def svc_bulk_assign_candidates(
     role, emp_id = _user_ctx(current_user)
     _require_row_context(role, emp_id)
 
-    codes_n: List[str] = []
-    if service_codes:
-        codes_n = list(
-            dict.fromkeys(
-                c.strip().upper()
-                for c in service_codes
-                if isinstance(c, str) and c.strip()
-            )
-        )
+    mode = _normalize_code(match_mode)
+    if mode not in {"AND", "OR"}:
+        raise HTTPException(status_code=400, detail={"match_mode": "Use AND or OR."})
 
-    status_n: List[str] = []
-    if service_statuses:
-        status_n = list(
-            dict.fromkeys(
-                s.strip().upper()
-                for s in service_statuses
-                if isinstance(s, str) and s.strip()
+    filter_mode_norm = _normalize_code(filter_mode)
+    if filter_mode_norm not in {"IN", "NOT_IN"}:
+        raise HTTPException(status_code=400, detail={"filter_mode": "Use IN or NOT_IN."})
+
+    codes_n = _norm_str_list(service_codes)
+    status_n = _norm_str_list(service_statuses)
+    for s in status_n:
+        if s not in {"PENDING", "PROVIDED"}:
+            raise HTTPException(
+                status_code=400,
+                detail={"service_statuses": f"Invalid status: {s}"},
             )
+
+    rm_ids_n = _norm_int_list(rm_ids)
+    op_ids_n = _norm_int_list(op_ids)
+    customer_ids_n = _norm_int_list(customer_ids)
+    null_fields_n = _norm_str_list(null_fields)
+    not_null_fields_n = _norm_str_list(not_null_fields)
+
+    invalid_null = [f for f in null_fields_n if f not in NULL_FIELD_SQL]
+    if invalid_null:
+        raise HTTPException(
+            status_code=400,
+            detail={"null_fields": f"Unsupported values: {', '.join(invalid_null)}"},
         )
-        for s in status_n:
-            if s not in {"PENDING", "PROVIDED"}:
-                raise HTTPException(
-                    status_code=400,
-                    detail={"service_statuses": f"Invalid status: {s}"},
-                )
+    invalid_not_null = [f for f in not_null_fields_n if f not in NULL_FIELD_SQL]
+    if invalid_not_null:
+        raise HTTPException(
+            status_code=400,
+            detail={"not_null_fields": f"Unsupported values: {', '.join(invalid_not_null)}"},
+        )
+    overlap = sorted(set(null_fields_n) & set(not_null_fields_n))
+    if overlap:
+        raise HTTPException(
+            status_code=400,
+            detail={"null_fields": f"Conflicts with not_null_fields: {', '.join(overlap)}"},
+        )
 
     pool = await get_db_pool()
     try:
@@ -90,17 +149,48 @@ async def svc_bulk_assign_candidates(
             clauses = []
             params: list = []
 
-            if customer_id is not None:
+            if customer_ids_n:
+                params.append(customer_ids_n)
+                clauses.append(
+                    f"cs.customer_id = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (cs.customer_id = ANY(${len(params)}))"
+                )
+            elif customer_id is not None:
                 params.append(customer_id)
                 clauses.append(f"cs.customer_id = ${len(params)}")
 
             if codes_n:
                 params.append(codes_n)
-                clauses.append(f"upper(trim(cs.service_code)) = ANY(${len(params)})")
+                clauses.append(
+                    f"upper(trim(cs.service_code)) = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (upper(trim(cs.service_code)) = ANY(${len(params)}))"
+                )
 
             if status_n:
                 params.append(status_n)
-                clauses.append(f"cs.service_status = ANY(${len(params)})")
+                clauses.append(
+                    f"upper(trim(cs.service_status)) = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (upper(trim(cs.service_status)) = ANY(${len(params)}))"
+                )
+
+            if rm_ids_n:
+                params.append(rm_ids_n)
+                clauses.append(
+                    f"cs.rm_id = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (cs.rm_id = ANY(${len(params)}))"
+                )
+
+            if op_ids_n:
+                params.append(op_ids_n)
+                clauses.append(
+                    f"cs.op_id = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (cs.op_id = ANY(${len(params)}))"
+                )
 
             if is_active is not None:
                 params.append(is_active)
@@ -116,26 +206,33 @@ async def svc_bulk_assign_candidates(
             elif null_op is False:
                 clauses.append("cs.op_id IS NOT NULL")
 
+            for key in null_fields_n:
+                clauses.append(f"{NULL_FIELD_SQL[key]} IS NULL")
+            for key in not_null_fields_n:
+                clauses.append(f"{NULL_FIELD_SQL[key]} IS NOT NULL")
+
+            where_parts = []
+            if clauses:
+                joiner = " OR " if mode == "OR" else " AND "
+                where_parts.append(f"({joiner.join(clauses)})")
+
             vis_sql, vis_vals, _ = build_customer_service_visibility(
                 role, emp_id if emp_id > 0 else None, len(params) + 1, DB_SCHEMA
             )
-            where_parts = []
-            if clauses:
-                where_parts.append(" AND ".join(clauses))
             if vis_sql:
                 where_parts.append(vis_sql)
                 params.extend(vis_vals)
 
             where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
 
-            lim_idx = len(params) + 1
-            off_idx = len(params) + 2
-
-            count_sql = f"""
-                SELECT COUNT(*)::bigint
-                  FROM {DB_SCHEMA}.customer_services cs
-                {where_sql}
+            base_from = f"""
+                FROM {DB_SCHEMA}.customer_services cs
+                LEFT JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+                LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = cs.rm_id
+                LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = cs.op_id
             """
+
+            count_sql = f"SELECT COUNT(*)::bigint {base_from} {where_sql}"
             list_sql = f"""
                 SELECT
                     cs.id,
@@ -149,22 +246,28 @@ async def svc_bulk_assign_candidates(
                     cs.created_at,
                     cs.updated_at,
                     c.full_name,
-                    c.mobile
-                  FROM {DB_SCHEMA}.customer_services cs
-                  JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+                    c.mobile,
+                    erm.username AS rm_username,
+                    eop.username AS op_username
+                  {base_from}
                 {where_sql}
                 ORDER BY cs.updated_at DESC NULLS LAST, cs.id DESC
-                LIMIT ${lim_idx} OFFSET ${off_idx}
+                LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
             """
 
+            params_with_page = list(params) + [limit, offset]
             total = await conn.fetchval(count_sql, *params)
-            rows = await conn.fetch(list_sql, *params, limit, offset)
+            rows = await conn.fetch(list_sql, *params_with_page)
 
             return {
                 "items": [dict(r) for r in rows],
                 "total": int(total or 0),
                 "limit": limit,
                 "offset": offset,
+                "match_mode": mode,
+                "filter_mode": filter_mode_norm,
+                "null_fields": null_fields_n,
+                "not_null_fields": not_null_fields_n,
             }
     except asyncpg.PostgresError:
         logger.exception("DB error in customer_services bulk-assign candidates")

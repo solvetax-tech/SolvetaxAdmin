@@ -110,6 +110,10 @@ class CustomerServiceBulkAssignCandidatesOut(CustomerServiceBaseSchema):
     total: int
     limit: int
     offset: int
+    match_mode: Optional[str] = None
+    filter_mode: Optional[str] = None
+    null_fields: Optional[List[str]] = None
+    not_null_fields: Optional[List[str]] = None
 
 
 # --- service_config dropdown (migrated from customer_registration/service_config) ---
