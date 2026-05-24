@@ -107,7 +107,6 @@ from app.gst_registration.gst_registration import router as gst_registration_rou
 from app.gst_registration.gst_people import router as gst_people_router
 from app.gst_registration.gst_documents import router as gst_documents_router
 from app.gst_registration.gst_registration_config import router as gst_registration_config_router
-from app.Dashboard.dashboard import router as dashboard_router
 from app.version.version import router as version_router
 from app.payments.registration_payments import router as registration_payments_router
 from app.payments.gst_filing_payments import router as gst_filing_payments_router
@@ -161,8 +160,6 @@ if gst_registration_filing:
     app.include_router(gst_registration_filing)
 if gst_filing_document_router:
     app.include_router(gst_filing_document_router)
-if dashboard_router:
-    app.include_router(dashboard_router)
 if gst_filing_config:
     app.include_router(gst_filing_config)
 if version_router:

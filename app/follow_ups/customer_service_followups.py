@@ -72,9 +72,6 @@ async def _invalidate_customer_service_followup_cache() -> None:
         "customer_services:filter:index",
         "customer_services:dashboard:index",
         "customer_services:pending:index",
-        "dashboard:gst_missed:gt_one:index",
-        "dashboard:gst_missed:buckets:index",
-        "dashboard:gst_missed:exact_one:index",
     )
     for tag in tags:
         await redis_invalidate_tag(tag)
@@ -581,7 +578,13 @@ async def update_customer_service_followup(
 
                     if payload.status == "COMPLETED":
                         updates.append("completed_at = COALESCE(completed_at, NOW())")
-                        updates.append("missed_at = NULL")
+                        # Preserve missed_at so late completions stay auditable; stamp if overdue but not yet flagged.
+                        updates.append(
+                            "missed_at = CASE "
+                            "WHEN missed_at IS NOT NULL THEN missed_at "
+                            "WHEN followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' THEN NOW() "
+                            "ELSE missed_at END"
+                        )
                     elif payload.status == "PENDING":
                         updates.append("completed_at = NULL")
                         updates.append("missed_at = NULL")
@@ -624,9 +627,16 @@ async def update_customer_service_followup(
 
 @router.get(
     "/counts",
-    summary="Customer service follow-up counts (today in IST)",
+    summary="Customer service follow-up counts for a follow-up date range",
 )
 async def get_customer_service_followup_counts(
+    followup_from: Optional[datetime] = Query(None),
+    followup_to: Optional[datetime] = Query(None),
+    dates: Optional[str] = Query(
+        None,
+        description="Comma-separated YYYY-MM-DD keys; when set, only those calendar days are counted",
+    ),
+    service_code: Optional[str] = Query(None),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     request_id = generate_uuid()
@@ -638,11 +648,31 @@ async def get_customer_service_followup_counts(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
 
+    if followup_from is not None and followup_to is not None:
+        range_start = followup_from
+        range_end = followup_to
+    else:
+        range_start = today_start
+        range_end = today_end
+
+    date_keys = None
+    if isinstance(dates, str) and dates.strip():
+        date_keys = sorted({d.strip() for d in dates.split(",") if d.strip()})
+
+    sc_norm = (
+        service_code.strip().upper()
+        if isinstance(service_code, str) and service_code.strip()
+        else None
+    )
+
     cache_key = build_cache_key(
         "customer_service_followups:counts",
         role=role,
         emp_id=emp_id,
-        counts_date=today_start.date().isoformat(),
+        followup_from=range_start,
+        followup_to=range_end,
+        dates=tuple(date_keys) if date_keys else None,
+        service_code=sc_norm,
     )
 
     try:
@@ -654,9 +684,23 @@ async def get_customer_service_followup_counts(
     async def _load_customer_service_followup_counts():
         conditions = [
             "cs.followup_at IS NOT NULL",
+            "cs.followup_at >= $1",
+            "cs.followup_at <= $2",
         ]
-        values = []
+        values: list = [range_start, range_end]
         idx = 3
+
+        if date_keys:
+            conditions.append(
+                f"to_char(cs.followup_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = ANY(${idx}::text[])"
+            )
+            values.append(date_keys)
+            idx += 1
+
+        if sc_norm:
+            conditions.append(f"upper(trim(cs.service_code)) = ${idx}")
+            values.append(sc_norm)
+            idx += 1
 
         visibility_sql, visibility_values, idx = build_customer_service_visibility(
             role, emp_id, idx, DB_SCHEMA
@@ -669,34 +713,31 @@ async def get_customer_service_followup_counts(
 
         query = f"""
             SELECT
+                COUNT(*) AS scheduled_today,
                 COUNT(*) FILTER (
-                    WHERE cs.followup_at >= $1 AND cs.followup_at < $2
-                ) AS scheduled_today,
-                COUNT(*) FILTER (
-                    WHERE cs.followup_at >= $1 AND cs.followup_at < $2
-                      AND (
-                          cs.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes'
-                          OR cs.followup_status = 'COMPLETED'
-                      )
+                    WHERE cs.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+                       OR cs.completed_at IS NOT NULL
                 ) AS evaluated_today,
                 COUNT(*) FILTER (
                     WHERE cs.missed_at IS NOT NULL
-                      AND cs.followup_at >= $1 AND cs.followup_at < $2
-                ) AS overdue_today,
+                      AND cs.completed_at IS NULL
+                ) AS overdue_pending_today,
                 COUNT(*) FILTER (
-                    WHERE cs.followup_status = 'COMPLETED'
+                    WHERE cs.missed_at IS NOT NULL
+                      AND cs.completed_at IS NOT NULL
+                ) AS overdue_completed_today,
+                COUNT(*) FILTER (
+                    WHERE cs.completed_at IS NOT NULL
                       AND cs.missed_at IS NULL
-                      AND cs.followup_at >= $1 AND cs.followup_at < $2
                 ) AS completed_today,
                 COUNT(*) FILTER (
-                    WHERE cs.followup_status = 'COMPLETED'
+                    WHERE cs.completed_at IS NOT NULL
                       AND cs.missed_at IS NULL
-                      AND cs.followup_at >= $1 AND cs.followup_at < $2
                 ) AS successful_today,
                 COUNT(*) FILTER (
                     WHERE cs.completed_at IS NULL
-                      AND cs.followup_at >= $1 AND cs.followup_at < $2
                       AND cs.followup_status = 'PENDING'
+                      AND cs.missed_at IS NULL
                 ) AS pending_today
             FROM {DB_SCHEMA}.customer_services cs
             {where_clause}
@@ -704,7 +745,7 @@ async def get_customer_service_followup_counts(
 
         try:
             async with pool.acquire() as conn:
-                row = await conn.fetchrow(query, today_start, today_end, *values)
+                row = await conn.fetchrow(query, *values)
         except asyncpg.PostgresError:
             logger.exception("DB error while fetching customer service followup counts")
             raise HTTPException(500, "Database error occurred")
@@ -713,11 +754,12 @@ async def get_customer_service_followup_counts(
             raise HTTPException(500, "Internal server error")
 
         res_data = dict(row)
+        res_data["overdue_today"] = res_data.get("overdue_pending_today", 0)
 
-        evaluated = res_data.get("evaluated_today", 0)
+        scheduled = res_data.get("scheduled_today", 0)
         successful = res_data.get("successful_today", 0)
         res_data["success_rate"] = (
-            round((successful / evaluated) * 100) if evaluated > 0 else 100
+            round((successful / scheduled) * 100) if scheduled > 0 else 100
         )
 
         return {

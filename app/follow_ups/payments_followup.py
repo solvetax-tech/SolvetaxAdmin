@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -41,6 +42,8 @@ router = APIRouter(
     tags=["Payment follow-ups"],
 )
 
+IST = ZoneInfo("Asia/Kolkata")
+
 
 def _payments_followup_list_tag() -> str:
     return "payment_followups:list:index"
@@ -48,6 +51,8 @@ def _payments_followup_list_tag() -> str:
 
 async def _invalidate_payment_followup_cache() -> None:
     await redis_invalidate_tag(_payments_followup_list_tag())
+    await redis_invalidate_tag("payment_followups:counts:index")
+    await redis_invalidate_tag("payment_followups:alerts:index")
     await redis_invalidate_tag("registration_payments:filter:index")
     await redis_invalidate_tag("payments_config:get_amount:index")
 
@@ -115,7 +120,7 @@ def _assert_payment_followup_entity_type(entity_type: Optional[str]) -> str:
 @router.get(
     "",
     response_model=PaymentFollowupListResponse,
-    summary="List payment collection follow-ups (GST filing + customer service; payment_status=PENDING only)",
+    summary="List and filter payment collection follow-ups",
 )
 async def list_payment_followups(
     payment_id: Optional[int] = Query(None, gt=0),
@@ -308,7 +313,7 @@ async def list_payment_followups(
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=CreatePaymentFollowupResponse,
-    summary="Schedule a payment collection follow-up (payment must be PENDING; GST filing or customer service only)",
+    summary="Schedule a payment collection follow-up",
 )
 async def create_payment_followup(
     payload: CreatePaymentFollowupRequest,
@@ -457,7 +462,7 @@ async def create_payment_followup(
 @router.post(
     "/{payment_id}",
     response_model=UpdatePaymentFollowupResponse,
-    summary="Update a payment collection follow-up (payment must remain PENDING)",
+    summary="Update a payment collection follow-up",
 )
 async def update_payment_followup(
     payment_id: int,
@@ -583,7 +588,12 @@ async def update_payment_followup(
 
                     if payload.status == "COMPLETED":
                         updates.append("completed_at = COALESCE(completed_at, NOW())")
-                        updates.append("missed_at = NULL")
+                        updates.append(
+                            "missed_at = CASE "
+                            "WHEN missed_at IS NOT NULL THEN missed_at "
+                            "WHEN followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes' THEN NOW() "
+                            "ELSE missed_at END"
+                        )
                     elif payload.status == "PENDING":
                         updates.append("completed_at = NULL")
                         updates.append("missed_at = NULL")
@@ -630,3 +640,267 @@ async def update_payment_followup(
     except Exception:
         log.exception("Unexpected error")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get(
+    "/counts",
+    summary="Payment follow-up counts for a follow-up date range",
+)
+async def get_payment_followup_counts(
+    followup_from: Optional[datetime] = Query(None),
+    followup_to: Optional[datetime] = Query(None),
+    dates: Optional[str] = Query(
+        None,
+        description="Comma-separated YYYY-MM-DD keys; when set, only those calendar days are counted",
+    ),
+    entity_type: Optional[str] = Query(
+        None,
+        description="Optional: GST_FILING, GST_FILING_RETURN_DETAILS, or CUSTOMER_SERVICE",
+    ),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = str(current_user.get("role") or "").strip().upper()
+
+    now = datetime.now(IST)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+
+    if followup_from is not None and followup_to is not None:
+        range_start = followup_from
+        range_end = followup_to
+    else:
+        range_start = today_start
+        range_end = today_end
+
+    date_keys = None
+    if isinstance(dates, str) and dates.strip():
+        date_keys = sorted({d.strip() for d in dates.split(",") if d.strip()})
+
+    et_norm: Optional[str] = None
+    if isinstance(entity_type, str) and entity_type.strip():
+        et_norm = _assert_payment_followup_entity_type(entity_type)
+
+    cache_key = build_cache_key(
+        "payment_followups:counts",
+        role=role,
+        emp_id=emp_id,
+        followup_from=range_start,
+        followup_to=range_end,
+        dates=tuple(date_keys) if date_keys else None,
+        entity_type=et_norm,
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        logger.exception("DB connection failed (payment followup counts)")
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+    async def _load_payment_followup_counts():
+        conditions = [
+            "rp.followup_at IS NOT NULL",
+            "rp.payment_status = 'PENDING'",
+            "rp.followup_at >= $1",
+            "rp.followup_at <= $2",
+        ]
+        values: list = [range_start, range_end]
+        idx = 3
+
+        if date_keys:
+            conditions.append(
+                f"to_char(rp.followup_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = ANY(${idx}::text[])"
+            )
+            values.append(date_keys)
+            idx += 1
+
+        if et_norm:
+            conditions.append(f"upper(trim(rp.entity_type)) = ${idx}")
+            values.append(et_norm)
+            idx += 1
+        else:
+            conditions.append(f"rp.entity_type = ANY(${idx}::text[])")
+            values.append(list(PAYMENT_FOLLOWUP_ENTITY_TYPES))
+            idx += 1
+
+        joins = _payment_followup_entity_joins()
+        visibility_sql, visibility_values, idx = build_payment_followup_visibility(
+            role, emp_id, idx, DB_SCHEMA
+        )
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        query = f"""
+            SELECT
+                COUNT(*) AS scheduled_today,
+                COUNT(*) FILTER (
+                    WHERE rp.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+                       OR rp.completed_at IS NOT NULL
+                ) AS evaluated_today,
+                COUNT(*) FILTER (
+                    WHERE rp.missed_at IS NOT NULL
+                      AND rp.completed_at IS NULL
+                ) AS overdue_pending_today,
+                COUNT(*) FILTER (
+                    WHERE rp.missed_at IS NOT NULL
+                      AND rp.completed_at IS NOT NULL
+                ) AS overdue_completed_today,
+                COUNT(*) FILTER (
+                    WHERE rp.completed_at IS NOT NULL
+                      AND rp.missed_at IS NULL
+                ) AS completed_today,
+                COUNT(*) FILTER (
+                    WHERE rp.completed_at IS NOT NULL
+                      AND rp.missed_at IS NULL
+                ) AS successful_today,
+                COUNT(*) FILTER (
+                    WHERE rp.completed_at IS NULL
+                      AND rp.followup_status = 'PENDING'
+                      AND rp.missed_at IS NULL
+                ) AS pending_today
+            {joins}
+            {where_clause}
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, *values)
+        except asyncpg.PostgresError:
+            logger.exception("DB error while fetching payment followup counts")
+            raise HTTPException(status_code=500, detail="Database error occurred")
+        except Exception:
+            logger.exception("Unexpected error while fetching payment followup counts")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+        res_data = dict(row)
+        res_data["overdue_today"] = res_data.get("overdue_pending_today", 0)
+
+        scheduled = res_data.get("scheduled_today", 0)
+        successful = res_data.get("successful_today", 0)
+        res_data["success_rate"] = (
+            round((successful / scheduled) * 100) if scheduled > 0 else 100
+        )
+
+        return {
+            "data": res_data,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_payment_followup_counts,
+        ttl_seconds=300,
+        tags=["payment_followups:counts:index"],
+    )
+
+
+@router.get(
+    "/alerts",
+    summary="Payment follow-up alerts (due within 24h)",
+)
+async def get_payment_followup_alerts(
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = str(current_user.get("role") or "").strip().upper()
+
+    now = datetime.now(timezone.utc)
+    next_24h = now + timedelta(hours=24)
+    time_bucket = int(now.timestamp() // 300)
+
+    cache_key = build_cache_key(
+        "payment_followups:alerts",
+        role=role,
+        emp_id=emp_id,
+        time_bucket=time_bucket,
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        logger.exception("DB connection failed (payment followup alerts)")
+        raise HTTPException(status_code=500, detail="Database connection error")
+
+    async def _load_payment_followup_alerts():
+        conditions = [
+            "rp.followup_at IS NOT NULL",
+            "rp.payment_status = 'PENDING'",
+            "rp.followup_status IN ('PENDING', 'MISSED')",
+            "rp.followup_at <= $1",
+            "rp.entity_type = ANY($2::text[])",
+        ]
+        values: list = [next_24h, list(PAYMENT_FOLLOWUP_ENTITY_TYPES)]
+        idx = 3
+
+        joins = _payment_followup_entity_joins()
+        visibility_sql, visibility_values, idx = build_payment_followup_visibility(
+            role, emp_id, idx, DB_SCHEMA
+        )
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        query = f"""
+            SELECT
+                rp.id,
+                rp.customer_id,
+                rp.entity_id,
+                rp.entity_type,
+                rp.payment_status,
+                rp.amount,
+                rp.discount,
+                rp.net_amount,
+                rp.paid_amount,
+                rp.remaining_amount,
+                rp.followup_at,
+                rp.followup_status,
+                rp.followup_remarks AS remarks,
+                rp.completed_at,
+                rp.missed_at,
+                rp.is_active,
+                rp.created_at,
+                rp.updated_at,
+                c.full_name,
+                c.mobile,
+                c.rm_id,
+                c.op_id,
+                rm.first_name AS rm_name,
+                op.first_name AS op_name
+            {joins}
+            {where_clause}
+            ORDER BY rp.followup_at ASC
+            LIMIT 50
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *values)
+        except asyncpg.PostgresError:
+            logger.exception("DB error while fetching payment followup alerts")
+            raise HTTPException(status_code=500, detail="Database error occurred")
+        except Exception:
+            logger.exception("Unexpected error while fetching payment followup alerts")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+        items = [PaymentFollowupListItem(**dict(row)).model_dump() for row in rows]
+
+        return {
+            "data": items,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_payment_followup_alerts,
+        ttl_seconds=120,
+        tags=["payment_followups:alerts:index"],
+    )

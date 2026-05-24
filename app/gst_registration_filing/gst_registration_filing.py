@@ -192,9 +192,6 @@ async def _invalidate_gst_filing_cache(gst_registration_id: Optional[int] = None
     await redis_invalidate_tag("customer_services:filter:index")
     await redis_invalidate_tag("customer_services:dashboard:index")
     await redis_invalidate_tag("customer_services:pending:index")
-    await redis_invalidate_tag("dashboard:gst_missed:gt_one:index")
-    await redis_invalidate_tag("dashboard:gst_missed:buckets:index")
-    await redis_invalidate_tag("dashboard:gst_missed:exact_one:index")
     await redis_invalidate_tag(_gst_filing_table_filings_tag())
     await redis_invalidate_tag(_gst_filing_table_return_details_tag())
     if gst_registration_id is not None:
