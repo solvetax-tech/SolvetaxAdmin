@@ -72,6 +72,7 @@ async def _invalidate_customer_service_followup_cache() -> None:
         "customer_services:filter:index",
         "customer_services:dashboard:index",
         "customer_services:pending:index",
+        "customer_services:progress_tracker:index",
     )
     for tag in tags:
         await redis_invalidate_tag(tag)

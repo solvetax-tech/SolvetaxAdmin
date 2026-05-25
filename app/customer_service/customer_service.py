@@ -931,6 +931,217 @@ def _legacy_cs_pending_tag() -> str:
     return "customer_services:pending:index"
 
 
+def _legacy_cs_progress_tracker_tag() -> str:
+    return "customer_services:progress_tracker:index"
+
+
+def _derive_customer_progress_status(provided_count: int, pending_count: int) -> str:
+    if provided_count > 0 and pending_count == 0:
+        return "COMPLETED"
+    if provided_count > 0 and pending_count > 0:
+        return "IN_PROGRESS"
+    return "NOT_STARTED"
+
+
+@router.get(
+    "/customer-services/progress-tracker",
+    response_model=None,
+    summary="Per-customer service progress (PENDING/PROVIDED counts, visibility, Redis)",
+)
+async def get_customer_services_progress_tracker(
+    overall_status: Optional[str] = Query(
+        None,
+        description="Filter rows: NOT_STARTED | IN_PROGRESS | COMPLETED",
+    ),
+    limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    request_id = generate_uuid()
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+
+    status_filter = None
+    if overall_status and str(overall_status).strip():
+        status_filter = str(overall_status).strip().upper()
+        if status_filter not in {"NOT_STARTED", "IN_PROGRESS", "COMPLETED"}:
+            raise HTTPException(status_code=400, detail="Invalid overall_status")
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "get_customer_services_progress_tracker"},
+    )
+    cache_key = build_cache_key(
+        "customer_services:progress_tracker",
+        overall_status=status_filter,
+        limit=limit,
+        offset=offset,
+        role=(role or "").strip().upper() or None,
+        emp_id=emp_id,
+    )
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("Database pool acquisition failed")
+        raise HTTPException(status_code=500, detail="Database connection error.")
+
+    async def _load_progress_tracker():
+        conditions = ["cs.is_active IS TRUE"]
+        values: list = []
+        idx = 1
+
+        visibility_sql, visibility_values, idx = build_customer_service_visibility(
+            role, emp_id, idx, DB_SCHEMA
+        )
+        if visibility_sql:
+            conditions.append(visibility_sql)
+            values.extend(visibility_values)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        agg_sql = f"""
+            WITH scoped AS (
+                SELECT
+                    cs.customer_id,
+                    cs.service_status,
+                    cs.rm_id,
+                    cs.op_id,
+                    cs.created_at,
+                    c.full_name,
+                    c.business_name,
+                    c.mobile,
+                    COALESCE(NULLIF(trim(sc.service_name), ''), upper(trim(cs.service_code))) AS service_label,
+                    rm.first_name AS rm_first_name,
+                    op.first_name AS op_first_name
+                FROM {DB_SCHEMA}.customer_services cs
+                JOIN {DB_SCHEMA}.customers c
+                  ON c.customer_id = cs.customer_id
+                LEFT JOIN {DB_SCHEMA}.service_config sc
+                  ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
+                 AND sc.is_active IS NOT DISTINCT FROM TRUE
+                LEFT JOIN {DB_SCHEMA}.employees rm ON rm.emp_id = cs.rm_id
+                LEFT JOIN {DB_SCHEMA}.employees op ON op.emp_id = cs.op_id
+                {where_clause}
+            ),
+            per_customer AS (
+                SELECT
+                    customer_id,
+                    MAX(full_name) AS customer_name,
+                    MAX(business_name) AS business_name,
+                    MAX(mobile) AS phone_number,
+                    COUNT(*)::int AS required_count,
+                    COUNT(*) FILTER (WHERE upper(trim(service_status)) = 'PROVIDED')::int AS provided_count,
+                    COUNT(*) FILTER (WHERE upper(trim(service_status)) = 'PENDING')::int AS pending_count,
+                    MAX(created_at) AS latest_service_at,
+                    (ARRAY_AGG(rm_id ORDER BY created_at DESC NULLS LAST))[1] AS rm_id,
+                    (ARRAY_AGG(op_id ORDER BY created_at DESC NULLS LAST))[1] AS op_id,
+                    (ARRAY_AGG(rm_first_name ORDER BY created_at DESC NULLS LAST))[1] AS rm_username,
+                    (ARRAY_AGG(op_first_name ORDER BY created_at DESC NULLS LAST))[1] AS op_username,
+                    COALESCE(
+                        array_agg(DISTINCT service_label)
+                        FILTER (WHERE service_label IS NOT NULL),
+                        ARRAY[]::text[]
+                    ) AS required_services,
+                    COALESCE(
+                        array_agg(DISTINCT service_label)
+                        FILTER (
+                            WHERE service_label IS NOT NULL
+                              AND upper(trim(service_status)) = 'PROVIDED'
+                        ),
+                        ARRAY[]::text[]
+                    ) AS provided_services,
+                    COALESCE(
+                        array_agg(DISTINCT service_label)
+                        FILTER (
+                            WHERE service_label IS NOT NULL
+                              AND upper(trim(service_status)) = 'PENDING'
+                        ),
+                        ARRAY[]::text[]
+                    ) AS pending_services
+                FROM scoped
+                GROUP BY customer_id
+                HAVING COUNT(*) > 0
+            ),
+            enriched AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN provided_count > 0 AND pending_count = 0 THEN 'COMPLETED'
+                        WHEN provided_count > 0 AND pending_count > 0 THEN 'IN_PROGRESS'
+                        ELSE 'NOT_STARTED'
+                    END AS overall_status,
+                    CASE
+                        WHEN required_count > 0
+                        THEN ROUND((provided_count::numeric / required_count::numeric) * 100)::int
+                        ELSE 0
+                    END AS completion_percent
+                FROM per_customer
+            )
+            SELECT *
+            FROM enriched
+            ORDER BY latest_service_at DESC NULLS LAST, customer_id ASC
+        """
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(agg_sql, *values)
+
+        all_rows = []
+        summary = {
+            "tracked_customers": 0,
+            "completed": 0,
+            "in_progress": 0,
+            "not_started": 0,
+        }
+        for row in rows:
+            item = dict(row)
+            item["overall_status"] = _derive_customer_progress_status(
+                int(item.get("provided_count") or 0),
+                int(item.get("pending_count") or 0),
+            )
+            summary["tracked_customers"] += 1
+            st = item["overall_status"]
+            if st == "COMPLETED":
+                summary["completed"] += 1
+            elif st == "IN_PROGRESS":
+                summary["in_progress"] += 1
+            else:
+                summary["not_started"] += 1
+
+            if status_filter and item["overall_status"] != status_filter:
+                continue
+            all_rows.append(item)
+
+        total_count = len(all_rows)
+        page_rows = all_rows[offset : offset + limit]
+
+        return {
+            "data": {
+                "summary": summary,
+                "rows": page_rows,
+                "count": len(page_rows),
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset,
+            },
+            "request_id": request_id,
+        }
+
+    try:
+        return await redis_get_or_set_json(
+            cache_key,
+            loader=_load_progress_tracker,
+            ttl_seconds=300,
+            tags=[_legacy_cs_progress_tracker_tag()],
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        log.exception("Unexpected error fetching progress tracker")
+        raise HTTPException(status_code=500, detail="Internal server error.")
+
+
 @router.get(
     "/customer-services/filter",
     response_model=None,

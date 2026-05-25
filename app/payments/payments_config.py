@@ -25,6 +25,39 @@ def _normalize_optional_filter(filter_value: Optional[str]) -> Optional[str]:
     return s if s else None
 
 
+def _clean_display_label(value) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s or s.lower() in {"n/a", "na", "none", "null"} or s == "string":
+        return None
+    return s
+
+
+def _build_payment_target_label(
+    target_code,
+    customer_name,
+    business_name,
+    entity_id: int,
+) -> str:
+    """e.g. ITR_NOTICE – Bhanu Venkat – Balu Works or 29ABCDE1234F1Z5 – Client – Business."""
+    code = _clean_display_label(target_code)
+    person = _clean_display_label(customer_name)
+    biz = _clean_display_label(business_name)
+
+    segments = [code] if code else [f"ID: {entity_id}"]
+
+    name_parts = []
+    if person:
+        name_parts.append(person)
+    if biz and (not person or biz.lower() != person.lower()):
+        name_parts.append(biz)
+    if name_parts:
+        segments.append(" – ".join(name_parts))
+
+    return " – ".join(segments)
+
+
 SERVICE_PRICE_SPECS = [
     {"code": "ITR_FILING", "mode": "first", "queries": [
         {"entity_type": "INCOME_TAX", "value": "DEFAULT"},
@@ -570,14 +603,27 @@ async def get_payment_amount(
                 description = ""
                 ownership_category = "N/A"
                 pricing_lookup_entity_type = entity_type_norm
+                target_code = ""
+                target_customer_name = ""
+                target_business_name = ""
 
                 if entity_type_norm == "GST_REGISTRATION":
                     gst_row = await conn.fetchrow(
                         f"""
-                        SELECT id, customer_id, ownership_category, is_active
-                        FROM {DB_SCHEMA}.gst_registration
-                        WHERE id = $1
-                        LIMIT 1
+                        SELECT g.id,
+                               g.customer_id,
+                               g.ownership_category,
+                               g.is_active,
+                               g.gstin,
+                               NULLIF(trim(g.client_name), '') AS client_name,
+                               NULLIF(trim(g.business_name), '') AS reg_business_name,
+                               NULLIF(trim(c.full_name), '') AS customer_full_name,
+                               NULLIF(trim(c.business_name), '') AS customer_business_name
+                          FROM {DB_SCHEMA}.gst_registration g
+                          LEFT JOIN {DB_SCHEMA}.customers c
+                            ON c.customer_id = g.customer_id
+                         WHERE g.id = $1
+                         LIMIT 1
                         """,
                         entity_id,
                     )
@@ -591,14 +637,34 @@ async def get_payment_amount(
                         (gst_row["ownership_category"] or "N/A").strip().upper()
                     )
                     display_name = "GST Registration"
+                    target_code = (gst_row["gstin"] or "").strip().upper() or None
+                    target_customer_name = (
+                        gst_row["client_name"] or gst_row["customer_full_name"] or ""
+                    )
+                    target_business_name = (
+                        gst_row["reg_business_name"] or gst_row["customer_business_name"] or ""
+                    )
 
                 elif entity_type_norm == "GST_FILING":
                     filing_row = await conn.fetchrow(
                         f"""
-                        SELECT id, customer_id, filing_frequency, gstin, is_active
-                        FROM {DB_SCHEMA}.gst_filings
-                        WHERE id = $1
-                        LIMIT 1
+                        SELECT f.id,
+                               f.customer_id,
+                               f.filing_frequency,
+                               f.gstin,
+                               f.is_active,
+                               NULLIF(trim(f.business_name), '') AS filing_business_name,
+                               NULLIF(trim(r.client_name), '') AS reg_client_name,
+                               NULLIF(trim(r.business_name), '') AS reg_business_name,
+                               NULLIF(trim(c.full_name), '') AS customer_full_name,
+                               NULLIF(trim(c.business_name), '') AS customer_business_name
+                          FROM {DB_SCHEMA}.gst_filings f
+                          LEFT JOIN {DB_SCHEMA}.gst_registration r
+                            ON r.id = f.gst_registration_id
+                          LEFT JOIN {DB_SCHEMA}.customers c
+                            ON c.customer_id = f.customer_id
+                         WHERE f.id = $1
+                         LIMIT 1
                         """,
                         entity_id,
                     )
@@ -610,6 +676,18 @@ async def get_payment_amount(
                     customer_id = filing_row["customer_id"]
                     display_name = f"GST Filing ({filing_row['filing_frequency']})"
                     ownership_category = filing_row["filing_frequency"]
+                    target_code = (filing_row["gstin"] or "").strip().upper() or None
+                    target_customer_name = (
+                        filing_row["reg_client_name"]
+                        or filing_row["customer_full_name"]
+                        or ""
+                    )
+                    target_business_name = (
+                        filing_row["filing_business_name"]
+                        or filing_row["reg_business_name"]
+                        or filing_row["customer_business_name"]
+                        or ""
+                    )
 
                 elif entity_type_norm == "GST_FILING_RETURN_DETAILS":
                     detail_row = await conn.fetchrow(
@@ -618,10 +696,20 @@ async def get_payment_amount(
                                d.is_active AS detail_active,
                                f.customer_id,
                                f.filing_frequency,
-                               f.is_active AS filing_active
+                               f.gstin,
+                               f.is_active AS filing_active,
+                               NULLIF(trim(f.business_name), '') AS filing_business_name,
+                               NULLIF(trim(r.client_name), '') AS reg_client_name,
+                               NULLIF(trim(r.business_name), '') AS reg_business_name,
+                               NULLIF(trim(c.full_name), '') AS customer_full_name,
+                               NULLIF(trim(c.business_name), '') AS customer_business_name
                           FROM {DB_SCHEMA}.gst_filing_return_details d
                           INNER JOIN {DB_SCHEMA}.gst_filings f
                             ON f.id = d.gst_filing_id
+                          LEFT JOIN {DB_SCHEMA}.gst_registration r
+                            ON r.id = f.gst_registration_id
+                          LEFT JOIN {DB_SCHEMA}.customers c
+                            ON c.customer_id = f.customer_id
                          WHERE d.id = $1
                          LIMIT 1
                         """,
@@ -645,6 +733,18 @@ async def get_payment_amount(
                     )
                     ownership_category = filing_frequency
                     pricing_lookup_entity_type = "GST_FILING"
+                    target_code = (detail_row["gstin"] or "").strip().upper() or None
+                    target_customer_name = (
+                        detail_row["reg_client_name"]
+                        or detail_row["customer_full_name"]
+                        or ""
+                    )
+                    target_business_name = (
+                        detail_row["filing_business_name"]
+                        or detail_row["reg_business_name"]
+                        or detail_row["customer_business_name"]
+                        or ""
+                    )
 
                 elif entity_type_norm == "INCOME_TAX":
                     income_tax_row = await conn.fetchrow(
@@ -678,11 +778,15 @@ async def get_payment_amount(
                                cs.customer_id,
                                cs.service_code,
                                cs.is_active,
-                               sc.service_name
+                               sc.service_name,
+                               NULLIF(trim(c.full_name), '') AS customer_full_name,
+                               NULLIF(trim(c.business_name), '') AS customer_business_name
                           FROM {DB_SCHEMA}.customer_services cs
                           LEFT JOIN {DB_SCHEMA}.service_config sc
                             ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
                            AND sc.is_active IS NOT DISTINCT FROM TRUE
+                          LEFT JOIN {DB_SCHEMA}.customers c
+                            ON c.customer_id = cs.customer_id
                          WHERE cs.id = $1
                          LIMIT 1
                         """,
@@ -698,6 +802,9 @@ async def get_payment_amount(
                     ownership_category = code or "N/A"
                     label = (cs_row["service_name"] or code or "Customer service").strip()
                     display_name = label
+                    target_code = code or None
+                    target_customer_name = cs_row["customer_full_name"] or ""
+                    target_business_name = cs_row["customer_business_name"] or ""
 
                 else:
                     raise HTTPException(
@@ -823,12 +930,23 @@ async def get_payment_amount(
                         f"Payment already completed for this {entity_type_norm.lower().replace('_', ' ')}.",
                     )
 
+                target_label = _build_payment_target_label(
+                    target_code or ownership_category,
+                    target_customer_name,
+                    target_business_name,
+                    entity_id,
+                )
+
                 return {
                     "entity_id": entity_id,
                     "entity_type": entity_type_norm,
                     "customer_id": customer_id,
                     "ownership_category": ownership_category,
                     "display_name": display_name,
+                    "target_code": target_code or ownership_category,
+                    "customer_name": _clean_display_label(target_customer_name),
+                    "business_name": _clean_display_label(target_business_name),
+                    "target_label": target_label,
                     "original_amount": round(original_amount, 2),
                     "total_discount": round(total_discount, 2),
                     "total_paid": round(total_paid, 2),

@@ -72,6 +72,7 @@ async def _invalidate_customer_services_index_caches() -> None:
         "customer_services:filter:index",
         "customer_services:dashboard:index",
         "customer_services:pending:index",
+        "customer_services:progress_tracker:index",
         "customer_service_followups:list:index",
         "customer_service_followups:counts:index",
         "customer_service_followups:alerts:index",

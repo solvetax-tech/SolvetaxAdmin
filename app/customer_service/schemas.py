@@ -131,3 +131,39 @@ class ServiceConfigDropdownResponse(CustomerServiceBaseSchema):
     data: List[ServiceConfigDropdownRow]
     count: int
     request_id: str
+
+
+class CustomerServiceProgressRowOut(CustomerServiceBaseSchema):
+    customer_id: int
+    customer_name: Optional[str] = None
+    business_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    required_count: int = 0
+    provided_count: int = 0
+    pending_count: int = 0
+    completion_percent: int = 0
+    overall_status: Literal["NOT_STARTED", "IN_PROGRESS", "COMPLETED"] = "NOT_STARTED"
+    required_services: List[str] = Field(default_factory=list)
+    provided_services: List[str] = Field(default_factory=list)
+    pending_services: List[str] = Field(default_factory=list)
+    rm_id: Optional[int] = None
+    op_id: Optional[int] = None
+    rm_username: Optional[str] = None
+    op_username: Optional[str] = None
+    latest_service_at: Optional[datetime] = None
+
+
+class CustomerServiceProgressSummaryOut(CustomerServiceBaseSchema):
+    tracked_customers: int = 0
+    completed: int = 0
+    in_progress: int = 0
+    not_started: int = 0
+
+
+class CustomerServiceProgressTrackerOut(CustomerServiceBaseSchema):
+    summary: CustomerServiceProgressSummaryOut
+    rows: List[CustomerServiceProgressRowOut]
+    count: int
+    total_count: int
+    limit: int
+    offset: int
