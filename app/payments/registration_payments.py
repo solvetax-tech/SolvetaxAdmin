@@ -19,6 +19,7 @@ from app.utils import (
     generate_uuid,
     build_registration_payments_visibility,
 )
+from app.Dashboard.service_done_payment_pending import invalidate_service_done_payment_pending_cache
 from app.logger import logger
 from app.redis_cache import (
     build_cache_key,
@@ -42,6 +43,7 @@ def _registration_payments_filter_tag() -> str:
 async def _invalidate_registration_payments_cache() -> None:
     await redis_invalidate_tag(_registration_payments_filter_tag())
     await redis_invalidate_tag("payments_config:get_amount:index")
+    await invalidate_service_done_payment_pending_cache()
 
 @router.post(
     "",

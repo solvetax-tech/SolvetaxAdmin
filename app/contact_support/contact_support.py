@@ -21,6 +21,36 @@ from app.utils import (
 
 router = APIRouter(prefix="/api/v1/contact-support", tags=["Contact Support"])
 
+_LEAD_BUCKET_CONTACT = "CONTACT_SUPPORT"
+_LEAD_BUCKET_REFERRAL = "REFERRAL"
+_ALLOWED_LEAD_BUCKETS = frozenset({_LEAD_BUCKET_CONTACT, _LEAD_BUCKET_REFERRAL})
+
+
+def _referral_present_sql(alias: str = "c") -> str:
+    return (
+        f"{alias}.referal_phone_number IS NOT NULL "
+        f"AND trim({alias}.referal_phone_number) <> ''"
+    )
+
+
+def _referral_absent_sql(alias: str = "c") -> str:
+    return (
+        f"({alias}.referal_phone_number IS NULL "
+        f"OR trim({alias}.referal_phone_number) = '')"
+    )
+
+
+def _normalize_lead_bucket(value: Optional[str]) -> Optional[str]:
+    if value is None or not str(value).strip():
+        return None
+    bucket = str(value).strip().upper()
+    if bucket not in _ALLOWED_LEAD_BUCKETS:
+        raise HTTPException(
+            status_code=400,
+            detail="lead_bucket must be CONTACT_SUPPORT or REFERRAL.",
+        )
+    return bucket
+
 
 def _contact_support_filter_tag() -> str:
     return "contact_support:filter:index"
@@ -137,6 +167,103 @@ async def create_contact_support(
         raise HTTPException(status_code=500, detail="Database error.")
 
 
+@router.get("/options", summary="Dropdown options and lead bucket counts")
+async def contact_support_options(
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    """service_required list + active lead counts per bucket (referral phone null vs set)."""
+    request_id = generate_uuid()
+    role_norm, emp_id = _contact_support_role_emp(current_user)
+
+    cache_key = build_cache_key(
+        "contact_support_options",
+        role=role_norm,
+        emp_id=emp_id,
+    )
+
+    async def _loader():
+        try:
+            pool = await get_db_pool()
+            async with pool.acquire() as conn:
+                service_rows = await conn.fetch(
+                    f"""
+                    SELECT DISTINCT upper(trim(val)) AS service_code
+                      FROM (
+                        SELECT COALESCE(NULLIF(trim(service_name), ''), trim(service_code)) AS val
+                          FROM {DB_SCHEMA}.service_config
+                         WHERE is_active = TRUE
+                        UNION
+                        SELECT trim(service_required) AS val
+                          FROM {DB_SCHEMA}.contact_support
+                         WHERE service_required IS NOT NULL
+                           AND trim(service_required) <> ''
+                      ) s
+                     WHERE val IS NOT NULL AND trim(val) <> ''
+                     ORDER BY 1
+                    """
+                )
+                referral_rows = await conn.fetch(
+                    f"""
+                    SELECT DISTINCT trim(referal_phone_number) AS referal_phone_number
+                      FROM {DB_SCHEMA}.contact_support c
+                     WHERE {_referral_present_sql("c")}
+                       AND c.is_active = TRUE
+                     ORDER BY 1
+                    """
+                )
+
+                vis_conditions = ["c.is_active = TRUE"]
+                vis_values: list = []
+                vis_idx = 1
+                visibility_sql, visibility_values, vis_idx = build_customer_visibility(
+                    role_norm, emp_id, vis_idx, DB_SCHEMA
+                )
+                if visibility_sql:
+                    vis_conditions.append(f"({visibility_sql})")
+                    vis_values.extend(visibility_values)
+
+                vis_where = f"WHERE {' AND '.join(vis_conditions)}"
+                contact_count = await conn.fetchval(
+                    f"""
+                    SELECT COUNT(*)::bigint
+                      FROM {DB_SCHEMA}.contact_support c
+                     {vis_where}
+                       AND {_referral_absent_sql("c")}
+                    """,
+                    *vis_values,
+                )
+                referral_count = await conn.fetchval(
+                    f"""
+                    SELECT COUNT(*)::bigint
+                      FROM {DB_SCHEMA}.contact_support c
+                     {vis_where}
+                       AND {_referral_present_sql("c")}
+                    """,
+                    *vis_values,
+                )
+
+            return {
+                "service_required": [r["service_code"] for r in service_rows if r["service_code"]],
+                "referal_phone_numbers": [
+                    r["referal_phone_number"] for r in referral_rows if r["referal_phone_number"]
+                ],
+                "counts": {
+                    "contact_support": int(contact_count or 0),
+                    "referral": int(referral_count or 0),
+                },
+                "request_id": request_id,
+            }
+        except asyncpg.PostgresError:
+            raise HTTPException(status_code=500, detail="Database error.")
+
+    return await redis_get_or_set_json(
+        cache_key=cache_key,
+        loader=_loader,
+        ttl_seconds=120,
+        tags=[_contact_support_filter_tag()],
+    )
+
+
 @router.get("/filter", summary="Filter contact support requests")
 async def filter_contact_support(
     id: Optional[int] = None,
@@ -146,6 +273,10 @@ async def filter_contact_support(
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
     referal_phone_number: Optional[str] = None,
+    lead_bucket: Optional[str] = Query(
+        None,
+        description="CONTACT_SUPPORT: referal_phone_number is null/empty. REFERRAL: referal_phone_number is set.",
+    ),
     is_service_provided: Optional[bool] = None,
     is_resolved: Optional[bool] = None,
     is_active: Optional[bool] = None,
@@ -162,9 +293,10 @@ async def filter_contact_support(
     email_address = email_address.strip().lower() if email_address else None
     service_required = service_required.strip().upper() if service_required else None
     referal_phone_number = referal_phone_number.strip() if referal_phone_number else None
+    lead_bucket_norm = _normalize_lead_bucket(lead_bucket)
 
     cache_key = build_cache_key(
-        "contact_support_filter",
+        "contact_support_filter:v2",
         id=id,
         phone_number=phone_number,
         email_address=email_address,
@@ -172,6 +304,7 @@ async def filter_contact_support(
         rm_id=rm_id,
         op_id=op_id,
         referal_phone_number=referal_phone_number,
+        lead_bucket=lead_bucket_norm,
         is_service_provided=is_service_provided,
         is_resolved=is_resolved,
         is_active=is_active,
@@ -206,6 +339,10 @@ async def filter_contact_support(
         add_eq("c.op_id", op_id)
     if referal_phone_number:
         add_eq("trim(c.referal_phone_number)", referal_phone_number)
+    if lead_bucket_norm == _LEAD_BUCKET_CONTACT:
+        conditions.append(_referral_absent_sql("c"))
+    elif lead_bucket_norm == _LEAD_BUCKET_REFERRAL:
+        conditions.append(_referral_present_sql("c"))
     if is_service_provided is not None:
         add_eq("c.is_service_provided", is_service_provided)
     if is_resolved is not None:

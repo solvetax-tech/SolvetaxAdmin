@@ -1,7 +1,8 @@
 import logging
+from typing import Any, Optional, List
+
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status, Request
-from typing import Optional, List
 from app.security.rbac import require_permission
 from app.security.public_security import enforce_public_security
 from app.payments.schemas import RegistrationPaymentIn
@@ -561,6 +562,377 @@ async def get_public_service_prices(request: Request):
         tags=["payments_config:public_service_prices:index"],
     )
 
+
+async def compute_entity_payment_amounts(
+    conn: asyncpg.Connection,
+    *,
+    entity_id: int,
+    entity_type_norm: str,
+    itr_payment_customer_id: Optional[int] = None,
+) -> dict[str, Any]:
+    """
+    Resolve original / paid / remaining amounts for an entity (same rules as Add Payment).
+    """
+    from app.payments.payment_ledger import compute_entity_balance
+
+    customer_id = None
+    display_name = ""
+    description = ""
+    ownership_category = "N/A"
+    pricing_lookup_entity_type = entity_type_norm
+    target_code = ""
+    target_customer_name = ""
+    target_business_name = ""
+
+    if entity_type_norm == "GST_REGISTRATION":
+        gst_row = await conn.fetchrow(
+            f"""
+            SELECT g.id,
+                   g.customer_id,
+                   g.ownership_category,
+                   g.is_active,
+                   g.gstin,
+                   NULLIF(trim(g.client_name), '') AS client_name,
+                   NULLIF(trim(g.business_name), '') AS reg_business_name,
+                   NULLIF(trim(c.full_name), '') AS customer_full_name,
+                   NULLIF(trim(c.business_name), '') AS customer_business_name
+              FROM {DB_SCHEMA}.gst_registration g
+              LEFT JOIN {DB_SCHEMA}.customers c
+                ON c.customer_id = g.customer_id
+             WHERE g.id = $1
+             LIMIT 1
+            """,
+            entity_id,
+        )
+        if not gst_row:
+            raise HTTPException(404, "GST registration not found.")
+        if not gst_row["is_active"]:
+            raise HTTPException(400, "GST registration is inactive.")
+
+        customer_id = gst_row["customer_id"]
+        ownership_category = (gst_row["ownership_category"] or "N/A").strip().upper()
+        display_name = "GST Registration"
+        target_code = (gst_row["gstin"] or "").strip().upper() or None
+        target_customer_name = gst_row["client_name"] or gst_row["customer_full_name"] or ""
+        target_business_name = (
+            gst_row["reg_business_name"] or gst_row["customer_business_name"] or ""
+        )
+
+    elif entity_type_norm == "GST_FILING":
+        filing_row = await conn.fetchrow(
+            f"""
+            SELECT f.id,
+                   f.customer_id,
+                   f.filing_frequency,
+                   f.gstin,
+                   f.is_active,
+                   NULLIF(trim(f.business_name), '') AS filing_business_name,
+                   NULLIF(trim(r.client_name), '') AS reg_client_name,
+                   NULLIF(trim(r.business_name), '') AS reg_business_name,
+                   NULLIF(trim(c.full_name), '') AS customer_full_name,
+                   NULLIF(trim(c.business_name), '') AS customer_business_name
+              FROM {DB_SCHEMA}.gst_filings f
+              LEFT JOIN {DB_SCHEMA}.gst_registration r
+                ON r.id = f.gst_registration_id
+              LEFT JOIN {DB_SCHEMA}.customers c
+                ON c.customer_id = f.customer_id
+             WHERE f.id = $1
+             LIMIT 1
+            """,
+            entity_id,
+        )
+        if not filing_row:
+            raise HTTPException(404, "GST filing not found.")
+        if not filing_row["is_active"]:
+            raise HTTPException(400, "GST filing is inactive.")
+
+        customer_id = filing_row["customer_id"]
+        display_name = f"GST Filing ({filing_row['filing_frequency']})"
+        ownership_category = filing_row["filing_frequency"]
+        target_code = (filing_row["gstin"] or "").strip().upper() or None
+        target_customer_name = (
+            filing_row["reg_client_name"] or filing_row["customer_full_name"] or ""
+        )
+        target_business_name = (
+            filing_row["filing_business_name"]
+            or filing_row["reg_business_name"]
+            or filing_row["customer_business_name"]
+            or ""
+        )
+
+    elif entity_type_norm == "GST_FILING_RETURN_DETAILS":
+        detail_row = await conn.fetchrow(
+            f"""
+            SELECT d.id,
+                   d.is_active AS detail_active,
+                   f.customer_id,
+                   f.filing_frequency,
+                   f.gstin,
+                   f.is_active AS filing_active,
+                   NULLIF(trim(f.business_name), '') AS filing_business_name,
+                   NULLIF(trim(r.client_name), '') AS reg_client_name,
+                   NULLIF(trim(r.business_name), '') AS reg_business_name,
+                   NULLIF(trim(c.full_name), '') AS customer_full_name,
+                   NULLIF(trim(c.business_name), '') AS customer_business_name
+              FROM {DB_SCHEMA}.gst_filing_return_details d
+              INNER JOIN {DB_SCHEMA}.gst_filings f
+                ON f.id = d.gst_filing_id
+              LEFT JOIN {DB_SCHEMA}.gst_registration r
+                ON r.id = f.gst_registration_id
+              LEFT JOIN {DB_SCHEMA}.customers c
+                ON c.customer_id = f.customer_id
+             WHERE d.id = $1
+             LIMIT 1
+            """,
+            entity_id,
+        )
+        if not detail_row:
+            raise HTTPException(404, "GST filing return detail not found.")
+        if not detail_row["detail_active"]:
+            raise HTTPException(400, "GST filing return detail is inactive.")
+        if not detail_row["filing_active"]:
+            raise HTTPException(400, "Parent GST filing is inactive.")
+
+        customer_id = detail_row["customer_id"]
+        filing_frequency = detail_row["filing_frequency"]
+        display_name = f"GST Filing return detail ({filing_frequency})"
+        ownership_category = filing_frequency
+        pricing_lookup_entity_type = "GST_FILING"
+        target_code = (detail_row["gstin"] or "").strip().upper() or None
+        target_customer_name = (
+            detail_row["reg_client_name"] or detail_row["customer_full_name"] or ""
+        )
+        target_business_name = (
+            detail_row["filing_business_name"]
+            or detail_row["reg_business_name"]
+            or detail_row["customer_business_name"]
+            or ""
+        )
+
+    elif entity_type_norm == "INCOME_TAX":
+        income_tax_row = await conn.fetchrow(
+            f"""
+            SELECT id, financial_year, is_active
+            FROM {DB_SCHEMA}.income_tax
+            WHERE id = $1
+            LIMIT 1
+            """,
+            entity_id,
+        )
+        if not income_tax_row:
+            raise HTTPException(404, "Income tax record not found.")
+        if not income_tax_row["is_active"]:
+            raise HTTPException(400, "Income tax record is inactive.")
+
+        customer_id = itr_payment_customer_id
+        fy = income_tax_row["financial_year"]
+        if isinstance(fy, (list, tuple)):
+            fy_label = ", ".join(str(x) for x in fy if x)
+        else:
+            fy_label = str(fy) if fy else ""
+        display_name = f"Income Tax ({fy_label or 'N/A'})"
+        ownership_category = fy_label or "N/A"
+
+    elif entity_type_norm == "CUSTOMER_SERVICE":
+        cs_row = await conn.fetchrow(
+            f"""
+            SELECT cs.id,
+                   cs.customer_id,
+                   cs.service_code,
+                   cs.is_active,
+                   sc.service_name,
+                   NULLIF(trim(c.full_name), '') AS customer_full_name,
+                   NULLIF(trim(c.business_name), '') AS customer_business_name
+              FROM {DB_SCHEMA}.customer_services cs
+              LEFT JOIN {DB_SCHEMA}.service_config sc
+                ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
+               AND sc.is_active IS NOT DISTINCT FROM TRUE
+              LEFT JOIN {DB_SCHEMA}.customers c
+                ON c.customer_id = cs.customer_id
+             WHERE cs.id = $1
+             LIMIT 1
+            """,
+            entity_id,
+        )
+        if not cs_row:
+            raise HTTPException(404, "Customer service not found.")
+        if not cs_row["is_active"]:
+            raise HTTPException(400, "Customer service is inactive.")
+
+        customer_id = cs_row["customer_id"]
+        code = (cs_row["service_code"] or "").strip().upper()
+        ownership_category = code or "N/A"
+        label = (cs_row["service_name"] or code or "Customer service").strip()
+        display_name = label
+        target_code = code or None
+        target_customer_name = cs_row["customer_full_name"] or ""
+        target_business_name = cs_row["customer_business_name"] or ""
+
+    else:
+        raise HTTPException(400, f"Unsupported entity type: {entity_type_norm}")
+
+    payment_summary = await conn.fetchrow(
+        f"""
+        SELECT
+            (
+                SELECT amount
+                FROM {DB_SCHEMA}.payments
+                WHERE customer_id IS NOT DISTINCT FROM $1
+                  AND entity_id = $2
+                  AND entity_type = $3
+                  AND is_active = TRUE
+                  AND payment_status != 'CANCELLED'
+                ORDER BY created_at ASC
+                LIMIT 1
+            ) AS original_amount,
+            COALESCE(SUM(discount), 0) AS total_discount,
+            COALESCE(SUM(paid_amount), 0) AS total_paid,
+            (
+                SELECT payment_status
+                FROM {DB_SCHEMA}.payments
+                WHERE customer_id IS NOT DISTINCT FROM $1
+                  AND entity_id = $2
+                  AND entity_type = $3
+                  AND is_active = TRUE
+                  AND payment_status != 'CANCELLED'
+                ORDER BY created_at DESC
+                LIMIT 1
+            ) AS last_status
+        FROM {DB_SCHEMA}.payments
+        WHERE customer_id IS NOT DISTINCT FROM $1
+          AND entity_id = $2
+          AND entity_type = $3
+          AND is_active = TRUE
+          AND payment_status != 'CANCELLED'
+        """,
+        customer_id,
+        entity_id,
+        entity_type_norm,
+    )
+
+    if payment_summary["original_amount"] is None:
+        if entity_type_norm == "CUSTOMER_SERVICE":
+            config = await fetch_active_price_for_service_code(
+                conn,
+                ownership_category if ownership_category != "N/A" else "",
+            )
+        else:
+            config = await conn.fetchrow(
+                f"""
+                SELECT display_name, amount, description, is_active
+                FROM {DB_SCHEMA}.payment_config
+                WHERE upper(trim(entity_type)) = upper(trim($1::text))
+                  AND upper(trim(config_type)) = 'PRICE'
+                  AND (
+                      upper(trim(value)) = upper(trim($2::text))
+                      OR upper(trim(value)) = 'DEFAULT'
+                  )
+                  AND (filter IS NULL OR trim(filter) = '')
+                ORDER BY
+                  CASE WHEN upper(trim(value)) = upper(trim($2::text)) THEN 0 ELSE 1 END ASC
+                LIMIT 1
+                """,
+                pricing_lookup_entity_type,
+                ownership_category,
+            )
+
+        if not config:
+            original_amount = 0.0
+            display_name = display_name or entity_type_norm
+            description = f"Initial payment for {display_name}"
+        else:
+            if not config["is_active"]:
+                raise HTTPException(400, "Payment configuration is inactive.")
+            original_amount = float(config["amount"])
+            display_name = config["display_name"]
+            description = config["description"]
+
+        total_discount = 0.0
+        total_paid = 0.0
+
+    else:
+        original_amount = float(payment_summary["original_amount"])
+        total_discount = float(payment_summary["total_discount"] or 0)
+        total_paid = float(payment_summary["total_paid"] or 0)
+        last_status = payment_summary["last_status"]
+
+        if entity_type_norm == "GST_REGISTRATION":
+            display_name = "GST Registration"
+            description = "Remaining payment for GST registration"
+        elif entity_type_norm == "CUSTOMER_SERVICE":
+            description = f"Remaining payment for {display_name}"
+        else:
+            description = f"Remaining payment for {display_name}"
+
+        if last_status == "PAID":
+            raise HTTPException(
+                409,
+                f"Payment already completed for this {entity_type_norm.lower().replace('_', ' ')}.",
+            )
+
+    net_amount, remaining_amount = compute_entity_balance(
+        original_amount, total_discount, total_paid
+    )
+
+    if remaining_amount <= 0 and (original_amount > 0 or total_paid > 0):
+        raise HTTPException(
+            409,
+            f"Payment already completed for this {entity_type_norm.lower().replace('_', ' ')}.",
+        )
+
+    target_label = _build_payment_target_label(
+        target_code or ownership_category,
+        target_customer_name,
+        target_business_name,
+        entity_id,
+    )
+
+    return {
+        "entity_id": entity_id,
+        "entity_type": entity_type_norm,
+        "customer_id": customer_id,
+        "ownership_category": ownership_category,
+        "display_name": display_name,
+        "target_code": target_code or ownership_category,
+        "customer_name": _clean_display_label(target_customer_name),
+        "business_name": _clean_display_label(target_business_name),
+        "target_label": target_label,
+        "original_amount": round(original_amount, 2),
+        "total_discount": round(total_discount, 2),
+        "total_paid": round(total_paid, 2),
+        "net_amount": round(net_amount, 2),
+        "remaining_amount": round(remaining_amount, 2),
+        "payable_amount": round(remaining_amount, 2),
+        "description": description,
+    }
+
+
+async def resolve_entity_remaining_amount(
+    conn: asyncpg.Connection,
+    *,
+    entity_id: int,
+    entity_type: str,
+    customer_id: Optional[int] = None,
+) -> Optional[float]:
+    """Collectible balance for dashboard; None when entity is missing or inactive."""
+    entity_type_norm = (entity_type or "").strip().upper()
+    itr_payment_customer_id = customer_id if entity_type_norm == "INCOME_TAX" else None
+    try:
+        data = await compute_entity_payment_amounts(
+            conn,
+            entity_id=entity_id,
+            entity_type_norm=entity_type_norm,
+            itr_payment_customer_id=itr_payment_customer_id,
+        )
+        return float(data["remaining_amount"])
+    except HTTPException as exc:
+        if exc.status_code in (404, 400):
+            return None
+        if exc.status_code == 409:
+            return 0.0
+        raise
+
+
 @router.get(
     "/amount/{entity_id}",
     summary="Get Entity Payment Details",
@@ -598,364 +970,14 @@ async def get_payment_amount(
     async def _load_payment_amount():
         async with pool.acquire() as conn:
             try:
-                customer_id = None
-                display_name = ""
-                description = ""
-                ownership_category = "N/A"
-                pricing_lookup_entity_type = entity_type_norm
-                target_code = ""
-                target_customer_name = ""
-                target_business_name = ""
-
-                if entity_type_norm == "GST_REGISTRATION":
-                    gst_row = await conn.fetchrow(
-                        f"""
-                        SELECT g.id,
-                               g.customer_id,
-                               g.ownership_category,
-                               g.is_active,
-                               g.gstin,
-                               NULLIF(trim(g.client_name), '') AS client_name,
-                               NULLIF(trim(g.business_name), '') AS reg_business_name,
-                               NULLIF(trim(c.full_name), '') AS customer_full_name,
-                               NULLIF(trim(c.business_name), '') AS customer_business_name
-                          FROM {DB_SCHEMA}.gst_registration g
-                          LEFT JOIN {DB_SCHEMA}.customers c
-                            ON c.customer_id = g.customer_id
-                         WHERE g.id = $1
-                         LIMIT 1
-                        """,
-                        entity_id,
-                    )
-                    if not gst_row:
-                        raise HTTPException(404, "GST registration not found.")
-                    if not gst_row["is_active"]:
-                        raise HTTPException(400, "GST registration is inactive.")
-
-                    customer_id = gst_row["customer_id"]
-                    ownership_category = (
-                        (gst_row["ownership_category"] or "N/A").strip().upper()
-                    )
-                    display_name = "GST Registration"
-                    target_code = (gst_row["gstin"] or "").strip().upper() or None
-                    target_customer_name = (
-                        gst_row["client_name"] or gst_row["customer_full_name"] or ""
-                    )
-                    target_business_name = (
-                        gst_row["reg_business_name"] or gst_row["customer_business_name"] or ""
-                    )
-
-                elif entity_type_norm == "GST_FILING":
-                    filing_row = await conn.fetchrow(
-                        f"""
-                        SELECT f.id,
-                               f.customer_id,
-                               f.filing_frequency,
-                               f.gstin,
-                               f.is_active,
-                               NULLIF(trim(f.business_name), '') AS filing_business_name,
-                               NULLIF(trim(r.client_name), '') AS reg_client_name,
-                               NULLIF(trim(r.business_name), '') AS reg_business_name,
-                               NULLIF(trim(c.full_name), '') AS customer_full_name,
-                               NULLIF(trim(c.business_name), '') AS customer_business_name
-                          FROM {DB_SCHEMA}.gst_filings f
-                          LEFT JOIN {DB_SCHEMA}.gst_registration r
-                            ON r.id = f.gst_registration_id
-                          LEFT JOIN {DB_SCHEMA}.customers c
-                            ON c.customer_id = f.customer_id
-                         WHERE f.id = $1
-                         LIMIT 1
-                        """,
-                        entity_id,
-                    )
-                    if not filing_row:
-                        raise HTTPException(404, "GST filing not found.")
-                    if not filing_row["is_active"]:
-                        raise HTTPException(400, "GST filing is inactive.")
-
-                    customer_id = filing_row["customer_id"]
-                    display_name = f"GST Filing ({filing_row['filing_frequency']})"
-                    ownership_category = filing_row["filing_frequency"]
-                    target_code = (filing_row["gstin"] or "").strip().upper() or None
-                    target_customer_name = (
-                        filing_row["reg_client_name"]
-                        or filing_row["customer_full_name"]
-                        or ""
-                    )
-                    target_business_name = (
-                        filing_row["filing_business_name"]
-                        or filing_row["reg_business_name"]
-                        or filing_row["customer_business_name"]
-                        or ""
-                    )
-
-                elif entity_type_norm == "GST_FILING_RETURN_DETAILS":
-                    detail_row = await conn.fetchrow(
-                        f"""
-                        SELECT d.id,
-                               d.is_active AS detail_active,
-                               f.customer_id,
-                               f.filing_frequency,
-                               f.gstin,
-                               f.is_active AS filing_active,
-                               NULLIF(trim(f.business_name), '') AS filing_business_name,
-                               NULLIF(trim(r.client_name), '') AS reg_client_name,
-                               NULLIF(trim(r.business_name), '') AS reg_business_name,
-                               NULLIF(trim(c.full_name), '') AS customer_full_name,
-                               NULLIF(trim(c.business_name), '') AS customer_business_name
-                          FROM {DB_SCHEMA}.gst_filing_return_details d
-                          INNER JOIN {DB_SCHEMA}.gst_filings f
-                            ON f.id = d.gst_filing_id
-                          LEFT JOIN {DB_SCHEMA}.gst_registration r
-                            ON r.id = f.gst_registration_id
-                          LEFT JOIN {DB_SCHEMA}.customers c
-                            ON c.customer_id = f.customer_id
-                         WHERE d.id = $1
-                         LIMIT 1
-                        """,
-                        entity_id,
-                    )
-                    if not detail_row:
-                        raise HTTPException(
-                            404, "GST filing return detail not found."
-                        )
-                    if not detail_row["detail_active"]:
-                        raise HTTPException(
-                            400, "GST filing return detail is inactive."
-                        )
-                    if not detail_row["filing_active"]:
-                        raise HTTPException(400, "Parent GST filing is inactive.")
-
-                    customer_id = detail_row["customer_id"]
-                    filing_frequency = detail_row["filing_frequency"]
-                    display_name = (
-                        f"GST Filing return detail ({filing_frequency})"
-                    )
-                    ownership_category = filing_frequency
-                    pricing_lookup_entity_type = "GST_FILING"
-                    target_code = (detail_row["gstin"] or "").strip().upper() or None
-                    target_customer_name = (
-                        detail_row["reg_client_name"]
-                        or detail_row["customer_full_name"]
-                        or ""
-                    )
-                    target_business_name = (
-                        detail_row["filing_business_name"]
-                        or detail_row["reg_business_name"]
-                        or detail_row["customer_business_name"]
-                        or ""
-                    )
-
-                elif entity_type_norm == "INCOME_TAX":
-                    income_tax_row = await conn.fetchrow(
-                        f"""
-                        SELECT id, financial_year, is_active
-                        FROM {DB_SCHEMA}.income_tax
-                        WHERE id = $1
-                        LIMIT 1
-                        """,
-                        entity_id,
-                    )
-                    if not income_tax_row:
-                        raise HTTPException(404, "Income tax record not found.")
-                    if not income_tax_row["is_active"]:
-                        raise HTTPException(400, "Income tax record is inactive.")
-
-                    # ITR rows have no customer_id; use optional query param for payment history.
-                    customer_id = itr_payment_customer_id
-                    fy = income_tax_row["financial_year"]
-                    if isinstance(fy, (list, tuple)):
-                        fy_label = ", ".join(str(x) for x in fy if x)
-                    else:
-                        fy_label = str(fy) if fy else ""
-                    display_name = f"Income Tax ({fy_label or 'N/A'})"
-                    ownership_category = fy_label or "N/A"
-
-                elif entity_type_norm == "CUSTOMER_SERVICE":
-                    cs_row = await conn.fetchrow(
-                        f"""
-                        SELECT cs.id,
-                               cs.customer_id,
-                               cs.service_code,
-                               cs.is_active,
-                               sc.service_name,
-                               NULLIF(trim(c.full_name), '') AS customer_full_name,
-                               NULLIF(trim(c.business_name), '') AS customer_business_name
-                          FROM {DB_SCHEMA}.customer_services cs
-                          LEFT JOIN {DB_SCHEMA}.service_config sc
-                            ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
-                           AND sc.is_active IS NOT DISTINCT FROM TRUE
-                          LEFT JOIN {DB_SCHEMA}.customers c
-                            ON c.customer_id = cs.customer_id
-                         WHERE cs.id = $1
-                         LIMIT 1
-                        """,
-                        entity_id,
-                    )
-                    if not cs_row:
-                        raise HTTPException(404, "Customer service not found.")
-                    if not cs_row["is_active"]:
-                        raise HTTPException(400, "Customer service is inactive.")
-
-                    customer_id = cs_row["customer_id"]
-                    code = (cs_row["service_code"] or "").strip().upper()
-                    ownership_category = code or "N/A"
-                    label = (cs_row["service_name"] or code or "Customer service").strip()
-                    display_name = label
-                    target_code = code or None
-                    target_customer_name = cs_row["customer_full_name"] or ""
-                    target_business_name = cs_row["customer_business_name"] or ""
-
-                else:
-                    raise HTTPException(
-                        400,
-                        f"Unsupported entity type: {entity_type_norm}",
-                    )
-
-                payment_summary = await conn.fetchrow(
-                    f"""
-                    SELECT
-                        (
-                            SELECT amount
-                            FROM {DB_SCHEMA}.payments
-                            WHERE customer_id IS NOT DISTINCT FROM $1
-                              AND entity_id = $2
-                              AND entity_type = $3
-                              AND is_active = TRUE
-                              AND payment_status != 'CANCELLED'
-                            ORDER BY created_at ASC
-                            LIMIT 1
-                        ) AS original_amount,
-                        COALESCE(SUM(discount), 0) AS total_discount,
-                        COALESCE(SUM(paid_amount), 0) AS total_paid,
-                        (
-                            SELECT payment_status
-                            FROM {DB_SCHEMA}.payments
-                            WHERE customer_id IS NOT DISTINCT FROM $1
-                              AND entity_id = $2
-                              AND entity_type = $3
-                              AND is_active = TRUE
-                              AND payment_status != 'CANCELLED'
-                            ORDER BY created_at DESC
-                            LIMIT 1
-                        ) AS last_status
-                    FROM {DB_SCHEMA}.payments
-                    WHERE customer_id IS NOT DISTINCT FROM $1
-                      AND entity_id = $2
-                      AND entity_type = $3
-                      AND is_active = TRUE
-                      AND payment_status != 'CANCELLED'
-                    """,
-                    customer_id,
-                    entity_id,
-                    entity_type_norm,
+                payload = await compute_entity_payment_amounts(
+                    conn,
+                    entity_id=entity_id,
+                    entity_type_norm=entity_type_norm,
+                    itr_payment_customer_id=itr_payment_customer_id,
                 )
-
-                if payment_summary["original_amount"] is None:
-                    if entity_type_norm == "CUSTOMER_SERVICE":
-                        config = await fetch_active_price_for_service_code(
-                            conn,
-                            ownership_category if ownership_category != "N/A" else "",
-                        )
-                    else:
-                        config = await conn.fetchrow(
-                            f"""
-                            SELECT display_name, amount, description, is_active
-                            FROM {DB_SCHEMA}.payment_config
-                            WHERE upper(trim(entity_type)) = upper(trim($1::text))
-                              AND upper(trim(config_type)) = 'PRICE'
-                              AND (
-                                  upper(trim(value)) = upper(trim($2::text))
-                                  OR upper(trim(value)) = 'DEFAULT'
-                              )
-                              AND (filter IS NULL OR trim(filter) = '')
-                            ORDER BY
-                              CASE WHEN upper(trim(value)) = upper(trim($2::text)) THEN 0 ELSE 1 END ASC
-                            LIMIT 1
-                            """,
-                            pricing_lookup_entity_type,
-                            ownership_category,
-                        )
-
-                    if not config:
-                        original_amount = 0.0
-                        display_name = display_name or entity_type_norm
-                        description = f"Initial payment for {display_name}"
-                    else:
-                        if not config["is_active"]:
-                            raise HTTPException(
-                                400,
-                                "Payment configuration is inactive.",
-                            )
-                        original_amount = float(config["amount"])
-                        display_name = config["display_name"]
-                        description = config["description"]
-
-                    total_discount = 0.0
-                    total_paid = 0.0
-
-                else:
-                    original_amount = float(payment_summary["original_amount"])
-                    total_discount = float(
-                        payment_summary["total_discount"] or 0
-                    )
-                    total_paid = float(payment_summary["total_paid"] or 0)
-                    last_status = payment_summary["last_status"]
-
-                    if entity_type_norm == "GST_REGISTRATION":
-                        display_name = "GST Registration"
-                        description = "Remaining payment for GST registration"
-                    elif entity_type_norm == "CUSTOMER_SERVICE":
-                        description = f"Remaining payment for {display_name}"
-                    else:
-                        description = f"Remaining payment for {display_name}"
-
-                    if last_status == "PAID":
-                        raise HTTPException(
-                            409,
-                            f"Payment already completed for this {entity_type_norm.lower().replace('_', ' ')}.",
-                        )
-
-                from app.payments.payment_ledger import compute_entity_balance
-
-                net_amount, remaining_amount = compute_entity_balance(
-                    original_amount, total_discount, total_paid
-                )
-
-                if remaining_amount <= 0 and (
-                    original_amount > 0 or total_paid > 0
-                ):
-                    raise HTTPException(
-                        409,
-                        f"Payment already completed for this {entity_type_norm.lower().replace('_', ' ')}.",
-                    )
-
-                target_label = _build_payment_target_label(
-                    target_code or ownership_category,
-                    target_customer_name,
-                    target_business_name,
-                    entity_id,
-                )
-
-                return {
-                    "entity_id": entity_id,
-                    "entity_type": entity_type_norm,
-                    "customer_id": customer_id,
-                    "ownership_category": ownership_category,
-                    "display_name": display_name,
-                    "target_code": target_code or ownership_category,
-                    "customer_name": _clean_display_label(target_customer_name),
-                    "business_name": _clean_display_label(target_business_name),
-                    "target_label": target_label,
-                    "original_amount": round(original_amount, 2),
-                    "total_discount": round(total_discount, 2),
-                    "total_paid": round(total_paid, 2),
-                    "net_amount": round(net_amount, 2),
-                    "remaining_amount": round(remaining_amount, 2),
-                    "payable_amount": round(remaining_amount, 2),
-                    "description": description,
-                    "request_id": request_id,
-                }
+                payload["request_id"] = request_id
+                return payload
             except asyncpg.PostgresError:
                 raise HTTPException(500, "Database error.")
             except HTTPException:

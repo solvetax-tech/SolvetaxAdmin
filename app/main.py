@@ -134,6 +134,7 @@ from app.contact_support.contact_support import router as contact_support_router
 from app.campaign.campaign import router as campaign_router
 from app.customer_service.customer_service import router as customer_service_staff_router
 from app.customer_service.service_config import router as customer_service_config_router
+from app.Dashboard.service_done_payment_pending import router as dashboard_router
 
 
 if email_verification:
@@ -206,6 +207,8 @@ if customer_service_staff_router:
     app.include_router(customer_service_staff_router)
 if customer_service_config_router:
     app.include_router(customer_service_config_router)
+if dashboard_router:
+    app.include_router(dashboard_router)
 
 @app.get("/health")
 async def health_check():

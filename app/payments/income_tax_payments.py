@@ -2,6 +2,7 @@ import asyncpg
 import json
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.Dashboard.service_done_payment_pending import invalidate_service_done_payment_pending_cache
 from app.logger import logger
 from app.payments.schemas import FilingPaymentIn
 from app.payments.payment_ledger import PaymentLedgerError
@@ -27,6 +28,7 @@ async def _invalidate_income_tax_payments_cache() -> None:
     # Shared payments listing endpoint caches by filter.
     await redis_invalidate_tag("registration_payments:filter:index")
     await redis_invalidate_tag("payments_config:get_amount:index")
+    await invalidate_service_done_payment_pending_cache()
 
 
 @router.post(
