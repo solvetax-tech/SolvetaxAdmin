@@ -27,7 +27,11 @@ DB_SCHEMA = os.getenv("DB_SCHEMA", "solvetax")
 # Supports both existing keys (host/port/password) and REDIS_* variants.
 REDIS_HOST = (os.getenv("REDIS_HOST") or os.getenv("host") or "").strip()
 REDIS_PORT = int((os.getenv("REDIS_PORT") or os.getenv("port") or "6379").strip())
-REDIS_PASSWORD = (os.getenv("REDIS_PASSWORD") or os.getenv("password") or "").strip()
+_redis_pw_raw = (os.getenv("REDIS_PASSWORD") or os.getenv("password") or "").strip()
+# .env may wrap password in quotes; strip so Azure Redis auth succeeds.
+if len(_redis_pw_raw) >= 2 and _redis_pw_raw[0] == _redis_pw_raw[-1] and _redis_pw_raw[0] in "\"'":
+    _redis_pw_raw = _redis_pw_raw[1:-1]
+REDIS_PASSWORD = _redis_pw_raw
 
 
 @dataclass(frozen=True)
@@ -106,12 +110,6 @@ async def get_db_pool():
     DB_NAME = os.getenv("DB_NAME")
     DB_USER = os.getenv("DB_USER")
     DB_PASSWORD = os.getenv("DB_PASSWORD")
-   
-
-    print(
-        f"[DB DEBUG] DB_HOST={DB_HOST} DB_PORT={DB_PORT} "
-        f"DB_NAME={DB_NAME} DB_USER={DB_USER} DB_SCHEMA={DB_SCHEMA}"
-    )
 
     if not DB_HOST or not DB_NAME or not DB_USER:
         raise RuntimeError("Database environment variables are not loaded")
@@ -121,9 +119,19 @@ async def get_db_pool():
         async with _db_pool_lock:
             if _db_pool is None:
                 ssl_context = ssl.create_default_context()
-                pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
-                pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
+                pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "2"))
+                pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "10"))
                 app_name = os.getenv("DB_APP_NAME", "slovetax-api")
+                logging.info(
+                    "[DB] Creating pool host=%s port=%s db=%s user=%s schema=%s min=%s max=%s",
+                    DB_HOST,
+                    DB_PORT,
+                    DB_NAME,
+                    DB_USER,
+                    DB_SCHEMA,
+                    pool_min_size,
+                    pool_max_size,
+                )
                 _db_pool = await asyncpg.create_pool(
                     host=DB_HOST,
                     port=DB_PORT,
@@ -131,10 +139,10 @@ async def get_db_pool():
                     user=DB_USER,
                     password=DB_PASSWORD,
                     ssl=ssl_context,
-                    command_timeout=60,
+                    command_timeout=int(os.getenv("DB_COMMAND_TIMEOUT", "30")),
                     min_size=pool_min_size,
                     max_size=pool_max_size,
-                    max_inactive_connection_lifetime=60,
+                    max_inactive_connection_lifetime=300,
                     server_settings={"application_name": app_name},
                 )
 

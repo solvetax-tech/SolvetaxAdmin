@@ -19,12 +19,11 @@ from app.utils import (
     generate_uuid,
     build_registration_payments_visibility,
 )
-from app.Dashboard.service_done_payment_pending import invalidate_service_done_payment_pending_cache
 from app.logger import logger
+from app.payments.payment_cache_invalidation import invalidate_payment_related_caches
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
-    invalidate_tag as redis_invalidate_tag,
 )
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -39,11 +38,6 @@ router = APIRouter(
 def _registration_payments_filter_tag() -> str:
     return "registration_payments:filter:index"
 
-
-async def _invalidate_registration_payments_cache() -> None:
-    await redis_invalidate_tag(_registration_payments_filter_tag())
-    await redis_invalidate_tag("payments_config:get_amount:index")
-    await invalidate_service_done_payment_pending_cache()
 
 @router.post(
     "",
@@ -157,7 +151,10 @@ async def create_registration_payment(
             # RESPONSE
             # --------------------------------------------------
 
-            await _invalidate_registration_payments_cache()
+            await invalidate_payment_related_caches(
+                gst_registration_id=payload.entity_id,
+                crm=True,
+            )
             return {
                 **dict(payment_row),
                 "message": "Payment created successfully.",
@@ -721,7 +718,10 @@ async def soft_delete_registration_payment(
                 "Registration payment soft deleted successfully | payment_id=%s",
                 payment_id,
             )
-            await _invalidate_registration_payments_cache()
+            await invalidate_payment_related_caches(
+                gst_registration_id=int(deleted_row["entity_id"]),
+                crm=True,
+            )
 
             return {
                 **dict(deleted_row),
@@ -884,7 +884,10 @@ async def activate_registration_payment(
                 "Registration payment activated successfully | payment_id=%s",
                 payment_id,
             )
-            await _invalidate_registration_payments_cache()
+            await invalidate_payment_related_caches(
+                gst_registration_id=int(payment_row["entity_id"]),
+                crm=True,
+            )
 
             return {
                 **dict(activated_row),

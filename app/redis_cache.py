@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import asyncio
 import random
 import hashlib
@@ -17,10 +18,10 @@ _redis_client: Optional[redis.Redis] = None
 # Cross-worker / cross-task loader coordination (replaces per-key asyncio.Lock growth).
 _LOADER_LOCK_KEY_PREFIX = "cache:loader:"
 _LOADER_LOCK_TTL_SEC = 25
-_LOADER_WAIT_ATTEMPTS = 200
-_LOADER_WAIT_INTERVAL_SEC = 0.05
-_REDIS_CONNECT_TIMEOUT_SEC = 0.5
-_REDIS_COOLDOWN_SEC = 30
+_LOADER_WAIT_ATTEMPTS = int(os.getenv("REDIS_LOADER_WAIT_ATTEMPTS", "40"))
+_LOADER_WAIT_INTERVAL_SEC = float(os.getenv("REDIS_LOADER_WAIT_INTERVAL_SEC", "0.05"))
+_REDIS_CONNECT_TIMEOUT_SEC = float(os.getenv("REDIS_CONNECT_TIMEOUT_SEC", "2"))
+_REDIS_COOLDOWN_SEC = int(os.getenv("REDIS_COOLDOWN_SEC", "15"))
 _redis_skip_until_ts = 0.0
 
 
@@ -28,7 +29,7 @@ def _log_cache_step(step: str, **fields: Any) -> None:
     parts = [f"cache_step={step}"]
     for key, value in fields.items():
         parts.append(f"{key}={value}")
-    logger.info(" ".join(parts))
+    logger.debug(" ".join(parts))
 
 
 def is_redis_configured() -> bool:
@@ -255,7 +256,7 @@ async def get_or_set_json(
 ) -> Any:
     _log_cache_step("get_or_set_start", key=cache_key, ttl_seconds=ttl_seconds, has_tags=bool(tags))
     if not is_redis_configured() or _redis_temporarily_disabled():
-        logger.info("cache_status=bypass key=%s", cache_key)
+        logger.debug("cache_status=bypass key=%s", cache_key)
         _log_cache_step(
             "get_or_set_bypass",
             key=cache_key,
@@ -266,13 +267,13 @@ async def get_or_set_json(
 
     cached = await get_json(cache_key)
     if cached is not None:
-        logger.info("cache_status=hit key=%s", cache_key)
+        logger.debug("cache_status=hit key=%s", cache_key)
         return cached
-    logger.info("cache_status=miss key=%s", cache_key)
+    logger.debug("cache_status=miss key=%s", cache_key)
     _log_cache_step("get_or_set_miss", key=cache_key)
     if _redis_temporarily_disabled():
         # get_json likely just failed and opened cooldown; skip second Redis attempt.
-        logger.info("cache_status=fallback key=%s reason=redis_cooldown", cache_key)
+        logger.debug("cache_status=fallback key=%s reason=redis_cooldown", cache_key)
         _log_cache_step("get_or_set_fallback", key=cache_key, reason="redis_cooldown")
         return await loader()
 
@@ -284,7 +285,7 @@ async def get_or_set_json(
         _log_cache_step("get_or_set_lock_result", key=cache_key, acquired=bool(acquired))
     except Exception:
         _mark_redis_unhealthy()
-        logger.info("cache_status=fallback key=%s reason=lock_acquire_failed", cache_key)
+        logger.debug("cache_status=fallback key=%s reason=lock_acquire_failed", cache_key)
         _log_cache_step("get_or_set_fallback", key=cache_key, reason="lock_acquire_failed")
         logger.warning(
             "Redis lock acquisition failed for key=%s; using DB loader fallback",
@@ -297,7 +298,7 @@ async def get_or_set_json(
         try:
             cached_again = await get_json(cache_key)
             if cached_again is not None:
-                logger.info("cache_status=hit key=%s source=double_check", cache_key)
+                logger.debug("cache_status=hit key=%s source=double_check", cache_key)
                 _log_cache_step("get_or_set_hit_double_check", key=cache_key)
                 return cached_again
             _log_cache_step("get_or_set_loader_run", key=cache_key, mode="lock_owner")
@@ -309,7 +310,7 @@ async def get_or_set_json(
                 ttl_seconds=ttl_with_jitter,
                 tags=tags,
             )
-            logger.info("cache_status=miss key=%s action=stored", cache_key)
+            logger.debug("cache_status=miss key=%s action=stored", cache_key)
             _log_cache_step("get_or_set_store_complete", key=cache_key, ttl_seconds=ttl_with_jitter)
             return value
         finally:
@@ -325,11 +326,11 @@ async def get_or_set_json(
                 await asyncio.sleep(_LOADER_WAIT_INTERVAL_SEC)
                 hit = await get_json(cache_key)
                 if hit is not None:
-                    logger.info("cache_status=hit key=%s source=wait_loop", cache_key)
+                    logger.debug("cache_status=hit key=%s source=wait_loop", cache_key)
                     _log_cache_step("get_or_set_hit_wait_loop", key=cache_key)
                     return hit
         except Exception:
-            logger.info("cache_status=fallback key=%s reason=wait_loop_failed", cache_key)
+            logger.debug("cache_status=fallback key=%s reason=wait_loop_failed", cache_key)
             _log_cache_step("get_or_set_fallback", key=cache_key, reason="wait_loop_failed")
             logger.warning(
                 "Redis wait loop failed for key=%s; using DB loader fallback",
@@ -338,7 +339,7 @@ async def get_or_set_json(
             )
             return await loader()
         # Rare: lock holder slow or failed after setting cache; avoid hanging forever.
-        logger.info("cache_status=fallback key=%s reason=wait_loop_timeout", cache_key)
+        logger.debug("cache_status=fallback key=%s reason=wait_loop_timeout", cache_key)
         _log_cache_step("get_or_set_fallback", key=cache_key, reason="wait_loop_timeout")
         _log_cache_step("get_or_set_loader_run", key=cache_key, mode="wait_timeout")
         value = await loader()

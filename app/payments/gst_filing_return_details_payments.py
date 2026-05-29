@@ -17,7 +17,7 @@ from app.payments.payment_ledger_db import (
     lock_entity_payment_rows,
     resolve_ledger_for_create,
 )
-from app.redis_cache import invalidate_tag as redis_invalidate_tag
+from app.payments.payment_cache_invalidation import invalidate_payment_related_caches
 from app.security.rbac import require_permission
 from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
 
@@ -27,11 +27,6 @@ router = APIRouter(
 )
 
 ENTITY_TYPE = "GST_FILING_RETURN_DETAILS"
-
-
-async def _invalidate_return_detail_payments_cache() -> None:
-    await redis_invalidate_tag("registration_payments:filter:index")
-    await redis_invalidate_tag("payments_config:get_amount:index")
 
 
 @router.post(
@@ -141,7 +136,7 @@ async def create_gst_filing_return_detail_payment(
                     None,
                 )
 
-            await _invalidate_return_detail_payments_cache()
+            await invalidate_payment_related_caches(gst_filing=True)
             return {
                 **dict(payment_row),
                 "message": "GST filing return detail payment created successfully.",
@@ -245,7 +240,7 @@ async def soft_delete_return_detail_payment(
                     None,
                 )
 
-            await _invalidate_return_detail_payments_cache()
+            await invalidate_payment_related_caches(gst_filing=True)
 
             return {
                 **dict(deleted_row),
@@ -348,7 +343,7 @@ async def activate_return_detail_payment(
                     None,
                 )
 
-            await _invalidate_return_detail_payments_cache()
+            await invalidate_payment_related_caches(gst_filing=True)
             return {
                 **dict(activated_row),
                 "message": "GST filing return detail payment activated successfully.",

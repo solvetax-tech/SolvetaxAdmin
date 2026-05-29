@@ -184,6 +184,14 @@ async def _crm_apply_call_update(
             remarks = COALESCE($4, remarks),
             rm_id = CASE WHEN $6 = 'RM' THEN $7 ELSE rm_id END,
             op_id = CASE WHEN $6 = 'OP' THEN $7 ELSE op_id END,
+            rm_assigned_at = CASE
+                WHEN $6 = 'RM' AND rm_id IS DISTINCT FROM $7 THEN NOW()
+                ELSE rm_assigned_at
+            END,
+            op_assigned_at = CASE
+                WHEN $6 = 'OP' AND op_id IS DISTINCT FROM $7 THEN NOW()
+                ELSE op_assigned_at
+            END,
             updated_at = NOW()
         WHERE id = $5
         RETURNING *
@@ -471,6 +479,10 @@ async def edit_crm_lead(
                 if "followup_at" in update_data and update_data["followup_at"] is not None:
                     if update_data["followup_at"] <= datetime.now(IST):
                         raise _validation_error("Invalid followup datetime.", {"followup_at": "Must be a future datetime."})
+                if "rm_id" in update_data and update_data["rm_id"] != old_row["rm_id"]:
+                    update_data["rm_assigned_at"] = datetime.now(IST) if update_data["rm_id"] is not None else None
+                if "op_id" in update_data and update_data["op_id"] != old_row["op_id"]:
+                    update_data["op_assigned_at"] = datetime.now(IST) if update_data["op_id"] is not None else None
 
                 fields, values, idx = [], [], 1
                 for key, value in update_data.items():

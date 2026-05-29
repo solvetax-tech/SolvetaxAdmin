@@ -2,8 +2,8 @@ import asyncpg
 import json
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.Dashboard.service_done_payment_pending import invalidate_service_done_payment_pending_cache
 from app.logger import logger
+from app.payments.payment_cache_invalidation import invalidate_payment_related_caches
 from app.payments.schemas import FilingPaymentIn
 from app.payments.payment_ledger import PaymentLedgerError
 from app.payments.payment_ledger_db import (
@@ -14,7 +14,6 @@ from app.payments.payment_ledger_db import (
     lock_entity_payment_rows,
     resolve_ledger_for_create,
 )
-from app.redis_cache import invalidate_tag as redis_invalidate_tag
 from app.security.rbac import require_permission
 from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
 
@@ -22,13 +21,6 @@ router = APIRouter(
     prefix="/api/v1/income-tax-payments",
     tags=["Income Tax Payments"],
 )
-
-
-async def _invalidate_income_tax_payments_cache() -> None:
-    # Shared payments listing endpoint caches by filter.
-    await redis_invalidate_tag("registration_payments:filter:index")
-    await redis_invalidate_tag("payments_config:get_amount:index")
-    await invalidate_service_done_payment_pending_cache()
 
 
 @router.post(
@@ -125,7 +117,10 @@ async def create_income_tax_payment(
                     None,
                 )
 
-            await _invalidate_income_tax_payments_cache()
+            await invalidate_payment_related_caches(
+                income_tax_id=int(payload.entity_id),
+                crm=True,
+            )
             return {
                 **dict(payment_row),
                 "message": "Income tax payment created successfully.",
@@ -209,7 +204,10 @@ async def soft_delete_income_tax_payment(
                     None,
                 )
 
-            await _invalidate_income_tax_payments_cache()
+            await invalidate_payment_related_caches(
+                income_tax_id=int(deleted_row["entity_id"]),
+                crm=True,
+            )
             return {
                 **dict(deleted_row),
                 "message": "Income tax payment soft deleted successfully.",
@@ -307,7 +305,10 @@ async def activate_income_tax_payment(
                     None,
                 )
 
-            await _invalidate_income_tax_payments_cache()
+            await invalidate_payment_related_caches(
+                income_tax_id=int(activated_row["entity_id"]),
+                crm=True,
+            )
             return {
                 **dict(activated_row),
                 "message": "Income tax payment activated successfully.",

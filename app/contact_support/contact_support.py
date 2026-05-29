@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import List, Optional
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -29,15 +29,49 @@ _ALLOWED_LEAD_BUCKETS = frozenset({_LEAD_BUCKET_CONTACT, _LEAD_BUCKET_REFERRAL})
 def _referral_present_sql(alias: str = "c") -> str:
     return (
         f"{alias}.referal_phone_number IS NOT NULL "
-        f"AND trim({alias}.referal_phone_number) <> ''"
+        f"AND cardinality({alias}.referal_phone_number) > 0"
     )
 
 
 def _referral_absent_sql(alias: str = "c") -> str:
     return (
         f"({alias}.referal_phone_number IS NULL "
-        f"OR trim({alias}.referal_phone_number) = '')"
+        f"OR cardinality({alias}.referal_phone_number) = 0)"
     )
+
+
+def _normalize_upper_list(items: Optional[List[str]]) -> Optional[List[str]]:
+    if items is None:
+        return None
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if item is None:
+            continue
+        s = str(item).strip().upper()
+        if not s:
+            continue
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out or None
+
+
+def _normalize_phone_list(items: Optional[List[str]]) -> Optional[List[str]]:
+    if items is None:
+        return None
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if item is None:
+            continue
+        s = str(item).strip()
+        if not s:
+            continue
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out or None
 
 
 def _normalize_lead_bucket(value: Optional[str]) -> Optional[str]:
@@ -110,13 +144,47 @@ async def create_contact_support(
                     FROM {DB_SCHEMA}.contact_support
                     WHERE is_active = TRUE
                       AND trim(phone_number) = trim($1::text)
-                      AND COALESCE(trim(referal_phone_number), '') = COALESCE(trim($2::text), '')
-                      AND upper(COALESCE(trim(service_required), '')) = upper(COALESCE(trim($3::text), ''))
+                      AND COALESCE(
+                            ARRAY(
+                                SELECT DISTINCT trim(x)
+                                FROM unnest(referal_phone_number) AS x
+                                WHERE trim(x) <> ''
+                                ORDER BY 1
+                            ),
+                            ARRAY[]::text[]
+                          ) =
+                          COALESCE(
+                            ARRAY(
+                                SELECT DISTINCT trim(x)
+                                FROM unnest($2::text[]) AS x
+                                WHERE trim(x) <> ''
+                                ORDER BY 1
+                            ),
+                            ARRAY[]::text[]
+                          )
+                      AND COALESCE(
+                            ARRAY(
+                                SELECT DISTINCT upper(trim(x))
+                                FROM unnest(service_required) AS x
+                                WHERE trim(x) <> ''
+                                ORDER BY 1
+                            ),
+                            ARRAY[]::text[]
+                          ) =
+                          COALESCE(
+                            ARRAY(
+                                SELECT DISTINCT upper(trim(x))
+                                FROM unnest($3::text[]) AS x
+                                WHERE trim(x) <> ''
+                                ORDER BY 1
+                            ),
+                            ARRAY[]::text[]
+                          )
                 ) AS combo_match
                 """,
                 payload.phone_number,
-                payload.referal_phone_number,
-                payload.service_required,
+                _normalize_phone_list(payload.referal_phone_number),
+                _normalize_upper_list(payload.service_required),
             )
             if duplicate_row and duplicate_row["combo_match"]:
                 _raise_contact_support_validation_error(
@@ -147,8 +215,8 @@ async def create_contact_support(
                 payload.your_name,
                 payload.phone_number,
                 payload.email_address,
-                payload.service_required,
-                payload.referal_phone_number,
+                _normalize_upper_list(payload.service_required),
+                _normalize_phone_list(payload.referal_phone_number),
                 payload.your_message,
             )
         await _invalidate_contact_support_cache()
@@ -193,10 +261,11 @@ async def contact_support_options(
                           FROM {DB_SCHEMA}.service_config
                          WHERE is_active = TRUE
                         UNION
-                        SELECT trim(service_required) AS val
-                          FROM {DB_SCHEMA}.contact_support
+                        SELECT upper(trim(sr)) AS val
+                          FROM {DB_SCHEMA}.contact_support,
+                               unnest(service_required) AS sr
                          WHERE service_required IS NOT NULL
-                           AND trim(service_required) <> ''
+                           AND trim(sr) <> ''
                       ) s
                      WHERE val IS NOT NULL AND trim(val) <> ''
                      ORDER BY 1
@@ -204,9 +273,11 @@ async def contact_support_options(
                 )
                 referral_rows = await conn.fetch(
                     f"""
-                    SELECT DISTINCT trim(referal_phone_number) AS referal_phone_number
-                      FROM {DB_SCHEMA}.contact_support c
+                    SELECT DISTINCT trim(rp) AS referal_phone_number
+                      FROM {DB_SCHEMA}.contact_support c,
+                           unnest(c.referal_phone_number) AS rp
                      WHERE {_referral_present_sql("c")}
+                       AND trim(rp) <> ''
                        AND c.is_active = TRUE
                      ORDER BY 1
                     """
@@ -269,10 +340,10 @@ async def filter_contact_support(
     id: Optional[int] = None,
     phone_number: Optional[str] = None,
     email_address: Optional[str] = None,
-    service_required: Optional[str] = None,
+    service_required: Optional[List[str]] = Query(None),
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
-    referal_phone_number: Optional[str] = None,
+    referal_phone_number: Optional[List[str]] = Query(None),
     lead_bucket: Optional[str] = Query(
         None,
         description="CONTACT_SUPPORT: referal_phone_number is null/empty. REFERRAL: referal_phone_number is set.",
@@ -291,8 +362,8 @@ async def filter_contact_support(
     role_norm = str(role).strip().upper() if role is not None else ""
     phone_number = phone_number.strip() if phone_number else None
     email_address = email_address.strip().lower() if email_address else None
-    service_required = service_required.strip().upper() if service_required else None
-    referal_phone_number = referal_phone_number.strip() if referal_phone_number else None
+    service_required = _normalize_upper_list(service_required)
+    referal_phone_number = _normalize_phone_list(referal_phone_number)
     lead_bucket_norm = _normalize_lead_bucket(lead_bucket)
 
     cache_key = build_cache_key(
@@ -332,13 +403,17 @@ async def filter_contact_support(
     if email_address:
         add_eq("lower(trim(c.email_address))", email_address)
     if service_required:
-        add_eq("upper(trim(c.service_required))", service_required)
+        conditions.append(f"COALESCE(c.service_required, ARRAY[]::text[]) && ${idx}::text[]")
+        values.append(service_required)
+        idx += 1
     if rm_id is not None:
         add_eq("c.rm_id", rm_id)
     if op_id is not None:
         add_eq("c.op_id", op_id)
     if referal_phone_number:
-        add_eq("trim(c.referal_phone_number)", referal_phone_number)
+        conditions.append(f"COALESCE(c.referal_phone_number, ARRAY[]::text[]) && ${idx}::text[]")
+        values.append(referal_phone_number)
+        idx += 1
     if lead_bucket_norm == _LEAD_BUCKET_CONTACT:
         conditions.append(_referral_absent_sql("c"))
     elif lead_bucket_norm == _LEAD_BUCKET_REFERRAL:
@@ -483,8 +558,12 @@ async def edit_contact_support(
                     raise HTTPException(status_code=404, detail="Contact support request not found.")
 
                 phone_value = update_data.get("phone_number", existing["phone_number"])
-                referal_phone_value = update_data.get("referal_phone_number", existing["referal_phone_number"])
-                service_value = update_data.get("service_required", existing["service_required"])
+                referal_phone_value = _normalize_phone_list(
+                    update_data.get("referal_phone_number", existing["referal_phone_number"])
+                )
+                service_value = _normalize_upper_list(
+                    update_data.get("service_required", existing["service_required"])
+                )
                 duplicate_row = await conn.fetchrow(
                     f"""
                     SELECT EXISTS(
@@ -493,8 +572,42 @@ async def edit_contact_support(
                         WHERE id <> $1
                           AND is_active = TRUE
                           AND trim(phone_number) = trim($2::text)
-                          AND COALESCE(trim(referal_phone_number), '') = COALESCE(trim($3::text), '')
-                          AND upper(COALESCE(trim(service_required), '')) = upper(COALESCE(trim($4::text), ''))
+                          AND COALESCE(
+                                ARRAY(
+                                    SELECT DISTINCT trim(x)
+                                    FROM unnest(referal_phone_number) AS x
+                                    WHERE trim(x) <> ''
+                                    ORDER BY 1
+                                ),
+                                ARRAY[]::text[]
+                              ) =
+                              COALESCE(
+                                ARRAY(
+                                    SELECT DISTINCT trim(x)
+                                    FROM unnest($3::text[]) AS x
+                                    WHERE trim(x) <> ''
+                                    ORDER BY 1
+                                ),
+                                ARRAY[]::text[]
+                              )
+                          AND COALESCE(
+                                ARRAY(
+                                    SELECT DISTINCT upper(trim(x))
+                                    FROM unnest(service_required) AS x
+                                    WHERE trim(x) <> ''
+                                    ORDER BY 1
+                                ),
+                                ARRAY[]::text[]
+                              ) =
+                              COALESCE(
+                                ARRAY(
+                                    SELECT DISTINCT upper(trim(x))
+                                    FROM unnest($4::text[]) AS x
+                                    WHERE trim(x) <> ''
+                                    ORDER BY 1
+                                ),
+                                ARRAY[]::text[]
+                              )
                     ) AS combo_match
                     """,
                     contact_id,
@@ -517,6 +630,10 @@ async def edit_contact_support(
                 values = []
                 idx = 1
                 for k, v in update_data.items():
+                    if k == "service_required":
+                        v = _normalize_upper_list(v)
+                    elif k == "referal_phone_number":
+                        v = _normalize_phone_list(v)
                     fields.append(f"{k} = ${idx}")
                     values.append(v)
                     idx += 1

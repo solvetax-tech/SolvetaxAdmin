@@ -1104,12 +1104,15 @@ async def _bulk_import_crm_leads(
                                     f"""
                                     INSERT INTO {DB_SCHEMA}.crm_leads (
                                         mobile, full_name, email, entity_id, entity_type, preferred_language,
-                                        stage, followup_at, rm_id, op_id, remarks,
+                                        stage, followup_at, rm_id, op_id, rm_assigned_at, op_assigned_at, remarks,
                                         is_active, follow_up_status, lead_type, tag, lead_source,
                                         created_at, updated_at
                                     ) VALUES (
                                         $1, $2, $3, $4, $5, $6,
-                                        $7, $8, $9, $10, $11,
+                                        $7, $8, $9, $10,
+                                        CASE WHEN $9 IS NOT NULL THEN NOW() ELSE NULL END,
+                                        CASE WHEN $10 IS NOT NULL THEN NOW() ELSE NULL END,
+                                        $11,
                                         COALESCE($12, TRUE), COALESCE($13, 'PENDING'),
                                         $14, $15, $16,
                                         NOW(), NOW()
@@ -1461,13 +1464,25 @@ async def _svc_execute_bulk_assign(
                             continue
                         if payload.assignment_role == "RM":
                             await conn.execute(
-                                f"UPDATE {DB_SCHEMA}.crm_leads SET rm_id = $1, updated_at = NOW() WHERE id = $2",
+                                (
+                                    f"UPDATE {DB_SCHEMA}.crm_leads "
+                                    f"SET rm_id = $1, "
+                                    f"rm_assigned_at = CASE WHEN rm_id IS DISTINCT FROM $1 THEN NOW() ELSE rm_assigned_at END, "
+                                    f"updated_at = NOW() "
+                                    f"WHERE id = $2"
+                                ),
                                 assignee,
                                 lead_id,
                             )
                         else:
                             await conn.execute(
-                                f"UPDATE {DB_SCHEMA}.crm_leads SET op_id = $1, updated_at = NOW() WHERE id = $2",
+                                (
+                                    f"UPDATE {DB_SCHEMA}.crm_leads "
+                                    f"SET op_id = $1, "
+                                    f"op_assigned_at = CASE WHEN op_id IS DISTINCT FROM $1 THEN NOW() ELSE op_assigned_at END, "
+                                    f"updated_at = NOW() "
+                                    f"WHERE id = $2"
+                                ),
                                 assignee,
                                 lead_id,
                             )
@@ -2169,6 +2184,8 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
                         follow_up_status,
                         rm_id,
                         op_id,
+                        rm_assigned_at,
+                        op_assigned_at,
                         remarks,
                         is_active,
                         lead_type,
@@ -2181,6 +2198,8 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
                         $1, $2, $3, NULL, $4, $5,
                         'FRESH_LEAD',
                         'PENDING',
+                        NULL,
+                        NULL,
                         NULL,
                         NULL,
                         $6,

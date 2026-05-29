@@ -13,22 +13,14 @@ from app.payments.payment_ledger_db import (
     resolve_ledger_for_create,
 )
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
-from app.Dashboard.service_done_payment_pending import invalidate_service_done_payment_pending_cache
 from app.logger import logger
-from app.redis_cache import invalidate_tag as redis_invalidate_tag
+from app.payments.payment_cache_invalidation import invalidate_payment_related_caches
 import json
 
 router = APIRouter(
     prefix="/api/v1/filing-payments",
     tags=["GST Filing Payments"],
 )
-
-
-async def _invalidate_gst_filing_payments_cache() -> None:
-    # Shared payments listing endpoint caches by filter (including entity_type=GST_FILING).
-    await redis_invalidate_tag("registration_payments:filter:index")
-    await redis_invalidate_tag("payments_config:get_amount:index")
-    await invalidate_service_done_payment_pending_cache()
 
 
 @router.post(
@@ -143,7 +135,7 @@ async def create_gst_filing_payment(
             # RESPONSE
             # --------------------------------------------------
 
-            await _invalidate_gst_filing_payments_cache()
+            await invalidate_payment_related_caches(gst_filing=True, crm=True)
             return {
                 **dict(payment_row),
                 "message": "GST filing payment created successfully.",
@@ -277,7 +269,7 @@ async def soft_delete_filing_payment(
                 "Filing payment soft deleted successfully | payment_id=%s",
                 payment_id,
             )
-            await _invalidate_gst_filing_payments_cache()
+            await invalidate_payment_related_caches(gst_filing=True, crm=True)
 
             return {
                 **dict(deleted_row),
@@ -388,7 +380,7 @@ async def activate_filing_payment(
                     None,
                 )
 
-            await _invalidate_gst_filing_payments_cache()
+            await invalidate_payment_related_caches(gst_filing=True, crm=True)
             return {
                 **dict(activated_row),
                 "message": "GST filing payment activated successfully.",

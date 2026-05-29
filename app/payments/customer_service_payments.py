@@ -14,9 +14,8 @@ from app.payments.payment_ledger_db import (
     resolve_ledger_for_create,
 )
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid
-from app.Dashboard.service_done_payment_pending import invalidate_service_done_payment_pending_cache
 from app.logger import logger
-from app.redis_cache import invalidate_tag as redis_invalidate_tag
+from app.payments.payment_cache_invalidation import invalidate_payment_related_caches
 import json
 
 router = APIRouter(
@@ -25,12 +24,6 @@ router = APIRouter(
 )
 
 ENTITY_TYPE = "CUSTOMER_SERVICE"
-
-
-async def _invalidate_customer_service_payments_cache() -> None:
-    await redis_invalidate_tag("registration_payments:filter:index")
-    await redis_invalidate_tag("payments_config:get_amount:index")
-    await invalidate_service_done_payment_pending_cache()
 
 
 @router.post(
@@ -133,7 +126,7 @@ async def create_customer_service_payment(
                     None,
                 )
 
-            await _invalidate_customer_service_payments_cache()
+            await invalidate_payment_related_caches(customer_service=True)
             return {
                 **dict(payment_row),
                 "message": "Customer service payment created successfully.",
@@ -240,7 +233,7 @@ async def soft_delete_customer_service_payment(
                     None,
                 )
 
-            await _invalidate_customer_service_payments_cache()
+            await invalidate_payment_related_caches(customer_service=True)
 
             return {
                 **dict(deleted_row),
@@ -343,7 +336,7 @@ async def activate_customer_service_payment(
                     None,
                 )
 
-            await _invalidate_customer_service_payments_cache()
+            await invalidate_payment_related_caches(customer_service=True)
             return {
                 **dict(activated_row),
                 "message": "Customer service payment activated successfully.",
