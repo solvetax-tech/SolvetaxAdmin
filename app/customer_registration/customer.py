@@ -1323,7 +1323,7 @@ async def get_customer_by_id(
     )
 
     log.info("Incoming get customer request | customer_id=%s", customer_id)
-    role = current_user.get("role")
+    role = (current_user.get("role") or "").strip().upper() or None
     cache_key = _customer_get_by_id_cache_key(customer_id, role, emp_id)
 
     try:
@@ -1407,18 +1407,18 @@ async def get_customer_by_id(
 # -------------------------------------------------------------------
 
 STANDARD_FILTERS = {
-    "customer_id": ("customer_id =", lambda v: v),
-    "full_name": ("full_name ILIKE", lambda v: f"%{v.strip()}%"),
-    "email": ("email ILIKE", lambda v: f"%{v.strip().lower()}%"),
-    "mobile": ("mobile =", lambda v: v.strip()),
-    "business_name": ("business_name ILIKE", lambda v: f"%{v.strip()}%"),
-    "business_type": ("business_type =", lambda v: v),
-    "state": ("state =", lambda v: v),
-    "city": ("city =", lambda v: v),
-    "language": ("language =", lambda v: v),
-    "rm_id": ("rm_id =", lambda v: v),
-    "op_id": ("op_id =", lambda v: v),
-    "referral_phone_number": ("referral_phone_number =", lambda v: v.strip() if isinstance(v, str) else v),
+    "customer_id": ("customer_id = {p}", lambda v: v),
+    "full_name": ("full_name ILIKE {p}", lambda v: f"%{v.strip()}%"),
+    "email": ("email ILIKE {p}", lambda v: f"%{v.strip().lower()}%"),
+    "mobile": ("trim(mobile) = trim({p}::text)", lambda v: v.strip()),
+    "business_name": ("business_name ILIKE {p}", lambda v: f"%{v.strip()}%"),
+    "business_type": ("business_type = {p}", lambda v: v),
+    "state": ("state = {p}", lambda v: v),
+    "city": ("city = {p}", lambda v: v),
+    "language": ("language = {p}", lambda v: v),
+    "rm_id": ("rm_id = {p}", lambda v: v),
+    "op_id": ("op_id = {p}", lambda v: v),
+    "referral_phone_number": ("referral_phone_number = {p}", lambda v: v.strip() if isinstance(v, str) else v),
 }
 
 ARRAY_FILTERS = {
@@ -1477,7 +1477,7 @@ async def filter_customers(
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
 
-    role = current_user.get("role")   # ✅ role from JWT
+    role = (current_user.get("role") or "").strip().upper() or None   # ✅ role from JWT (normalized)
 
     log = logging.LoggerAdapter(
         logger,
@@ -1561,7 +1561,7 @@ async def filter_customers(
                 }.get(key)
 
                 if value is not None:
-                    conditions.append(f"{sql_op} ${idx}")
+                    conditions.append(sql_op.format(p=f"${idx}"))
                     values.append(formatter(value))
                     idx += 1
 

@@ -1041,31 +1041,33 @@ async def list_gst_registrations(
             values.append(customer_id)
             param_index += 1
 
-        if gstin_is_null:
-            conditions.append("g.gstin IS NULL")
+        if gstin_is_null is not None:
+            conditions.append("g.gstin IS NULL" if gstin_is_null else "g.gstin IS NOT NULL")
         elif gstin:
-            conditions.append(f"upper(g.gstin) = ${param_index}")
+            conditions.append(f"upper(trim(g.gstin)) = ${param_index}")
             values.append(gstin)
             param_index += 1
 
-        if mobile_is_null:
-            conditions.append("g.mobile IS NULL")
+        if mobile_is_null is not None:
+            conditions.append("g.mobile IS NULL" if mobile_is_null else "g.mobile IS NOT NULL")
         elif mobile:
-            conditions.append(f"g.mobile = ${param_index}")
+            conditions.append(f"btrim(g.mobile) = btrim(${param_index}::text)")
             values.append(mobile)
             param_index += 1
 
-        if email_is_null:
-            conditions.append("g.email IS NULL")
+        if email_is_null is not None:
+            conditions.append("g.email IS NULL" if email_is_null else "g.email IS NOT NULL")
         elif email:
-            conditions.append(f"lower(g.email) = ${param_index}")
+            conditions.append(f"lower(trim(g.email)) = ${param_index}")
             values.append(email)
             param_index += 1
 
-        if secondary_email_is_null:
-            conditions.append("g.secondary_email IS NULL")
+        if secondary_email_is_null is not None:
+            conditions.append(
+                "g.secondary_email IS NULL" if secondary_email_is_null else "g.secondary_email IS NOT NULL"
+            )
         elif secondary_email:
-            conditions.append(f"lower(g.secondary_email) = ${param_index}")
+            conditions.append(f"lower(trim(g.secondary_email)) = ${param_index}")
             values.append(secondary_email)
             param_index += 1
 
@@ -1079,8 +1081,10 @@ async def list_gst_registrations(
             values.append(created_by)
             param_index += 1
 
-        if business_name_is_null:
-            conditions.append("g.business_name IS NULL")
+        if business_name_is_null is not None:
+            conditions.append(
+                "g.business_name IS NULL" if business_name_is_null else "g.business_name IS NOT NULL"
+            )
 
         elif business_name_clean:
             conditions.append(

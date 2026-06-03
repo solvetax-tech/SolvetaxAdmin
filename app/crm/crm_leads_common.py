@@ -97,6 +97,18 @@ def _entity_type_query(value: Optional[str]) -> str:
     return v if v else DEFAULT_CRM_ENTITY_TYPE
 
 
+def _crm_entity_type_match_sql(et_value: str, param_no: int, alias: str = "l") -> str:
+    """
+    Case/space-insensitive entity_type predicate. For the default GST funnel, legacy rows whose
+    entity_type is NULL/blank are treated as GST_REGISTRATION (mirrors _crm_lead_matches_funnel_entity_type),
+    so they are not silently dropped from list/filter results that display them.
+    """
+    base = f"upper(trim({alias}.entity_type)) = ${param_no}"
+    if et_value == DEFAULT_CRM_ENTITY_TYPE:
+        return f"({base} OR NULLIF(trim({alias}.entity_type), '') IS NULL)"
+    return base
+
+
 def _smart_board_stages(entity_type: Optional[str]) -> tuple[str, ...]:
     et = _entity_type_query(entity_type)
     if et == "INCOME_TAX":
@@ -855,6 +867,15 @@ async def _svc_filter_crm_leads(
             "Provide either stage or stages.",
             {"stage": "Use single stage or stages list, not both."},
         )
+    if (
+        followup_at_from is not None
+        and followup_at_to is not None
+        and followup_at_from > followup_at_to
+    ):
+        raise _validation_error(
+            "Invalid followup_at range.",
+            {"followup_at_from": "followup_at_from must be <= followup_at_to."},
+        )
     if stage:
         stage = _normalize_code(stage)
     stages_norm: Optional[List[str]] = None
@@ -934,10 +955,10 @@ async def _svc_filter_crm_leads(
                 params = []
                 if stage:
                     params.append(stage)
-                    where.append(f"l.stage = ${len(params)}")
+                    where.append(f"upper(trim(l.stage)) = ${len(params)}")
                 elif stages_norm:
                     params.append(stages_norm)
-                    where.append(f"l.stage = ANY(${len(params)})")
+                    where.append(f"upper(trim(l.stage)) = ANY(${len(params)})")
                 if follow_up_status:
                     params.append(follow_up_status)
                     where.append(f"l.follow_up_status = ${len(params)}")
@@ -972,11 +993,13 @@ async def _svc_filter_crm_leads(
                 if entity_id is not None:
                     params.append(entity_id)
                     where.append(f"l.entity_id = ${len(params)}")
-                    params.append(_entity_type_query(entity_type))
-                    where.append(f"l.entity_type = ${len(params)}")
+                    et_val = _entity_type_query(entity_type)
+                    params.append(et_val)
+                    where.append(_crm_entity_type_match_sql(et_val, len(params)))
                 elif entity_type is not None:
-                    params.append(_entity_type_query(entity_type))
-                    where.append(f"l.entity_type = ${len(params)}")
+                    et_val = _entity_type_query(entity_type)
+                    params.append(et_val)
+                    where.append(_crm_entity_type_match_sql(et_val, len(params)))
 
                 vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
                 if vis_sql:
@@ -1274,9 +1297,9 @@ async def _svc_get_bulk_assign_candidates(
             if stages_n:
                 params.append(stages_n)
                 clauses.append(
-                    f"l.stage = ANY(${len(params)})"
+                    f"upper(trim(l.stage)) = ANY(${len(params)})"
                     if filter_mode_norm == "IN"
-                    else f"NOT (l.stage = ANY(${len(params)}))"
+                    else f"NOT (upper(trim(l.stage)) = ANY(${len(params)}))"
                 )
             if rm_ids:
                 params.append(rm_ids)
@@ -1637,10 +1660,10 @@ async def _svc_filter_crm_activities(
                     where.append(f"a.call_status_code = ${len(params)}")
                 if old_stage is not None:
                     params.append(old_stage)
-                    where.append(f"a.old_stage = ${len(params)}")
+                    where.append(f"upper(trim(a.old_stage)) = ${len(params)}")
                 if new_stage is not None:
                     params.append(new_stage)
-                    where.append(f"a.new_stage = ${len(params)}")
+                    where.append(f"upper(trim(a.new_stage)) = ${len(params)}")
                 if performed_by is not None:
                     params.append(performed_by)
                     where.append(f"a.performed_by = ${len(params)}")
@@ -1655,18 +1678,20 @@ async def _svc_filter_crm_activities(
                     where.append(f"l.mobile = ${len(params)}")
                 if lead_stage is not None:
                     params.append(lead_stage)
-                    where.append(f"l.stage = ${len(params)}")
+                    where.append(f"upper(trim(l.stage)) = ${len(params)}")
                 if lead_is_active is not None:
                     params.append(lead_is_active)
                     where.append(f"l.is_active = ${len(params)}")
                 if entity_id is not None:
                     params.append(entity_id)
                     where.append(f"l.entity_id = ${len(params)}")
-                    params.append(_entity_type_query(entity_type))
-                    where.append(f"l.entity_type = ${len(params)}")
+                    et_val = _entity_type_query(entity_type)
+                    params.append(et_val)
+                    where.append(_crm_entity_type_match_sql(et_val, len(params)))
                 elif entity_type is not None:
-                    params.append(_entity_type_query(entity_type))
-                    where.append(f"l.entity_type = ${len(params)}")
+                    et_val = _entity_type_query(entity_type)
+                    params.append(et_val)
+                    where.append(_crm_entity_type_match_sql(et_val, len(params)))
 
                 vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
                 if vis_sql:
@@ -1809,11 +1834,13 @@ async def _svc_get_crm_lead_by_entity(
                 if entity_id is not None:
                     params.append(entity_id)
                     where.append(f"l.entity_id = ${len(params)}")
-                    params.append(_entity_type_query(entity_type))
-                    where.append(f"l.entity_type = ${len(params)}")
+                    et_val = _entity_type_query(entity_type)
+                    params.append(et_val)
+                    where.append(_crm_entity_type_match_sql(et_val, len(params)))
                 elif entity_type is not None:
-                    params.append(_entity_type_query(entity_type))
-                    where.append(f"l.entity_type = ${len(params)}")
+                    et_val = _entity_type_query(entity_type)
+                    params.append(et_val)
+                    where.append(_crm_entity_type_match_sql(et_val, len(params)))
 
                 vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, len(params) + 1)
                 if vis_sql:

@@ -346,12 +346,14 @@ def _collect_gst_filings_only_conditions(
         idx += 1
 
     if state_norm:
-        conditions.append(f"upper(trim(f.state)) = ${idx}")
+        # Match the displayed value, which is COALESCE(f.state, r.state) in the SELECT.
+        conditions.append(f"upper(trim(COALESCE(f.state, r.state))) = ${idx}")
         values.append(state_norm)
         idx += 1
 
     if language_norm:
-        conditions.append(f"upper(trim(f.language)) = ${idx}")
+        # Match the displayed value, which is COALESCE(f.language, r.language) in the SELECT.
+        conditions.append(f"upper(trim(COALESCE(f.language, r.language))) = ${idx}")
         values.append(language_norm)
         idx += 1
 
@@ -756,6 +758,62 @@ async def list_gst_filings_table(
     )
 
 
+def _return_detail_effective_period_lateral(d_alias: str = "d", f_alias: str = "f") -> str:
+    """
+    LATERAL subquery exposing ``ep.eff_period``, mirroring the frontend ``computeEffectivePeriod()``.
+
+    A return-detail row has NO stored period column; its period is derived from the row's own
+    due dates (the same value the UI displays). Filtering on the parent ``f.filing_period`` is wrong
+    because one filing produces many return-detail rows across different periods.
+    Computation is done in ``Asia/Kolkata`` so the month/year match the IST due dates that were seeded.
+    """
+    return f"""
+        LEFT JOIN LATERAL (
+            SELECT CASE
+                WHEN base.rd IS NULL THEN NULL
+                WHEN base.freq = 'YEARLY' OR base.yearly_hint THEN
+                    (CASE WHEN base.m <= 3 THEN base.y - 2 ELSE base.y - 1 END)::text
+                    || '-' ||
+                    LPAD((((CASE WHEN base.m <= 3 THEN base.y - 2 ELSE base.y - 1 END) + 1) % 100)::text, 2, '0')
+                WHEN base.freq = 'QUARTERLY' THEN
+                    'Q' || (CASE
+                        WHEN base.m IN (2, 3, 4) THEN 1
+                        WHEN base.m IN (5, 6, 7) THEN 2
+                        WHEN base.m IN (8, 9, 10) THEN 3
+                        ELSE 4
+                    END)::text
+                    || '-' ||
+                    (CASE WHEN base.m = 1 THEN base.y - 1 ELSE base.y END)::text
+                WHEN base.freq = 'MONTHLY' THEN
+                    UPPER(TO_CHAR((base.rd - INTERVAL '1 month'), 'MON-YYYY'))
+                ELSE NULL
+            END AS eff_period
+            FROM (
+                SELECT
+                    lrd.rd,
+                    EXTRACT(MONTH FROM lrd.rd)::int AS m,
+                    EXTRACT(YEAR FROM lrd.rd)::int AS y,
+                    COALESCE(
+                        NULLIF(UPPER(TRIM(COALESCE({d_alias}.filing_frequency, {f_alias}.filing_frequency))), ''),
+                        CASE
+                            WHEN {d_alias}.gstr9_due_date IS NOT NULL OR {d_alias}.gstr4_due_date IS NOT NULL THEN 'YEARLY'
+                            WHEN {d_alias}.cmp08_due_date IS NOT NULL THEN 'QUARTERLY'
+                            WHEN {d_alias}.gstr1_due_date IS NOT NULL OR {d_alias}.gstr3b_due_date IS NOT NULL THEN 'MONTHLY'
+                            ELSE NULL
+                        END
+                    ) AS freq,
+                    ({d_alias}.gstr9_due_date IS NOT NULL OR {d_alias}.gstr4_due_date IS NOT NULL) AS yearly_hint
+                FROM (
+                    SELECT (COALESCE(
+                        {d_alias}.gstr1_due_date, {d_alias}.gstr3b_due_date, {d_alias}.cmp08_due_date,
+                        {d_alias}.gstr9_due_date, {d_alias}.gstr4_due_date, {d_alias}.next_auto_generate_at
+                    ) AT TIME ZONE 'Asia/Kolkata') AS rd
+                ) lrd
+            ) base
+        ) ep ON TRUE
+    """
+
+
 @router.get(
     "/table/return-details",
     summary="List GST filing return details only (gst_filing_return_details, scoped by visible filings)",
@@ -764,7 +822,10 @@ async def list_gst_filing_return_details_table(
     id: Optional[int] = None,
     gst_filing_id: Optional[int] = None,
     customer_id: Optional[int] = None,
+    gstin: Optional[str] = None,
     filing_period: Optional[str] = None,
+    filing_frequency: Optional[str] = None,
+    filing_category: Optional[str] = None,
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
     is_current: Optional[bool] = Query(True),
@@ -796,10 +857,22 @@ async def list_gst_filing_return_details_table(
         if isinstance(filing_period, str) and filing_period.strip()
         else None
     )
+    gstin_norm = gstin.strip().upper() if isinstance(gstin, str) and gstin.strip() else None
+    filing_frequency_norm = (
+        filing_frequency.strip().upper()
+        if isinstance(filing_frequency, str) and filing_frequency.strip()
+        else None
+    )
+    filing_category_norm = (
+        filing_category.strip().upper()
+        if isinstance(filing_category, str) and filing_category.strip()
+        else None
+    )
 
     conditions: list = []
     values: list = []
     idx = 1
+    period_join = ""
 
     if id:
         conditions.append(f"d.id = ${idx}")
@@ -816,8 +889,28 @@ async def list_gst_filing_return_details_table(
         values.append(customer_id)
         idx += 1
 
+    if gstin_norm:
+        conditions.append(f"upper(f.gstin) = ${idx}")
+        values.append(gstin_norm)
+        idx += 1
+
+    if filing_frequency_norm:
+        conditions.append(f"upper(trim(f.filing_frequency)) = ${idx}")
+        values.append(filing_frequency_norm)
+        idx += 1
+
+    if filing_category_norm:
+        conditions.append(f"upper(trim(f.filing_category)) = ${idx}")
+        values.append(filing_category_norm)
+        idx += 1
+
     if filing_period_norm:
-        conditions.append(f"f.filing_period = ${idx}")
+        # The displayed period is derived from the return-detail row's own due dates
+        # (see _return_detail_effective_period_lateral / frontend computeEffectivePeriod),
+        # NOT the parent filing's static f.filing_period. Filter on the derived value so
+        # results match what the UI shows.
+        period_join = _return_detail_effective_period_lateral("d", "f")
+        conditions.append(f"upper(trim(ep.eff_period)) = ${idx}")
         values.append(filing_period_norm)
         idx += 1
 
@@ -861,12 +954,14 @@ async def list_gst_filing_return_details_table(
         SELECT COUNT(*)::bigint
         FROM {DB_SCHEMA}.gst_filing_return_details d
         INNER JOIN {DB_SCHEMA}.gst_filings f ON f.id = d.gst_filing_id
+        {period_join}
         {where_clause}
     """
     select_sql = f"""
         SELECT d.*
         FROM {DB_SCHEMA}.gst_filing_return_details d
         INNER JOIN {DB_SCHEMA}.gst_filings f ON f.id = d.gst_filing_id
+        {period_join}
         {where_clause}
         ORDER BY d.gst_filing_id DESC, d.id DESC
         LIMIT ${lim_idx} OFFSET ${off_idx}
@@ -877,7 +972,10 @@ async def list_gst_filing_return_details_table(
         id=id,
         gst_filing_id=gst_filing_id,
         customer_id=customer_id,
-        filing_period=(filing_period or "").strip().upper() or None,
+        gstin=gstin_norm,
+        filing_period=filing_period_norm,
+        filing_frequency=filing_frequency_norm,
+        filing_category=filing_category_norm,
         is_active=is_active,
         include_inactive=include_inactive,
         is_current=is_current,

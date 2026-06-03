@@ -246,7 +246,7 @@ async def get_payment_configs(
                         description,
                         sort_order
                     FROM {DB_SCHEMA}.payment_config
-                    WHERE upper(entity_type) = upper($1)
+                    WHERE upper(trim(entity_type)) = upper(trim($1))
                     AND is_active = TRUE
                     ORDER BY sort_order ASC
                     """,

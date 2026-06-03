@@ -800,7 +800,7 @@ async def filter_income_tax(
         priority=priority.strip().upper() if priority else None,
         language=language.strip().upper() if language else None,
         state=state.strip().upper() if state else None,
-        source_of_income=normalize_query_str_list(source_of_income) or None,
+        source_of_income=[s.strip().upper() for s in normalize_query_str_list(source_of_income)] or None,
         year=year,
         rm_id=rm_id,
         op_id=op_id,

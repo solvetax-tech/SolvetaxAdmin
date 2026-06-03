@@ -175,7 +175,7 @@ async def filter_customer_services_staff(
             clauses.append(f"upper(trim(cs.service_code)) = ${len(params)}")
         if status_u:
             params.append(status_u)
-            clauses.append(f"cs.service_status = ${len(params)}")
+            clauses.append(f"upper(trim(cs.service_status)) = ${len(params)}")
         if is_active is not None:
             params.append(is_active)
             clauses.append(f"cs.is_active = ${len(params)}")
@@ -218,9 +218,13 @@ async def filter_customer_services_staff(
                 sc.service_name
             FROM {DB_SCHEMA}.customer_services cs
             JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
-            LEFT JOIN {DB_SCHEMA}.service_config sc
-              ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
-             AND sc.is_active IS NOT DISTINCT FROM TRUE
+            LEFT JOIN LATERAL (
+                SELECT sc.service_name
+                FROM {DB_SCHEMA}.service_config sc
+                WHERE upper(trim(sc.service_code)) = upper(trim(cs.service_code))
+                  AND sc.is_active IS NOT DISTINCT FROM TRUE
+                LIMIT 1
+            ) sc ON TRUE
             {where_sql}
             ORDER BY cs.updated_at DESC NULLS LAST, cs.id DESC
             LIMIT ${lim_i} OFFSET ${off_i}
@@ -960,7 +964,7 @@ async def get_customer_services_progress_tracker(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    role = (current_user.get("role") or "").strip().upper() or None
 
     status_filter = None
     if overall_status and str(overall_status).strip():
@@ -1168,7 +1172,13 @@ async def filter_customer_services_extended(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    role = (current_user.get("role") or "").strip().upper() or None
+
+    service_status_u = (
+        service_status.strip().upper()
+        if isinstance(service_status, str) and service_status.strip()
+        else None
+    )
 
     log = logging.LoggerAdapter(
         logger,
@@ -1180,7 +1190,7 @@ async def filter_customer_services_extended(
         customer_id=customer_id,
         service_code=service_code,
         service_codes=service_codes,
-        service_status=service_status,
+        service_status=service_status_u,
         status=status,
         is_active=is_active,
         rm_id=rm_id,
@@ -1213,7 +1223,7 @@ async def filter_customer_services_extended(
         )
 
     valid_service_status = {"PENDING", "PROVIDED"}
-    if service_status and service_status not in valid_service_status:
+    if service_status_u and service_status_u not in valid_service_status:
         raise HTTPException(status_code=400, detail="Invalid service_status")
 
     valid_status = {"ACTIVE", "INACTIVE"}
@@ -1265,9 +1275,9 @@ async def filter_customer_services_extended(
                 values.append(op_id)
                 idx += 1
 
-            if service_status:
-                conditions.append(f"cs.service_status = ${idx}")
-                values.append(service_status)
+            if service_status_u:
+                conditions.append(f"upper(trim(cs.service_status)) = ${idx}")
+                values.append(service_status_u)
                 idx += 1
 
             effective_is_active = is_active
@@ -1407,7 +1417,7 @@ async def get_customer_services_dashboard_stats(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    role = (current_user.get("role") or "").strip().upper() or None
 
     log = logging.LoggerAdapter(
         logger,
@@ -1535,7 +1545,7 @@ async def get_customer_services_pending_list(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    role = (current_user.get("role") or "").strip().upper() or None
 
     try:
         pool = await get_db_pool()

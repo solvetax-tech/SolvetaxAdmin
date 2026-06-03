@@ -122,6 +122,9 @@ async def get_designations(
                     )
 
                 ownership_category = gst_row["ownership_category"]
+                ownership_category_norm = (
+                    str(ownership_category).strip().upper() if ownership_category is not None else None
+                )
                 rows = await conn.fetch(
                     f"""
                     SELECT
@@ -129,11 +132,11 @@ async def get_designations(
                         display_name,
                         description
                     FROM {DB_SCHEMA}.gst_registration_config
-                    WHERE config_type = $1
+                    WHERE upper(trim(config_type)) = $1
                     AND is_active = TRUE
                     ORDER BY sort_order
                     """,
-                    ownership_category,
+                    ownership_category_norm,
                 )
                 designations = [dict(r) for r in rows]
 
@@ -672,10 +675,10 @@ async def list_registration_persons(
             param_index += 1
 
         # ---------------- GSTIN ----------------
-        if gstin_is_null:
-            conditions.append("p.gstin IS NULL")
+        if gstin_is_null is not None:
+            conditions.append("p.gstin IS NULL" if gstin_is_null else "p.gstin IS NOT NULL")
         elif gstin_norm:
-            conditions.append(f"upper(p.gstin) = ${param_index}")
+            conditions.append(f"upper(trim(p.gstin)) = ${param_index}")
             values.append(gstin_norm)
             param_index += 1
 
@@ -690,7 +693,7 @@ async def list_registration_persons(
             param_index += 1
 
         if mobile_norm:
-            conditions.append(f"p.mobile = ${param_index}")
+            conditions.append(f"btrim(p.mobile) = btrim(${param_index}::text)")
             values.append(mobile_norm)
             param_index += 1
 

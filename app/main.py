@@ -24,10 +24,14 @@ app = FastAPI(title="Slove Tax", version="1.0.0")
 from app.utils import get_db_pool, close_db_pool
 from app.redis_cache import close_redis_client
 from app.schedular.schedular import start_scheduler_if_enabled, stop_scheduler
+from app.db_indexes import ensure_performance_indexes
+import asyncio
 
 @app.on_event("startup")
 async def _startup_init_db_pool():
     await get_db_pool()
+    # Ensure performance indexes exist without blocking startup (idempotent, best-effort).
+    asyncio.create_task(ensure_performance_indexes())
     start_scheduler_if_enabled()
 
 

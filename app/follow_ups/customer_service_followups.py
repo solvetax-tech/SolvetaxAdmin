@@ -102,7 +102,7 @@ async def list_customer_service_followups(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    role = (current_user.get("role") or "").strip().upper() or None
 
     log = logging.LoggerAdapter(
         logger,
@@ -196,8 +196,9 @@ async def list_customer_service_followups(
             values.append(created_to)
             idx += 1
 
+        role_norm = (role or "").strip().upper() or None
         visibility_sql, visibility_values, idx = build_customer_service_visibility(
-            role,
+            role_norm,
             emp_id,
             idx,
             DB_SCHEMA,
@@ -210,11 +211,7 @@ async def list_customer_service_followups(
         lim_idx = idx
         off_idx = idx + 1
 
-        count_sql = f"""
-            SELECT COUNT(*)::bigint
-            FROM {DB_SCHEMA}.customer_services cs
-            {where_clause}
-        """
+        # Single scan: window count avoids a second full pass (was ~2× latency on large tables).
         data_sql = f"""
             SELECT
                 cs.id,
@@ -237,12 +234,17 @@ async def list_customer_service_followups(
                 c.mobile,
                 sc.service_name,
                 rm.first_name AS rm_first_name,
-                op.first_name AS op_first_name
+                op.first_name AS op_first_name,
+                COUNT(*) OVER()::bigint AS total_count
             FROM {DB_SCHEMA}.customer_services cs
             JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
-            LEFT JOIN {DB_SCHEMA}.service_config sc
-              ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
-             AND sc.is_active IS NOT DISTINCT FROM TRUE
+            LEFT JOIN LATERAL (
+                SELECT sc.service_name
+                FROM {DB_SCHEMA}.service_config sc
+                WHERE upper(trim(sc.service_code)) = upper(trim(cs.service_code))
+                  AND sc.is_active IS NOT DISTINCT FROM TRUE
+                LIMIT 1
+            ) sc ON TRUE
             LEFT JOIN {DB_SCHEMA}.employees rm ON rm.emp_id = cs.rm_id
             LEFT JOIN {DB_SCHEMA}.employees op ON op.emp_id = cs.op_id
             {where_clause}
@@ -252,8 +254,8 @@ async def list_customer_service_followups(
 
         try:
             async with pool.acquire() as conn:
-                total = await conn.fetchval(count_sql, *values)
                 rows = await conn.fetch(data_sql, *values, limit, offset)
+                total = int(rows[0]["total_count"]) if rows else 0
         except asyncpg.PostgresError:
             log.exception("DB error while listing customer service followups")
             raise HTTPException(500, "Database error occurred")
@@ -261,7 +263,11 @@ async def list_customer_service_followups(
             log.exception("Unexpected error while listing customer service followups")
             raise HTTPException(500, "Internal server error")
 
-        items = [CustomerServiceFollowupListItem(**dict(row)).model_dump() for row in rows]
+        items = []
+        for row in rows:
+            row_dict = dict(row)
+            row_dict.pop("total_count", None)
+            items.append(CustomerServiceFollowupListItem(**row_dict).model_dump())
 
         return {
             "data": items,
@@ -643,18 +649,18 @@ async def get_customer_service_followup_counts(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    role = (current_user.get("role") or "").strip().upper() or None
 
     now = datetime.now(IST)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
 
-    if followup_from is not None and followup_to is not None:
-        range_start = followup_from
-        range_end = followup_to
-    else:
-        range_start = today_start
-        range_end = today_end
+    # Each bound defaults independently to today's window so a lone followup_from
+    # or followup_to is still honored (previously both had to be supplied).
+    range_start = followup_from if followup_from is not None else today_start
+    range_end = followup_to if followup_to is not None else today_end
+    if range_start > range_end:
+        raise HTTPException(status_code=400, detail="followup_from must be <= followup_to")
 
     date_keys = None
     if isinstance(dates, str) and dates.strip():
@@ -786,7 +792,7 @@ async def get_customer_service_followup_alerts(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    role = (current_user.get("role") or "").strip().upper() or None
 
     now = datetime.now(timezone.utc)
     next_24h = now + timedelta(hours=24)

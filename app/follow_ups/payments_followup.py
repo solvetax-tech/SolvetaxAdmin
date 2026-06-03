@@ -85,10 +85,25 @@ def _normalized_followup_statuses(
     return out
 
 
-def _payment_followup_entity_joins() -> str:
-    return f"""
+def _payment_followup_list_joins(*, for_visibility: bool) -> str:
+    """
+    List/count FROM clause.
+
+    When RBAC visibility is applied, we need gst_filings / return_details / customer_services
+    joins so COALESCE(c.rm_id, f.rm_id, …) can be evaluated. For ADMIN (no visibility SQL),
+    only customers + employees are required for display columns — skipping entity joins
+    avoids scanning those tables twice per request (count + data).
+    """
+    base = f"""
             FROM {DB_SCHEMA}.payments rp
             LEFT JOIN {DB_SCHEMA}.customers c ON rp.customer_id = c.customer_id
+    """
+    if not for_visibility:
+        return base + f"""
+            LEFT JOIN {DB_SCHEMA}.employees rm ON c.rm_id = rm.emp_id
+            LEFT JOIN {DB_SCHEMA}.employees op ON c.op_id = op.emp_id
+    """
+    return base + f"""
             LEFT JOIN {DB_SCHEMA}.gst_filings f
                    ON rp.entity_type = 'GST_FILING' AND rp.entity_id = f.id
             LEFT JOIN {DB_SCHEMA}.gst_filing_return_details rd
@@ -100,6 +115,11 @@ def _payment_followup_entity_joins() -> str:
             LEFT JOIN {DB_SCHEMA}.employees rm ON c.rm_id = rm.emp_id
             LEFT JOIN {DB_SCHEMA}.employees op ON c.op_id = op.emp_id
     """
+
+
+def _payment_followup_entity_joins() -> str:
+    """Backward-compatible alias: always include entity joins (visibility-safe)."""
+    return _payment_followup_list_joins(for_visibility=True)
 
 
 def _assert_payment_followup_entity_type(entity_type: Optional[str]) -> str:
@@ -186,6 +206,7 @@ async def list_payment_followups(
         conditions = [
             "rp.followup_at IS NOT NULL",
             "rp.payment_status = 'PENDING'",
+            "rp.is_active = TRUE",
         ]
         values: list = []
         idx = 1
@@ -228,12 +249,14 @@ async def list_payment_followups(
             values.append(followup_to)
             idx += 1
 
+        role_norm = str(role or "").strip().upper()
         visibility_sql, visibility_values, idx = build_payment_followup_visibility(
-            str(role or "").strip().upper(),
+            role_norm,
             emp_id,
             idx,
             DB_SCHEMA,
         )
+        needs_entity_joins = bool(visibility_sql)
         if visibility_sql:
             conditions.append(visibility_sql)
             values.extend(visibility_values)
@@ -242,12 +265,8 @@ async def list_payment_followups(
         lim_idx = idx
         off_idx = idx + 1
 
-        joins = _payment_followup_entity_joins()
-        count_sql = f"""
-            SELECT COUNT(*)::bigint
-            {joins}
-            {where_clause}
-        """
+        joins = _payment_followup_list_joins(for_visibility=needs_entity_joins)
+        # Single scan: window count avoids a second full pass over payments + joins.
         data_sql = f"""
             SELECT
                 rp.id,
@@ -273,7 +292,8 @@ async def list_payment_followups(
                 c.rm_id,
                 c.op_id,
                 rm.first_name AS rm_name,
-                op.first_name AS op_name
+                op.first_name AS op_name,
+                COUNT(*) OVER()::bigint AS total_count
             {joins}
             {where_clause}
             ORDER BY rp.followup_at ASC NULLS LAST, rp.id DESC
@@ -282,8 +302,8 @@ async def list_payment_followups(
 
         try:
             async with pool.acquire() as conn:
-                total = await conn.fetchval(count_sql, *values)
                 rows = await conn.fetch(data_sql, *values, limit, offset)
+                total = int(rows[0]["total_count"]) if rows else 0
         except asyncpg.PostgresError:
             log.exception("DB error listing payment followups")
             raise HTTPException(status_code=500, detail="Database error occurred")
@@ -291,7 +311,11 @@ async def list_payment_followups(
             log.exception("Unexpected error listing payment followups")
             raise HTTPException(status_code=500, detail="Internal server error")
 
-        items = [PaymentFollowupListItem(**dict(row)).model_dump() for row in rows]
+        items = []
+        for row in rows:
+            row_dict = dict(row)
+            row_dict.pop("total_count", None)
+            items.append(PaymentFollowupListItem(**row_dict).model_dump())
 
         return {
             "data": items,
@@ -668,12 +692,12 @@ async def get_payment_followup_counts(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
 
-    if followup_from is not None and followup_to is not None:
-        range_start = followup_from
-        range_end = followup_to
-    else:
-        range_start = today_start
-        range_end = today_end
+    # Each bound defaults independently to today's window so a lone followup_from
+    # or followup_to is still honored (previously both had to be supplied).
+    range_start = followup_from if followup_from is not None else today_start
+    range_end = followup_to if followup_to is not None else today_end
+    if range_start > range_end:
+        raise HTTPException(status_code=400, detail="followup_from must be <= followup_to")
 
     date_keys = None
     if isinstance(dates, str) and dates.strip():
@@ -703,6 +727,7 @@ async def get_payment_followup_counts(
         conditions = [
             "rp.followup_at IS NOT NULL",
             "rp.payment_status = 'PENDING'",
+            "rp.is_active = TRUE",
             "rp.followup_at >= $1",
             "rp.followup_at <= $2",
         ]
@@ -725,7 +750,6 @@ async def get_payment_followup_counts(
             values.append(list(PAYMENT_FOLLOWUP_ENTITY_TYPES))
             idx += 1
 
-        joins = _payment_followup_entity_joins()
         visibility_sql, visibility_values, idx = build_payment_followup_visibility(
             role, emp_id, idx, DB_SCHEMA
         )
@@ -734,6 +758,7 @@ async def get_payment_followup_counts(
             values.extend(visibility_values)
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
+        joins = _payment_followup_list_joins(for_visibility=bool(visibility_sql))
 
         query = f"""
             SELECT
@@ -832,6 +857,7 @@ async def get_payment_followup_alerts(
         conditions = [
             "rp.followup_at IS NOT NULL",
             "rp.payment_status = 'PENDING'",
+            "rp.is_active = TRUE",
             "rp.followup_status IN ('PENDING', 'MISSED')",
             "rp.followup_at <= $1",
             "rp.entity_type = ANY($2::text[])",
@@ -839,7 +865,6 @@ async def get_payment_followup_alerts(
         values: list = [next_24h, list(PAYMENT_FOLLOWUP_ENTITY_TYPES)]
         idx = 3
 
-        joins = _payment_followup_entity_joins()
         visibility_sql, visibility_values, idx = build_payment_followup_visibility(
             role, emp_id, idx, DB_SCHEMA
         )
@@ -848,6 +873,7 @@ async def get_payment_followup_alerts(
             values.extend(visibility_values)
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
+        joins = _payment_followup_list_joins(for_visibility=bool(visibility_sql))
 
         query = f"""
             SELECT

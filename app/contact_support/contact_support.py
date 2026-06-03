@@ -403,8 +403,12 @@ async def filter_contact_support(
     if email_address:
         add_eq("lower(trim(c.email_address))", email_address)
     if service_required:
-        conditions.append(f"COALESCE(c.service_required, ARRAY[]::text[]) && ${idx}::text[]")
-        values.append(service_required)
+        # Case/whitespace-insensitive element match so legacy non-uppercased rows still match.
+        conditions.append(
+            f"EXISTS (SELECT 1 FROM unnest(COALESCE(c.service_required, ARRAY[]::text[])) sr "
+            f"WHERE upper(trim(sr)) = ANY(${idx}::text[]))"
+        )
+        values.append([str(s).strip().upper() for s in service_required])
         idx += 1
     if rm_id is not None:
         add_eq("c.rm_id", rm_id)

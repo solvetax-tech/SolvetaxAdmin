@@ -339,7 +339,7 @@ async def filter_employees(
     )
 
     log.info("Incoming employee filter request limit=%s offset=%s", limit, offset)
-    role_cleaned = sorted([r.strip() for r in role if r and r.strip()]) if role else None
+    role_cleaned = sorted({r.strip().upper() for r in role if r and r.strip()}) if role else None
     cache_key = build_cache_key(
         "employees:filter",
         emp_id=emp_id,
@@ -396,12 +396,12 @@ async def filter_employees(
                 param_index += 1
 
             if phone_number and phone_number.strip():
-                conditions.append(f"phone_number = ${param_index}")
+                conditions.append(f"trim(phone_number) = trim(${param_index})")
                 values.append(phone_number.strip())
                 param_index += 1
 
             if role_cleaned:
-                conditions.append(f"role = ANY(${param_index})")
+                conditions.append(f"upper(trim(role)) = ANY(${param_index})")
                 values.append(role_cleaned)
                 param_index += 1
 

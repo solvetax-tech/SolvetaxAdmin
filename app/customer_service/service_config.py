@@ -1,7 +1,9 @@
 """Staff APIs for `service_config` (dropdown / catalog reads)."""
 
+import asyncio
 import logging
-from typing import Optional
+import time
+from typing import Any, Dict, Optional, Tuple
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +18,42 @@ router = APIRouter(
     prefix="/api/v1/customer-service",
     tags=["Service config"],
 )
+
+_PROCESS_DROPDOWN_TTL_SEC = 300
+_process_dropdown_cache: Dict[str, Tuple[float, Any]] = {}
+_process_dropdown_inflight: Dict[str, asyncio.Task] = {}
+
+
+async def _get_services_dropdown_with_process_cache(
+    cache_key: str,
+    loader,
+) -> Any:
+    """Coalesce parallel dropdown reads; avoid repeated Redis timeouts on a tiny table."""
+    now = time.monotonic()
+    cached = _process_dropdown_cache.get(cache_key)
+    if cached and (now - cached[0]) < _PROCESS_DROPDOWN_TTL_SEC:
+        return cached[1]
+
+    inflight = _process_dropdown_inflight.get(cache_key)
+    if inflight is not None:
+        return await inflight
+
+    async def _run() -> Any:
+        try:
+            value = await redis_get_or_set_json(
+                cache_key,
+                loader=loader,
+                ttl_seconds=_PROCESS_DROPDOWN_TTL_SEC,
+                tags=["service_config:get_services:index"],
+            )
+            _process_dropdown_cache[cache_key] = (time.monotonic(), value)
+            return value
+        finally:
+            _process_dropdown_inflight.pop(cache_key, None)
+
+    task = asyncio.create_task(_run())
+    _process_dropdown_inflight[cache_key] = task
+    return await task
 
 
 def _service_config_dropdown_cache_key(
@@ -76,7 +114,7 @@ async def get_service_config_dropdown(
             param_index = 1
 
             if service_category_cleaned:
-                conditions.append(f"service_category = ${param_index}")
+                conditions.append(f"upper(trim(service_category)) = ${param_index}")
                 values.append(service_category_cleaned)
                 param_index += 1
 
@@ -107,11 +145,9 @@ async def get_service_config_dropdown(
                 request_id=request_id,
             ).model_dump()
 
-        return await redis_get_or_set_json(
+        return await _get_services_dropdown_with_process_cache(
             cache_key,
-            loader=_load_services_dropdown,
-            ttl_seconds=300,
-            tags=["service_config:get_services:index"],
+            _load_services_dropdown,
         )
 
     except asyncpg.PostgresError as e:
