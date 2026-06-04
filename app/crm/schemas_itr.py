@@ -29,6 +29,10 @@ class CRMCallUpdateIn(CRMBaseSchema):
     call_status_code: str = Field(..., max_length=50)
     followup_at: Optional[datetime] = None
     remarks: Optional[str] = Field(default=None, max_length=2000)
+    complete_open_followup: bool = Field(
+        default=False,
+        description="When true, marks the lead's open follow-up (PENDING/MISSED) as COMPLETED.",
+    )
 
     @field_validator("call_type_code", "call_status_code", mode="before")
     @classmethod

@@ -32,6 +32,7 @@ from app.customer_service.bulk_lead_assignment import (
     _invalidate_customer_services_index_caches as _invalidate_customer_services_cache,
 )
 from app.crm.crm_leads_common import _invalidate_crm_cache
+from app.payments.payment_cache_invalidation import invalidate_followup_caches
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -102,6 +103,7 @@ async def _invalidate_customer_cache(customer_id: int) -> None:
     # invalidate their tags here too when customer fields affect those responses.
     await redis_invalidate_tag(_customer_get_by_id_tag(customer_id))
     await redis_invalidate_tag(_customer_filter_tag())
+    await invalidate_followup_caches()
 
 
 def _customer_pincode_lookup_tag() -> str:

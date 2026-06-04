@@ -44,6 +44,17 @@ async def _invalidate_tags(tags: tuple[str, ...]) -> None:
         await redis_invalidate_tag(tag)
 
 
+async def invalidate_followup_caches() -> None:
+    """Invalidate service + payment follow-up list/counts/alerts caches."""
+    await _invalidate_tags(_PAYMENT_FOLLOWUP_TAGS)
+    await _invalidate_tags(_CUSTOMER_SERVICE_FOLLOWUP_TAGS)
+
+
+async def invalidate_payment_followup_caches() -> None:
+    """Backward-compatible alias."""
+    await invalidate_followup_caches()
+
+
 async def invalidate_payment_related_caches(
     *,
     gst_registration_id: Optional[int] = None,

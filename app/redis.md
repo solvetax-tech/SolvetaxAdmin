@@ -114,7 +114,8 @@ Client uses **`ssl=True`**, **`decode_responses=True`**.
 | `is_redis_configured()` | `True` iff `REDIS_HOST` set. |
 | `get_redis_client()` | Singleton async Redis client; raises if not configured. |
 | `close_redis_client()` | Close client; called on app **shutdown**. |
-| `build_cache_key(prefix, **params)` | Stable string key from sorted params (same filters → same key). |
+| `build_cache_key(prefix, **params)` | Stable string key from sorted params (same filters → same key). Auto-normalizes `role` (uppercase) and `emp_id` (int). |
+| `normalize_cache_role` / `CACHE_TTL_*` | Shared role key normalization and recommended TTLs (list/counts 90s, alerts 120s, config 300s). |
 | `get_json` / `set_json` / `delete_key` | Single-key read / write-with-TTL / delete. Fail open on error. |
 | `set_json_with_tags` | `set_json` + register key under tag **SET**s with long `EXPIRE` on tags. |
 | `invalidate_tag(tag)` | Delete all cache keys listed in tag, then delete tag. |

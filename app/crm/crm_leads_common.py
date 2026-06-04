@@ -2,7 +2,7 @@
 
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from app.crm.schemas_common import (
     CRMBulkAssignExecuteIn,
+    CRMBulkAutoAssignConfigIn,
     CRMBulkImportIn,
     CRMLeadMarketingCreateIn,
     CRMLeadStagesOut,
@@ -23,6 +24,7 @@ from app.crm.schemas_common import (
 )
 from app.logger import logger
 from app.redis_cache import (
+    CACHE_TTL_COUNTS,
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
     invalidate_tag as redis_invalidate_tag,
@@ -82,6 +84,7 @@ def _crm_lead_activities_tag(lead_id: int) -> str:
 
 async def _invalidate_crm_cache(lead_id: Optional[int] = None) -> None:
     await redis_invalidate_tag(_crm_leads_filter_tag())
+    await redis_invalidate_tag(_crm_followup_counts_tag())
     await redis_invalidate_tag(_crm_activities_filter_tag())
     await redis_invalidate_tag(_crm_lead_by_entity_tag())
     if lead_id is not None:
@@ -236,6 +239,23 @@ FIRST_PITCH_CONNECTED = {
 # FINAL_PITCH_CALL: NOT_INTERESTED does not increment connected (first pitch only).
 FINAL_PITCH_CONNECTED = {"SCHEDULED_PAYMENT", "CALL_BACK", "CALL_DONE"}
 FOLLOWUP_STATUSES = {"PENDING", "COMPLETED", "MISSED"}
+
+CRM_SERVICE_FOLLOWUP_STAGES: tuple[str, ...] = (
+    "FRESH_LEAD",
+    "FRESH_LEADS",
+    "NEW",
+    "FOLLOW_UP",
+    "FOLLOWUP",
+    "INTERESTED",
+)
+CRM_PAYMENT_FOLLOWUP_STAGES: tuple[str, ...] = (
+    "SCHEDULED_PAYMENT",
+    "SCHEDULED_PAYMENTS",
+)
+
+
+def _crm_followup_counts_tag() -> str:
+    return "crm:leads:followup_counts:index"
 
 # Re-engage from NOT_INTERESTED when the client agrees to send documents.
 SEND_DOCS_REOPEN_FROM_STAGE = "NOT_INTERESTED"
@@ -1475,6 +1495,15 @@ async def _svc_execute_bulk_assign(
                     *vis_vals,
                 )
                 lead_ids = [int(r["id"]) for r in lead_rows]
+                entity_type_row = await conn.fetchval(
+                    f"""
+                    SELECT upper(trim(entity_type))
+                    FROM {DB_SCHEMA}.crm_leads
+                    WHERE id = ANY($1::bigint[])
+                    LIMIT 1
+                    """,
+                    unique_lead_ids,
+                )
                 per_employee_counts = {eid: 0 for eid in valid_emp_ids}
                 emp_cursor = 0
 
@@ -1516,13 +1545,39 @@ async def _svc_execute_bulk_assign(
                         break
 
         await _invalidate_crm_cache()
-        return {
+        result = {
             "message": "CRM bulk assignment completed.",
             "assignment_role": payload.assignment_role,
             "total_selected": len(unique_lead_ids),
             "total_assigned": sum(per_employee_counts.values()),
             "per_employee_counts": per_employee_counts,
         }
+        try:
+            from app.crm.crm_bulk_auto_assign import insert_bulk_assign_log
+
+            log_summary = {
+                "run_type": "MANUAL",
+                "assignment_role": payload.assignment_role,
+                "total_selected": result["total_selected"],
+                "total_assigned": result["total_assigned"],
+                "per_employee_counts": result["per_employee_counts"],
+                "roles": {
+                    payload.assignment_role: {
+                        "total_assigned": result["total_assigned"],
+                        "per_employee_counts": result["per_employee_counts"],
+                    }
+                },
+            }
+            await insert_bulk_assign_log(
+                run_type="MANUAL",
+                entity_type=entity_type_row or "UNKNOWN",
+                scheduler_id=None,
+                triggered_by=emp_id,
+                summary=log_summary,
+            )
+        except Exception:
+            logger.warning("Manual bulk-assign log insert failed", exc_info=True)
+        return result
     except asyncpg.PostgresError:
         logger.exception("Database error during CRM bulk assign execute")
         raise HTTPException(status_code=500, detail="Database error.")
@@ -2155,7 +2210,193 @@ async def _svc_list_crm_activities(
 
 
 
+async def _svc_crm_followup_counts(
+    *,
+    followup_from: Optional[datetime],
+    followup_to: Optional[datetime],
+    dates: Optional[str],
+    entity_type: str,
+    category: str,
+    stage: Optional[str],
+    current_user,
+):
+    """Dashboard KPI counts for CRM lead follow-ups (aligned with payment/service follow-up /counts)."""
+    request_id = generate_uuid()
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+
+    now = datetime.now(IST)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+    range_start = followup_from if followup_from is not None else today_start
+    range_end = followup_to if followup_to is not None else today_end
+    if range_start > range_end:
+        raise _validation_error(
+            "Invalid followup range.",
+            {"followup_from": "followup_from must be <= followup_to."},
+        )
+
+    date_keys = None
+    if isinstance(dates, str) and dates.strip():
+        date_keys = sorted({d.strip() for d in dates.split(",") if d.strip()})
+
+    cat = (category or "service").strip().lower()
+    if cat not in ("service", "payment"):
+        raise _validation_error(
+            "Invalid follow-up category.",
+            {"category": "Must be service or payment."},
+        )
+
+    et_filter = _entity_type_query(entity_type)
+    stage_norm = _normalize_code(stage) if isinstance(stage, str) and stage.strip() else None
+
+    cache_key = build_cache_key(
+        "crm:leads:followup_counts",
+        role=role,
+        emp_id=emp_id,
+        followup_from=range_start,
+        followup_to=range_end,
+        dates=tuple(date_keys) if date_keys else None,
+        entity_type=et_filter,
+        category=cat,
+        stage=stage_norm,
+    )
+
+    pool = await get_db_pool()
+
+    async def _load_counts():
+        conditions = [
+            "l.followup_at IS NOT NULL",
+            "l.is_active = TRUE",
+            "l.followup_at >= $1",
+            "l.followup_at <= $2",
+        ]
+        values: list = [range_start, range_end]
+        idx = 3
+
+        if date_keys:
+            conditions.append(
+                f"to_char(l.followup_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = ANY(${idx}::text[])"
+            )
+            values.append(date_keys)
+            idx += 1
+
+        if cat == "payment":
+            conditions.append(f"upper(trim(l.stage)) = ANY(${idx}::text[])")
+            values.append(list(CRM_PAYMENT_FOLLOWUP_STAGES))
+            idx += 1
+        else:
+            conditions.append(f"upper(trim(l.stage)) = ANY(${idx}::text[])")
+            values.append(list(CRM_SERVICE_FOLLOWUP_STAGES))
+            idx += 1
+
+        if stage_norm:
+            conditions.append(f"upper(trim(l.stage)) = ${idx}")
+            values.append(stage_norm)
+            idx += 1
+
+        values.append(et_filter)
+        conditions.append(_crm_entity_type_match_sql(et_filter, idx))
+        idx += 1
+
+        vis_sql, vis_vals, idx = _build_crm_visibility(role, emp_id, idx)
+        if vis_sql:
+            conditions.append(vis_sql)
+            values.extend(vis_vals)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+        query = f"""
+            SELECT
+                COUNT(*) AS scheduled_today,
+                COUNT(*) FILTER (
+                    WHERE l.completed_at IS NULL
+                      AND upper(trim(COALESCE(l.follow_up_status, 'PENDING'))) = 'PENDING'
+                      AND l.missed_at IS NULL
+                      AND l.followup_at IS NOT NULL
+                      AND l.followup_at < NOW()
+                ) AS overdue_pending_today,
+                COUNT(*) FILTER (
+                    WHERE l.missed_at IS NOT NULL
+                      AND upper(trim(l.follow_up_status)) = 'COMPLETED'
+                      AND l.completed_at IS NOT NULL
+                ) AS overdue_completed_today,
+                COUNT(*) FILTER (
+                    WHERE upper(trim(l.follow_up_status)) = 'COMPLETED'
+                      AND l.missed_at IS NULL
+                      AND l.completed_at IS NOT NULL
+                ) AS completed_today,
+                COUNT(*) FILTER (
+                    WHERE upper(trim(l.follow_up_status)) = 'COMPLETED'
+                      AND l.missed_at IS NULL
+                      AND l.completed_at IS NOT NULL
+                ) AS successful_today,
+                COUNT(*) FILTER (
+                    WHERE l.completed_at IS NULL
+                      AND l.missed_at IS NULL
+                      AND upper(trim(COALESCE(l.follow_up_status, 'PENDING'))) = 'PENDING'
+                      AND l.followup_at IS NOT NULL
+                      AND l.followup_at <= NOW()
+                      AND l.followup_at > NOW() - INTERVAL '10 minutes'
+                ) AS pending_today
+            FROM {DB_SCHEMA}.crm_leads l
+            {where_clause}
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(query, *values)
+        except asyncpg.PostgresError:
+            logger.exception("DB error while fetching CRM follow-up counts")
+            raise HTTPException(status_code=500, detail="Database error occurred")
+        except Exception:
+            logger.exception("Unexpected error while fetching CRM follow-up counts")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+        res_data = dict(row)
+        res_data["overdue_today"] = res_data.get("overdue_pending_today", 0)
+        scheduled = res_data.get("scheduled_today", 0)
+        successful = res_data.get("successful_today", 0)
+        res_data["success_rate"] = (
+            round((successful / scheduled) * 100) if scheduled > 0 else 100
+        )
+        return {"data": res_data, "request_id": request_id}
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_counts,
+        ttl_seconds=CACHE_TTL_COUNTS,
+        tags=[_crm_followup_counts_tag()],
+    )
+
+
 router = APIRouter(prefix="/api/v1/crm/leads", tags=["CRM Leads Common"])
+
+
+@router.get(
+    "/followups/counts",
+    summary="CRM lead follow-up dashboard counts for selected date range",
+)
+async def get_crm_lead_followup_counts(
+    followup_from: Optional[datetime] = Query(None),
+    followup_to: Optional[datetime] = Query(None),
+    dates: Optional[str] = Query(
+        None,
+        description="Comma-separated YYYY-MM-DD keys; when set, only those calendar days are counted",
+    ),
+    entity_type: str = Query(...),
+    category: str = Query("service", description="service or payment follow-up tab"),
+    stage: Optional[str] = Query(None, description="Optional stage filter (service tab)"),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    return await _svc_crm_followup_counts(
+        followup_from=followup_from,
+        followup_to=followup_to,
+        dates=dates,
+        entity_type=entity_type,
+        category=category,
+        stage=stage,
+        current_user=current_user,
+    )
 
 
 @router.post(
@@ -2572,6 +2813,198 @@ async def execute_bulk_assign(
     current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
 ):
     return await _svc_execute_bulk_assign(payload=payload, current_user=current_user)
+
+
+@router.get(
+    "/bulk-assign/schedulers",
+    summary="List saved auto-assign schedulers for an entity type",
+)
+async def list_bulk_assign_schedulers(
+    entity_type: str = Query(...),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    from app.crm.crm_bulk_auto_assign import svc_list_bulk_assign_schedulers
+
+    role, _ = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can view bulk-assign schedulers.")
+    return await svc_list_bulk_assign_schedulers(entity_type)
+
+
+@router.get(
+    "/bulk-assign/schedulers/{scheduler_id}",
+    summary="Get one auto-assign scheduler by id",
+)
+async def get_bulk_assign_scheduler(
+    scheduler_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    from app.crm.crm_bulk_auto_assign import svc_get_bulk_assign_scheduler
+
+    role, _ = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can view bulk-assign schedulers.")
+    return await svc_get_bulk_assign_scheduler(scheduler_id)
+
+
+@router.put(
+    "/bulk-assign/schedulers",
+    summary="Create or update an auto-assign scheduler (omit id to add another without touching others)",
+)
+async def save_bulk_assign_scheduler(
+    payload: CRMBulkAutoAssignConfigIn,
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    from app.crm.crm_bulk_auto_assign import svc_save_bulk_auto_assign_config
+
+    role, emp_id = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can configure bulk-assign schedulers.")
+    return await svc_save_bulk_auto_assign_config(payload, updated_by=emp_id)
+
+
+@router.delete(
+    "/bulk-assign/schedulers/{scheduler_id}",
+    summary="Remove an auto-assign scheduler (others unchanged)",
+)
+async def delete_bulk_assign_scheduler(
+    scheduler_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    from app.crm.crm_bulk_auto_assign import svc_delete_bulk_assign_scheduler
+
+    role, emp_id = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can delete bulk-assign schedulers.")
+    return await svc_delete_bulk_assign_scheduler(scheduler_id, updated_by=emp_id)
+
+
+@router.post(
+    "/bulk-assign/schedulers/{scheduler_id}/run",
+    summary="Run one auto-assign scheduler immediately",
+)
+async def run_bulk_assign_scheduler_now(
+    scheduler_id: int,
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    from app.crm.crm_bulk_auto_assign import run_auto_assign_scheduler, svc_get_bulk_assign_scheduler
+
+    role, _ = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can trigger bulk-assign schedulers.")
+    rule = await svc_get_bulk_assign_scheduler(scheduler_id)
+    if not rule.get("enabled"):
+        raise HTTPException(
+            status_code=409,
+            detail="Scheduler is disabled. Enable it and save, then run again.",
+        )
+    summary = await run_auto_assign_scheduler(scheduler_id, force=True)
+    if summary is None:
+        raise HTTPException(status_code=500, detail="Scheduler run did not produce a result.")
+    rm_n = (summary.get("roles") or {}).get("RM", {}).get("total_assigned", 0)
+    op_n = (summary.get("roles") or {}).get("OP", {}).get("total_assigned", 0)
+    return {
+        "message": f"Assigned {rm_n} as RM and {op_n} as OP from {summary.get('candidates_matched', 0)} matching leads.",
+        "summary": summary,
+    }
+
+
+@router.get(
+    "/bulk-assign/logs",
+    summary="Assignment run history (AUTO + MANUAL)",
+)
+async def list_bulk_assign_logs(
+    entity_type: Optional[str] = Query(None),
+    run_type: Optional[str] = Query(None, description="AUTO or MANUAL"),
+    scheduler_id: Optional[int] = Query(None, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    from app.crm.crm_bulk_auto_assign import svc_list_bulk_assign_logs
+
+    role, _ = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can view bulk-assign logs.")
+    return await svc_list_bulk_assign_logs(
+        entity_type=entity_type,
+        run_type=run_type,
+        scheduler_id=scheduler_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/bulk-assign/auto",
+    summary="Legacy: first scheduler + list for entity type",
+)
+async def get_bulk_auto_assign_config(
+    entity_type: str = Query(...),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    from app.crm.crm_bulk_auto_assign import svc_get_bulk_auto_assign_config
+
+    role, _ = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can view auto bulk-assign config.")
+    return await svc_get_bulk_auto_assign_config(entity_type)
+
+
+@router.put(
+    "/bulk-assign/auto",
+    summary="Legacy alias for PUT /bulk-assign/schedulers",
+)
+async def save_bulk_auto_assign_config(
+    payload: CRMBulkAutoAssignConfigIn,
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    from app.crm.crm_bulk_auto_assign import svc_save_bulk_auto_assign_config
+
+    role, emp_id = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can configure auto bulk-assign.")
+    return await svc_save_bulk_auto_assign_config(payload, updated_by=emp_id)
+
+
+@router.post(
+    "/bulk-assign/auto/run",
+    summary="Legacy: run scheduler by id or first enabled for entity_type",
+)
+async def run_bulk_auto_assign_now(
+    entity_type: str = Query(...),
+    scheduler_id: Optional[int] = Query(None, ge=1),
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    from app.crm.crm_bulk_auto_assign import (
+        run_auto_assign_for_rule,
+        run_auto_assign_scheduler,
+        svc_get_bulk_assign_scheduler,
+    )
+
+    role, _ = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can trigger auto bulk-assign.")
+    if scheduler_id:
+        rule = await svc_get_bulk_assign_scheduler(scheduler_id)
+        if not rule.get("enabled"):
+            raise HTTPException(status_code=409, detail="Scheduler is disabled.")
+        summary = await run_auto_assign_scheduler(scheduler_id, force=True)
+    else:
+        summary = await run_auto_assign_for_rule(entity_type, force=True)
+        if summary is None:
+            raise HTTPException(
+                status_code=409,
+                detail="No enabled scheduler found. Save a scheduler first.",
+            )
+    if summary is None:
+        raise HTTPException(status_code=500, detail="Auto-assign run did not produce a result.")
+    rm_n = (summary.get("roles") or {}).get("RM", {}).get("total_assigned", 0)
+    op_n = (summary.get("roles") or {}).get("OP", {}).get("total_assigned", 0)
+    return {
+        "message": f"Assigned {rm_n} as RM and {op_n} as OP from {summary.get('candidates_matched', 0)} matching leads.",
+        "summary": summary,
+    }
 
 
 @router.get("/activities/filter", summary="Filter CRM activities (visible leads only)")

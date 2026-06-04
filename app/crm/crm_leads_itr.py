@@ -11,6 +11,7 @@ from app.crm.crm_leads_common import (
     FINAL_PITCH_CONNECTED,
     FOLLOWUP_STATUSES,
     IST,
+    _svc_crm_followup_counts,
     _crm_lead_by_id_tag,
     _crm_lead_activities_tag,
     _crm_lead_calls_tag,
@@ -360,6 +361,8 @@ async def _crm_itr_apply_call_update(
 
     et_for_activity = _entity_type_query(lead.get("entity_type"))
 
+    complete_followup = bool(getattr(payload, "complete_open_followup", False))
+
     updated = await conn.fetchrow(
         f"""
         UPDATE {DB_SCHEMA}.crm_leads
@@ -369,9 +372,22 @@ async def _crm_itr_apply_call_update(
             last_dailed_at = NOW(),
             last_connected_at = CASE WHEN $2 = 1 THEN NOW() ELSE last_connected_at END,
             followup_at = COALESCE($3, followup_at),
-            follow_up_status = CASE WHEN $3 IS NOT NULL THEN 'PENDING' ELSE follow_up_status END,
-            missed_at = CASE WHEN $3 IS NOT NULL THEN NULL ELSE missed_at END,
-            completed_at = CASE WHEN $3 IS NOT NULL THEN NULL ELSE completed_at END,
+            follow_up_status = CASE
+                WHEN $3 IS NOT NULL THEN 'PENDING'
+                WHEN $8 THEN 'COMPLETED'
+                ELSE follow_up_status
+            END,
+            missed_at = CASE
+                WHEN missed_at IS NOT NULL THEN missed_at
+                WHEN $8 AND followup_at IS NOT NULL
+                     AND followup_at <= NOW() - INTERVAL '10 minutes' THEN NOW()
+                ELSE missed_at
+            END,
+            completed_at = CASE
+                WHEN $3 IS NOT NULL THEN NULL
+                WHEN $8 THEN NOW()
+                ELSE completed_at
+            END,
             remarks = COALESCE($4, remarks),
             rm_id = CASE WHEN $6 = 'RM' THEN $7 ELSE rm_id END,
             op_id = CASE WHEN $6 = 'OP' THEN $7 ELSE op_id END,
@@ -394,6 +410,7 @@ async def _crm_itr_apply_call_update(
         lead_id,
         role,
         emp_id,
+        complete_followup,
     )
 
     activity_id = await conn.fetchval(
@@ -475,7 +492,13 @@ async def _crm_itr_apply_followup_status(
         SET follow_up_status = $1,
             followup_at = COALESCE($2, followup_at),
             remarks = COALESCE($3, remarks),
-            missed_at = CASE WHEN $1 = 'MISSED' THEN missed_at ELSE NULL END,
+            missed_at = CASE
+                WHEN missed_at IS NOT NULL THEN missed_at
+                WHEN $1 = 'MISSED' THEN COALESCE(missed_at, NOW())
+                WHEN $1 = 'COMPLETED' AND followup_at IS NOT NULL
+                     AND followup_at <= NOW() - INTERVAL '10 minutes' THEN COALESCE(missed_at, NOW())
+                ELSE NULL
+            END,
             completed_at = CASE
                 WHEN $1 = 'COMPLETED' THEN NOW()
                 ELSE NULL
@@ -490,21 +513,25 @@ async def _crm_itr_apply_followup_status(
         lead_id,
     )
 
+    stage_for_activity = lead.get("stage")
+    activity_remarks = (
+        f"follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
+        if payload.remarks is None
+        else f"{payload.remarks} | follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
+    )
     activity_id = await conn.fetchval(
         f"""
         INSERT INTO {DB_SCHEMA}.crm_activities (
-            lead_id, entity_type, activity_type, remarks, performed_by, performed_at, created_at
+            lead_id, entity_type, activity_type, old_stage, new_stage,
+            remarks, performed_by, performed_at, created_at
         )
-        VALUES ($1, $2, 'FOLLOWUP_STATUS_UPDATE', $3, $4, NOW(), NOW())
+        VALUES ($1, $2, 'SYSTEM', $3, $3, $4, $5, NOW(), NOW())
         RETURNING id
         """,
         lead_id,
         _entity_type_query(lead.get("entity_type")),
-        (
-            f"follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
-            if payload.remarks is None
-            else f"{payload.remarks} | follow_up_status: {old_status or 'NULL'} -> {follow_up_status}"
-        ),
+        stage_for_activity,
+        activity_remarks,
         _performed_by_emp_id(emp_id),
     )
 
@@ -525,6 +552,29 @@ async def _crm_itr_apply_followup_status(
         "completed_at": updated["completed_at"],
         "activity_id": activity_id,
     }
+
+
+@router.get(
+    "/followups/counts",
+    summary="CRM ITR lead follow-up dashboard counts for selected date range",
+)
+async def get_crm_itr_lead_followup_counts(
+    followup_from: Optional[datetime] = Query(None),
+    followup_to: Optional[datetime] = Query(None),
+    dates: Optional[str] = Query(None),
+    category: str = Query("service", description="service or payment follow-up tab"),
+    stage: Optional[str] = Query(None),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    return await _svc_crm_followup_counts(
+        followup_from=followup_from,
+        followup_to=followup_to,
+        dates=dates,
+        entity_type=ITR_ENTITY_TYPE,
+        category=category,
+        stage=stage,
+        current_user=current_user,
+    )
 
 
 @router.post("/{lead_id:int}/followup-status", summary="Update CRM ITR lead follow-up status")

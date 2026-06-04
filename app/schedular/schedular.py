@@ -8,6 +8,7 @@ from app.utils import get_db_pool, DB_SCHEMA
 from app.gst_registration_filing.gst_filing_auto_policy import (
     disable_gst_filings_auto_over_missed_threshold,
 )
+from app.crm.crm_bulk_auto_assign import run_due_crm_bulk_auto_assign_jobs
 from app.crm.crm_leads_common import _invalidate_crm_cache
 from app.payments.payment_scheduler import sync_settled_payment_entities
 from app.redis_cache import invalidate_tag as redis_invalidate_tag
@@ -580,26 +581,28 @@ async def background_jobs():
                 )
                 logging.info("payments stamped missed_at: %s", result)
 
-                # 3) Mark overdue CRM lead followups as MISSED
+                # 3) CRM leads: overdue PENDING (>10 min past followup_at) → MISSED + missed_at
+                #    Matches customer_services / payments; 10-minute buffer keeps PENDING (urgent) first.
                 result = await conn.execute(
                     f"""
                     UPDATE {DB_SCHEMA}.crm_leads
                     SET follow_up_status = 'MISSED',
+                        missed_at = COALESCE(missed_at, NOW()),
                         updated_at = NOW()
                     WHERE id IN (
                         SELECT id
                         FROM {DB_SCHEMA}.crm_leads
                         WHERE is_active = TRUE
-                          AND follow_up_status = 'PENDING'
+                          AND upper(trim(follow_up_status)) = 'PENDING'
                           AND followup_at IS NOT NULL
-                          AND followup_at < NOW()
+                          AND NOW() > followup_at + INTERVAL '10 minutes'
                         LIMIT {lim}
                     )
                     """
                 )
-                logging.info("CRM leads marked MISSED by followup time: %s", result)
+                logging.info("CRM leads follow-ups marked MISSED (overdue): %s", result)
 
-                # 4) Stamp missed_at for MISSED CRM lead followups after 10 minutes
+                # 4) Stamp missed_at for MISSED CRM lead followups after 10 minutes (edge cases)
                 result = await conn.execute(
                     f"""
                     UPDATE {DB_SCHEMA}.crm_leads
@@ -693,6 +696,12 @@ async def background_jobs():
                         pay_sync["latest_promoted_to_paid"],
                         pay_sync["superseded_pending_closed"],
                     )
+
+                # 13) CRM auto bulk-assign (round-robin rm_id/op_id from saved filter rules)
+                auto_assign_ran = await run_due_crm_bulk_auto_assign_jobs()
+                if auto_assign_ran:
+                    await _invalidate_crm_cache()
+                    logging.info("CRM auto bulk-assign rules executed: count=%s", auto_assign_ran)
 
                 logging.info("Scheduler completed successfully")
 

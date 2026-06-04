@@ -18,6 +18,9 @@ from app.follow_ups.schemas import (
 )
 from app.logger import logger
 from app.redis_cache import (
+    CACHE_TTL_ALERTS,
+    CACHE_TTL_COUNTS,
+    CACHE_TTL_LIST,
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
     invalidate_tag as redis_invalidate_tag,
@@ -164,7 +167,7 @@ async def list_payment_followups(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    role_norm = str(current_user.get("role") or "").strip().upper()
 
     log = logging.LoggerAdapter(
         logger,
@@ -183,7 +186,7 @@ async def list_payment_followups(
 
     cache_key = build_cache_key(
         "payment_followups:list",
-        role=role,
+        role=role_norm,
         emp_id=emp_id,
         payment_id=payment_id,
         customer_id=customer_id,
@@ -249,7 +252,6 @@ async def list_payment_followups(
             values.append(followup_to)
             idx += 1
 
-        role_norm = str(role or "").strip().upper()
         visibility_sql, visibility_values, idx = build_payment_followup_visibility(
             role_norm,
             emp_id,
@@ -328,7 +330,7 @@ async def list_payment_followups(
     return await redis_get_or_set_json(
         cache_key,
         loader=_load_payment_followups,
-        ttl_seconds=300,
+        ttl_seconds=CACHE_TTL_LIST,
         tags=[_payments_followup_list_tag()],
     )
 
@@ -341,7 +343,7 @@ async def list_payment_followups(
 )
 async def create_payment_followup(
     payload: CreatePaymentFollowupRequest,
-    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
@@ -787,6 +789,9 @@ async def get_payment_followup_counts(
                     WHERE rp.completed_at IS NULL
                       AND rp.followup_status = 'PENDING'
                       AND rp.missed_at IS NULL
+                      AND rp.followup_at IS NOT NULL
+                      AND rp.followup_at <= NOW()
+                      AND rp.followup_at > NOW() - INTERVAL '10 minutes'
                 ) AS pending_today
             {joins}
             {where_clause}
@@ -819,7 +824,7 @@ async def get_payment_followup_counts(
     return await redis_get_or_set_json(
         cache_key,
         loader=_load_payment_followup_counts,
-        ttl_seconds=300,
+        ttl_seconds=CACHE_TTL_COUNTS,
         tags=["payment_followups:counts:index"],
     )
 
@@ -859,11 +864,12 @@ async def get_payment_followup_alerts(
             "rp.payment_status = 'PENDING'",
             "rp.is_active = TRUE",
             "rp.followup_status IN ('PENDING', 'MISSED')",
-            "rp.followup_at <= $1",
-            "rp.entity_type = ANY($2::text[])",
+            "rp.followup_at >= $1",
+            "rp.followup_at <= $2",
+            "rp.entity_type = ANY($3::text[])",
         ]
-        values: list = [next_24h, list(PAYMENT_FOLLOWUP_ENTITY_TYPES)]
-        idx = 3
+        values: list = [now, next_24h, list(PAYMENT_FOLLOWUP_ENTITY_TYPES)]
+        idx = 4
 
         visibility_sql, visibility_values, idx = build_payment_followup_visibility(
             role, emp_id, idx, DB_SCHEMA
@@ -927,6 +933,6 @@ async def get_payment_followup_alerts(
     return await redis_get_or_set_json(
         cache_key,
         loader=_load_payment_followup_alerts,
-        ttl_seconds=120,
+        ttl_seconds=CACHE_TTL_ALERTS,
         tags=["payment_followups:alerts:index"],
     )

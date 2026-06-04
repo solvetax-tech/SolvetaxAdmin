@@ -250,6 +250,60 @@ class CRMBulkAssignExecuteIn(CRMBaseSchema):
         return self
 
 
+class CRMBulkAutoAssignFiltersIn(CRMBaseSchema):
+    """Same filter shape as GET /bulk-assign/candidates (stored for scheduler replay)."""
+
+    stages: List[str] = Field(default_factory=list)
+    rm_ids: List[int] = Field(default_factory=list)
+    op_ids: List[int] = Field(default_factory=list)
+    lead_types: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    lead_sources: List[str] = Field(default_factory=list)
+    entity_types: List[str] = Field(default_factory=list)
+    follow_up_statuses: List[str] = Field(default_factory=list)
+    null_fields: List[str] = Field(default_factory=list)
+    not_null_fields: List[str] = Field(default_factory=list)
+    is_active: Optional[bool] = None
+    match_mode: Literal["AND", "OR"] = "AND"
+    filter_mode: Literal["IN", "NOT_IN"] = "IN"
+    limit: int = Field(default=500, ge=1, le=5000)
+
+
+class CRMBulkAutoAssignConfigIn(CRMBaseSchema):
+    """Create or update one auto bulk-assign scheduler (multiple per entity_type allowed)."""
+
+    id: Optional[int] = Field(default=None, ge=1, description="Set to update; omit to create a new scheduler.")
+    name: str = Field(default="Scheduler", min_length=1, max_length=120)
+    enabled: bool = False
+    entity_type: str = Field(..., min_length=1, max_length=64)
+    filters: CRMBulkAutoAssignFiltersIn
+    assign_rm: bool = False
+    assign_op: bool = False
+    selected_rm_usernames: List[str] = Field(default_factory=list)
+    selected_op_usernames: List[str] = Field(default_factory=list)
+    per_employee_limit_rm: Optional[int] = Field(default=None, ge=1, le=10000)
+    per_employee_limit_op: Optional[int] = Field(default=None, ge=1, le=10000)
+    assign_unassigned_only: bool = Field(
+        default=True,
+        description="When true, only leads with rm_id/op_id NULL are updated for that role.",
+    )
+    interval_minutes: int = Field(default=5, ge=1, le=1440)
+
+    @model_validator(mode="after")
+    def _validate_assignees(self):
+        if self.enabled:
+            if not self.assign_rm and not self.assign_op:
+                raise ValueError("Enable at least one of assign_rm or assign_op when auto-assign is on.")
+            if self.assign_rm and not self.selected_rm_usernames:
+                raise ValueError("selected_rm_usernames required when assign_rm is enabled.")
+            if self.assign_op and not self.selected_op_usernames:
+                raise ValueError("selected_op_usernames required when assign_op is enabled.")
+        et = (self.filters.entity_types or []) + [self.entity_type]
+        if not any(isinstance(x, str) and x.strip() for x in et):
+            raise ValueError("filters.entity_types or entity_type must be set.")
+        return self
+
+
 class CRMUIStagePitchItem(CRMBaseSchema):
     stage: str
     pitch_type_code: str

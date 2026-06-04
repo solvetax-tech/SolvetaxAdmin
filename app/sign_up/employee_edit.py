@@ -48,11 +48,14 @@ def _roles_list_tag() -> str:
 
 
 async def _invalidate_employee_related_cache(emp_id: Optional[int] = None) -> None:
+    from app.payments.payment_cache_invalidation import invalidate_followup_caches
+
     await redis_invalidate_tag(_employee_filter_tag())
     await redis_invalidate_tag(_employee_active_rm_tag())
     await redis_invalidate_tag(_employee_active_op_tag())
     await redis_invalidate_tag(_employee_active_managers_tag())
     await redis_invalidate_tag("version:filter:index")
+    await invalidate_followup_caches()
     if emp_id is not None:
         await redis_invalidate_tag(_employee_by_id_tag(emp_id))
 

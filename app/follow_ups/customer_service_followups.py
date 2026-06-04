@@ -23,6 +23,9 @@ from app.utils import (
 from app.security.rbac import require_permission
 from app.logger import logger
 from app.redis_cache import (
+    CACHE_TTL_ALERTS,
+    CACHE_TTL_COUNTS,
+    CACHE_TTL_LIST,
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
     invalidate_tag as redis_invalidate_tag,
@@ -280,7 +283,7 @@ async def list_customer_service_followups(
     return await redis_get_or_set_json(
         cache_key,
         loader=_load_customer_service_followups,
-        ttl_seconds=300,
+        ttl_seconds=CACHE_TTL_LIST,
         tags=["customer_service_followups:list:index"],
     )
 
@@ -745,6 +748,9 @@ async def get_customer_service_followup_counts(
                     WHERE cs.completed_at IS NULL
                       AND cs.followup_status = 'PENDING'
                       AND cs.missed_at IS NULL
+                      AND cs.followup_at IS NOT NULL
+                      AND cs.followup_at <= NOW()
+                      AND cs.followup_at > NOW() - INTERVAL '10 minutes'
                 ) AS pending_today
             FROM {DB_SCHEMA}.customer_services cs
             {where_clause}
@@ -777,7 +783,7 @@ async def get_customer_service_followup_counts(
     return await redis_get_or_set_json(
         cache_key,
         loader=_load_customer_service_followup_counts,
-        ttl_seconds=300,
+        ttl_seconds=CACHE_TTL_COUNTS,
         tags=["customer_service_followups:counts:index"],
     )
 
@@ -815,10 +821,11 @@ async def get_customer_service_followup_alerts(
         conditions = [
             "cs.followup_at IS NOT NULL",
             "cs.followup_status IN ('PENDING', 'MISSED')",
-            "cs.followup_at <= $1",
+            "cs.followup_at >= $1",
+            "cs.followup_at <= $2",
         ]
-        values = [next_24h]
-        idx = 2
+        values = [now, next_24h]
+        idx = 3
 
         visibility_sql, visibility_values, idx = build_customer_service_visibility(
             role, emp_id, idx, DB_SCHEMA
@@ -863,6 +870,6 @@ async def get_customer_service_followup_alerts(
     return await redis_get_or_set_json(
         cache_key,
         loader=_load_customer_service_followup_alerts,
-        ttl_seconds=120,
+        ttl_seconds=CACHE_TTL_ALERTS,
         tags=["customer_service_followups:alerts:index"],
     )

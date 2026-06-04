@@ -159,11 +159,46 @@ async def close_redis_client() -> None:
         _redis_client = None
 
 
+def normalize_cache_role(role: Any) -> Optional[str]:
+    """Uppercase/strip role so cache keys match SQL visibility (RM vs rm)."""
+    if role is None:
+        return None
+    text = str(role).strip().upper()
+    return text or None
+
+
+def normalize_cache_emp_id(emp_id: Any) -> Optional[int]:
+    if emp_id is None:
+        return None
+    try:
+        return int(emp_id)
+    except (TypeError, ValueError):
+        return None
+
+
+# Recommended TTLs for read-through GET caches (seconds).
+CACHE_TTL_LIST = 90
+CACHE_TTL_COUNTS = 90
+CACHE_TTL_ALERTS = 120
+CACHE_TTL_DETAIL = 120
+CACHE_TTL_CONFIG = 300
+
+
 def build_cache_key(prefix: str, **params: Any) -> str:
     # Canonical, order-stable key so equivalent filters map to same cache key.
-    normalized = {
-        k: v for k, v in sorted(params.items(), key=lambda item: item[0]) if v is not None
-    }
+    normalized: dict[str, Any] = {}
+    for key, value in sorted(params.items(), key=lambda item: item[0]):
+        if value is None:
+            continue
+        if key == "role":
+            value = normalize_cache_role(value)
+            if value is None:
+                continue
+        elif key == "emp_id":
+            value = normalize_cache_emp_id(value)
+            if value is None:
+                continue
+        normalized[key] = value
     payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"), default=str)
     return f"{prefix}:{payload}"
 
