@@ -125,6 +125,8 @@ async def rebuild_return_details_for_filing(
 
     - Legacy mode: old active rows are marked ``is_active = FALSE``.
     - Current-chain mode: old rows stay active, but become ``is_current = FALSE``.
+    - Scheduler auto-gen demotes prior rows in the same ``filing_frequency`` band only
+      (MONTHLY/QUARTERLY vs YEARLY) before inserting the new current row.
     """
     if supersede_with_is_current:
         await conn.execute(

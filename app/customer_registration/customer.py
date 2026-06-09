@@ -6,7 +6,7 @@ from difflib import SequenceMatcher
 from fastapi import APIRouter, HTTPException, Query, Depends, Request, status, UploadFile, File
 from pydantic import constr, validator
 from typing import Annotated, List, Optional, Set
-from datetime import datetime
+from datetime import date, datetime
 from app.customer_registration.schemas import (
     CustomerIn,
     CustomerEditIn,
@@ -18,6 +18,7 @@ from app.campaign.campaign import insert_campaign_capture_for_public_create
 from app.security.rbac import require_permission, get_employee_payload_if_bearer, assert_platform_permission
 from app.security.public_security import enforce_public_security
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_filter, append_ilike_contains
 from app.utils import (
     mask_sensitive_data,
     generate_uuid,
@@ -1410,13 +1411,8 @@ async def get_customer_by_id(
 
 STANDARD_FILTERS = {
     "customer_id": ("customer_id = {p}", lambda v: v),
-    "full_name": ("full_name ILIKE {p}", lambda v: f"%{v.strip()}%"),
-    "email": ("email ILIKE {p}", lambda v: f"%{v.strip().lower()}%"),
     "mobile": ("trim(mobile) = trim({p}::text)", lambda v: v.strip()),
-    "business_name": ("business_name ILIKE {p}", lambda v: f"%{v.strip()}%"),
     "business_type": ("business_type = {p}", lambda v: v),
-    "state": ("state = {p}", lambda v: v),
-    "city": ("city = {p}", lambda v: v),
     "language": ("language = {p}", lambda v: v),
     "rm_id": ("rm_id = {p}", lambda v: v),
     "op_id": ("op_id = {p}", lambda v: v),
@@ -1461,8 +1457,8 @@ async def filter_customers(
     services_required_any: Optional[List[str]] = Query(None),
 
     # date filters
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
 
     # pagination
     limit: int = Query(20, ge=1, le=100),
@@ -1567,6 +1563,17 @@ async def filter_customers(
                     values.append(formatter(value))
                     idx += 1
 
+            if full_name:
+                idx = append_fuzzy_name_filter(conditions, values, idx, "full_name", full_name)
+            if business_name:
+                idx = append_fuzzy_name_filter(conditions, values, idx, "business_name", business_name)
+            if email:
+                idx = append_ilike_contains(conditions, values, idx, "lower(email)", email)
+            if state:
+                idx = append_fuzzy_name_filter(conditions, values, idx, "state", state)
+            if city:
+                idx = append_fuzzy_name_filter(conditions, values, idx, "city", city)
+
         # --------------------------------------------------
         # ARRAY FILTERS
         # --------------------------------------------------
@@ -1613,12 +1620,12 @@ async def filter_customers(
         # DATE FILTER
         # --------------------------------------------------
             if from_date:
-                conditions.append(f"created_at >= ${idx}")
+                conditions.append(f"created_at::date >= ${idx}")
                 values.append(from_date)
                 idx += 1
 
             if to_date:
-                conditions.append(f"created_at <= ${idx}")
+                conditions.append(f"created_at::date <= ${idx}")
                 values.append(to_date)
                 idx += 1
 

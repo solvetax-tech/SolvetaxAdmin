@@ -11,7 +11,7 @@ from app.utils import (
 )
 from app.logger import logger
 from app.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 import json
 
@@ -43,8 +43,8 @@ async def list_versions(
     entity_id: Optional[int] = None,
     customer_id: Optional[int] = None,
     action: Optional[str] = None,
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -159,12 +159,12 @@ async def list_versions(
         # --------------------------------------------------
 
         if from_date:
-            conditions.append(f"v.created_at >= ${param_index}")
+            conditions.append(f"v.created_at::date >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"v.created_at <= ${param_index}")
+            conditions.append(f"v.created_at::date <= ${param_index}")
             values.append(to_date)
             param_index += 1
 

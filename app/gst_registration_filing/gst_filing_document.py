@@ -2,8 +2,12 @@ import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
-from datetime import datetime
+from datetime import date, datetime
 from app.gst_registration_filing.schemas import GSTFilingDocumentIn, GSTFilingDocumentEditIn
+from app.gst_registration_filing.gst_filter_rules import (
+    append_document_filter_rule_group,
+    normalize_match_mode,
+)
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_filing_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
@@ -453,16 +457,24 @@ async def filter_gst_filing_documents(
     # DOCUMENT
     document_type: Optional[str] = None,
     verified: Optional[bool] = None,
+    document_filter_match: Optional[str] = Query(
+        "AND",
+        description="Combine document_filter_rules with AND or OR.",
+    ),
+    document_filter_rules: Optional[List[str]] = Query(
+        None,
+        description="Document rules like DOCUMENT_TYPE:WORKING_SHEET and VERIFIED:VERIFIED.",
+    ),
 
     # USERS
     verified_by: Optional[int] = None,
 
     # DATE FILTERS
-    created_from: Optional[datetime] = None,
-    created_to: Optional[datetime] = None,
+    created_from: Optional[date] = None,
+    created_to: Optional[date] = None,
 
-    verified_from: Optional[datetime] = None,
-    verified_to: Optional[datetime] = None,
+    verified_from: Optional[date] = None,
+    verified_to: Optional[date] = None,
 
     # FLAGS
     is_active: Optional[bool] = None,
@@ -496,6 +508,13 @@ async def filter_gst_filing_documents(
 
     if verified_from and verified_to and verified_from > verified_to:
         raise HTTPException(400, "verified_from cannot be greater than verified_to")
+    if document_filter_rules and (document_type or verified is not None):
+        raise HTTPException(400, "Use document_filter_rules or document_type/verified, not both")
+    try:
+        if document_filter_rules:
+            normalize_match_mode(document_filter_match)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     gstin_norm = gstin.strip().upper() if gstin and gstin.strip() else None
     document_type_norm = document_type.strip().upper() if document_type and document_type.strip() else None
     cache_key = build_cache_key(
@@ -505,6 +524,8 @@ async def filter_gst_filing_documents(
         gstin=gstin_norm,
         document_type=document_type_norm,
         verified=verified,
+        document_filter_match=document_filter_match,
+        document_filter_rules=document_filter_rules,
         verified_by=verified_by,
         created_from=created_from,
         created_to=created_to,
@@ -550,15 +571,26 @@ async def filter_gst_filing_documents(
         # --------------------------------------------------
         # DOCUMENT FILTERS
         # --------------------------------------------------
-        if document_type_norm:
+        use_document_rules = bool(document_filter_rules)
+
+        if not use_document_rules and document_type_norm:
             conditions.append(f"d.document_type = ${idx}")
             values.append(document_type_norm)
             idx += 1
 
-        if verified is not None:
+        if not use_document_rules and verified is not None:
             conditions.append(f"d.verified = ${idx}")
             values.append(verified)
             idx += 1
+
+        if use_document_rules:
+            idx = append_document_filter_rule_group(
+                conditions,
+                values,
+                idx,
+                rules=document_filter_rules,
+                match_mode=document_filter_match or "AND",
+            )
 
         if verified_by:
             conditions.append(f"d.verified_by = ${idx}")
@@ -569,22 +601,22 @@ async def filter_gst_filing_documents(
         # DATE FILTERS
         # --------------------------------------------------
         if created_from:
-            conditions.append(f"d.created_at >= ${idx}")
+            conditions.append(f"d.created_at::date >= ${idx}")
             values.append(created_from)
             idx += 1
 
         if created_to:
-            conditions.append(f"d.created_at <= ${idx}")
+            conditions.append(f"d.created_at::date <= ${idx}")
             values.append(created_to)
             idx += 1
 
         if verified_from:
-            conditions.append(f"d.verified_at >= ${idx}")
+            conditions.append(f"d.verified_at::date >= ${idx}")
             values.append(verified_from)
             idx += 1
 
         if verified_to:
-            conditions.append(f"d.verified_at <= ${idx}")
+            conditions.append(f"d.verified_at::date <= ${idx}")
             values.append(verified_to)
             idx += 1
 

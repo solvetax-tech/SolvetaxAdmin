@@ -240,6 +240,11 @@ class CRMBulkAssignExecuteIn(CRMBaseSchema):
     selected_usernames: Optional[List[str]] = Field(default=None, min_length=1, max_length=500)
     assignment_role: Literal["RM", "OP"]
     per_employee_limit: Optional[int] = Field(default=None, ge=1, le=10000)
+    round_robin_start_index: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Auto-assign: resume round-robin from this index in selected_usernames order.",
+    )
 
     @model_validator(mode="after")
     def _require_assignees(self):
@@ -267,6 +272,12 @@ class CRMBulkAutoAssignFiltersIn(CRMBaseSchema):
     match_mode: Literal["AND", "OR"] = "AND"
     filter_mode: Literal["IN", "NOT_IN"] = "IN"
     limit: int = Field(default=500, ge=1, le=5000)
+
+
+class CRMBulkAutoAssignEnabledPatchIn(CRMBaseSchema):
+    """Quick on/off for a saved scheduler without resubmitting full config."""
+
+    enabled: bool
 
 
 class CRMBulkAutoAssignConfigIn(CRMBaseSchema):

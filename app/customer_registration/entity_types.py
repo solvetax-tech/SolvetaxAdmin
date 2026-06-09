@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.security.rbac import require_permission
 from app.utils import DB_SCHEMA, generate_uuid, get_db_pool
+from app.text_search_filters import append_fuzzy_name_or_filter
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +49,13 @@ async def list_entity_types(
         idx += 1
 
     if search and search.strip():
-        token = f"%{search.strip()}%"
-        where.append(f"(e.entity_name ILIKE ${idx} OR e.value ILIKE ${idx})")
-        params.append(token)
-        idx += 1
+        idx = append_fuzzy_name_or_filter(
+            where,
+            params,
+            idx,
+            ["e.entity_name", "e.value"],
+            search.strip(),
+        )
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     count_sql = f"""

@@ -122,33 +122,36 @@ async def _fetch_scheduler_row(conn, scheduler_id: int) -> Optional[asyncpg.Reco
     )
 
 
-async def svc_list_bulk_assign_schedulers(entity_type: str) -> Dict[str, Any]:
-    et = (entity_type or "").strip().upper()
-    pool = await get_db_pool()
-    try:
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT s.*,
-                       (
-                         SELECT l.summary
-                         FROM {DB_SCHEMA}.crm_bulk_assign_logs l
-                         WHERE l.scheduler_id = s.id
-                         ORDER BY l.created_at DESC
-                         LIMIT 1
-                       ) AS last_log_summary
-                FROM {DB_SCHEMA}.crm_bulk_assign_schedulers s
-                WHERE s.is_active = TRUE
-                  AND upper(trim(s.entity_type)) = $1
-                ORDER BY s.updated_at DESC, s.id DESC
-                """,
-                et,
-            )
-    except asyncpg.PostgresError as exc:
-        if _table_exists_error(exc):
-            return {"entity_type": et, "items": [], "storage_ready": False}
-        raise HTTPException(status_code=500, detail="Database error.") from exc
+async def _fetch_scheduler_rows(
+    conn: asyncpg.Connection,
+    *,
+    entity_type: Optional[str] = None,
+) -> List[asyncpg.Record]:
+    clauses = ["s.is_active = TRUE"]
+    params: list = []
+    if entity_type:
+        params.append((entity_type or "").strip().upper())
+        clauses.append(f"upper(trim(s.entity_type)) = ${len(params)}")
+    where_sql = " AND ".join(clauses)
+    return await conn.fetch(
+        f"""
+        SELECT s.*,
+               (
+                 SELECT l.summary
+                 FROM {DB_SCHEMA}.crm_bulk_assign_logs l
+                 WHERE l.scheduler_id = s.id
+                 ORDER BY l.created_at DESC
+                 LIMIT 1
+               ) AS last_log_summary
+        FROM {DB_SCHEMA}.crm_bulk_assign_schedulers s
+        WHERE {where_sql}
+        ORDER BY upper(trim(s.entity_type)), s.updated_at DESC, s.id DESC
+        """,
+        *params,
+    )
 
+
+def _rows_to_scheduler_items(rows: List[asyncpg.Record]) -> List[Dict[str, Any]]:
     items = []
     for row in rows:
         rule = _row_to_rule(row)
@@ -158,7 +161,88 @@ async def svc_list_bulk_assign_schedulers(entity_type: str) -> Dict[str, Any]:
                 ls = json.loads(ls)
             rule["last_run_summary"] = ls
         items.append(rule)
-    return {"entity_type": et, "items": items, "storage_ready": True}
+    return items
+
+
+async def svc_list_bulk_assign_schedulers(entity_type: Optional[str] = None) -> Dict[str, Any]:
+    et = (entity_type or "").strip().upper() or None
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            rows = await _fetch_scheduler_rows(conn, entity_type=et)
+    except asyncpg.PostgresError as exc:
+        if _table_exists_error(exc):
+            return {"entity_type": et, "items": [], "storage_ready": False}
+        raise HTTPException(status_code=500, detail="Database error.") from exc
+
+    items = _rows_to_scheduler_items(rows)
+    enabled_count = sum(1 for item in items if item.get("enabled"))
+    return {
+        "entity_type": et,
+        "items": items,
+        "total": len(items),
+        "enabled_count": enabled_count,
+        "storage_ready": True,
+    }
+
+
+async def svc_toggle_bulk_assign_scheduler_enabled(
+    scheduler_id: int,
+    *,
+    enabled: bool,
+    updated_by: int,
+) -> Dict[str, Any]:
+    pool = await get_db_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await _fetch_scheduler_row(conn, scheduler_id)
+            if not row:
+                raise HTTPException(status_code=404, detail="Scheduler not found.")
+            if enabled:
+                if not row["assign_rm"] and not row["assign_op"]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Enable at least one of RM or OP assignment before turning the scheduler on.",
+                    )
+                rm_users = row["selected_rm_usernames"]
+                if isinstance(rm_users, str):
+                    rm_users = json.loads(rm_users)
+                op_users = row["selected_op_usernames"]
+                if isinstance(op_users, str):
+                    op_users = json.loads(op_users)
+                if row["assign_rm"] and not (rm_users or []):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Select at least one RM before turning the scheduler on.",
+                    )
+                if row["assign_op"] and not (op_users or []):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Select at least one OP before turning the scheduler on.",
+                    )
+            row = await conn.fetchrow(
+                f"""
+                UPDATE {DB_SCHEMA}.crm_bulk_assign_schedulers
+                SET enabled = $2, updated_by = $3, updated_at = NOW()
+                WHERE id = $1 AND is_active = TRUE
+                RETURNING *
+                """,
+                scheduler_id,
+                enabled,
+                updated_by,
+            )
+    except HTTPException:
+        raise
+    except asyncpg.PostgresError as exc:
+        if _table_exists_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail="Run scripts/crm_bulk_assign_scheduler.sql to enable schedulers and logs.",
+            ) from exc
+        raise HTTPException(status_code=500, detail="Database error.") from exc
+
+    rule = _row_to_rule(row)
+    return {"configured": True, **rule}
 
 
 async def svc_get_bulk_assign_scheduler(scheduler_id: int) -> Dict[str, Any]:
@@ -192,7 +276,20 @@ async def svc_save_bulk_auto_assign_config(
                 existing = await _fetch_scheduler_row(conn, payload.id)
                 if not existing:
                     raise HTTPException(status_code=404, detail="Scheduler not found.")
-                # Preserve round-robin cursor and last run across config edits
+                rr = existing.get("rr_state")
+                if isinstance(rr, str):
+                    rr = json.loads(rr)
+                rr = dict(rr or {"RM": 0, "OP": 0})
+                old_rm = existing["selected_rm_usernames"]
+                if isinstance(old_rm, str):
+                    old_rm = json.loads(old_rm)
+                old_op = existing["selected_op_usernames"]
+                if isinstance(old_op, str):
+                    old_op = json.loads(old_op)
+                if list(old_rm or []) != list(payload.selected_rm_usernames or []):
+                    rr["RM"] = 0
+                if list(old_op or []) != list(payload.selected_op_usernames or []):
+                    rr["OP"] = 0
                 row = await conn.fetchrow(
                     f"""
                     UPDATE {DB_SCHEMA}.crm_bulk_assign_schedulers
@@ -208,7 +305,8 @@ async def svc_save_bulk_auto_assign_config(
                         per_employee_limit_op = $11,
                         assign_unassigned_only = $12,
                         interval_minutes = $13,
-                        updated_by = $14,
+                        rr_state = $14::jsonb,
+                        updated_by = $15,
                         updated_at = NOW()
                     WHERE id = $1 AND is_active = TRUE
                     RETURNING *
@@ -226,6 +324,7 @@ async def svc_save_bulk_auto_assign_config(
                     fields["per_employee_limit_op"],
                     fields["assign_unassigned_only"],
                     fields["interval_minutes"],
+                    json.dumps(rr),
                     updated_by,
                 )
             else:
@@ -411,6 +510,19 @@ async def svc_list_bulk_assign_logs(
     }
 
 
+def _lead_created_at_sort_key(row: Dict[str, Any]) -> tuple:
+    """Oldest leads first — fair FIFO for auto-assign round-robin."""
+    created_at = row.get("created_at")
+    if created_at is None:
+        created_ts = ""
+    elif isinstance(created_at, datetime):
+        created_ts = created_at.isoformat()
+    else:
+        created_ts = str(created_at)
+    lead_id = row.get("id")
+    return (created_ts, int(lead_id) if lead_id is not None else 0)
+
+
 async def _fetch_matching_leads(rule: Dict[str, Any]) -> List[Dict[str, Any]]:
     f = rule.get("filters") or {}
     entity_types = f.get("entity_types") or [rule["entity_type"]]
@@ -432,7 +544,9 @@ async def _fetch_matching_leads(rule: Dict[str, Any]) -> List[Dict[str, Any]]:
         offset=0,
         current_user=_SYSTEM_ADMIN_USER,
     )
-    return result.get("items") or []
+    items = result.get("items") or []
+    items.sort(key=_lead_created_at_sort_key)
+    return items
 
 
 async def _execute_role_assign(
@@ -441,6 +555,7 @@ async def _execute_role_assign(
     assignment_role: str,
     usernames: List[str],
     per_employee_limit: Optional[int],
+    round_robin_start_index: int = 0,
 ) -> Dict[str, Any]:
     if not lead_ids:
         return {
@@ -448,12 +563,14 @@ async def _execute_role_assign(
             "total_selected": 0,
             "total_assigned": 0,
             "per_employee_counts": {},
+            "round_robin_next_index": int(round_robin_start_index or 0),
         }
     payload = CRMBulkAssignExecuteIn(
         lead_ids=lead_ids,
         selected_usernames=usernames,
         assignment_role=assignment_role,
         per_employee_limit=per_employee_limit,
+        round_robin_start_index=int(round_robin_start_index or 0),
     )
     return await _svc_execute_bulk_assign(payload=payload, current_user=_SYSTEM_ADMIN_USER)
 
@@ -497,32 +614,42 @@ async def run_auto_assign_scheduler(scheduler_id: int, *, force: bool = False) -
 
     leads = await _fetch_matching_leads(rule)
     unassigned_only = bool(rule.get("assign_unassigned_only", True))
+    rr_state = rule.get("rr_state") or {"RM": 0, "OP": 0}
+    next_rr_state = dict(rr_state)
     summary: Dict[str, Any] = {
         "scheduler_id": scheduler_id,
         "scheduler_name": rule.get("name"),
         "entity_type": rule["entity_type"],
         "candidates_matched": len(leads),
         "roles": {},
+        "rr_state_before": rr_state,
         "ran_at": now.isoformat(),
     }
 
     try:
         if rule.get("assign_rm") and rule.get("selected_rm_usernames"):
             rm_ids = _filter_leads_for_role(leads, "RM", unassigned_only)
-            summary["roles"]["RM"] = await _execute_role_assign(
+            rm_result = await _execute_role_assign(
                 rm_ids,
                 assignment_role="RM",
                 usernames=list(rule["selected_rm_usernames"]),
                 per_employee_limit=rule.get("per_employee_limit_rm"),
+                round_robin_start_index=int(rr_state.get("RM") or 0),
             )
+            summary["roles"]["RM"] = rm_result
+            next_rr_state["RM"] = int(rm_result.get("round_robin_next_index") or 0)
         if rule.get("assign_op") and rule.get("selected_op_usernames"):
             op_ids = _filter_leads_for_role(leads, "OP", unassigned_only)
-            summary["roles"]["OP"] = await _execute_role_assign(
+            op_result = await _execute_role_assign(
                 op_ids,
                 assignment_role="OP",
                 usernames=list(rule["selected_op_usernames"]),
                 per_employee_limit=rule.get("per_employee_limit_op"),
+                round_robin_start_index=int(rr_state.get("OP") or 0),
             )
+            summary["roles"]["OP"] = op_result
+            next_rr_state["OP"] = int(op_result.get("round_robin_next_index") or 0)
+        summary["rr_state_after"] = next_rr_state
     except HTTPException:
         raise
     except Exception:
@@ -535,11 +662,14 @@ async def run_auto_assign_scheduler(scheduler_id: int, *, force: bool = False) -
         await conn.execute(
             f"""
             UPDATE {DB_SCHEMA}.crm_bulk_assign_schedulers
-            SET last_run_at = $2, updated_at = NOW()
+            SET last_run_at = $2,
+                rr_state = $3::jsonb,
+                updated_at = NOW()
             WHERE id = $1
             """,
             scheduler_id,
             now,
+            json.dumps(next_rr_state),
         )
 
     await insert_bulk_assign_log(

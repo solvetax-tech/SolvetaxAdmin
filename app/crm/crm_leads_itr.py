@@ -11,7 +11,9 @@ from app.crm.crm_leads_common import (
     FINAL_PITCH_CONNECTED,
     FOLLOWUP_STATUSES,
     IST,
+    _svc_crm_followup_alerts,
     _svc_crm_followup_counts,
+    _svc_crm_followup_list,
     _crm_lead_by_id_tag,
     _crm_lead_activities_tag,
     _crm_lead_calls_tag,
@@ -570,6 +572,52 @@ async def get_crm_itr_lead_followup_counts(
         followup_from=followup_from,
         followup_to=followup_to,
         dates=dates,
+        entity_type=ITR_ENTITY_TYPE,
+        category=category,
+        stage=stage,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/followups",
+    summary="List CRM ITR lead follow-ups for dashboard scheduled panel",
+)
+async def list_crm_itr_lead_followups(
+    followup_from: Optional[datetime] = Query(None),
+    followup_to: Optional[datetime] = Query(None),
+    dates: Optional[str] = Query(None),
+    category: str = Query("service", description="service or payment follow-up tab"),
+    stage: Optional[str] = Query(None),
+    follow_up_status: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    return await _svc_crm_followup_list(
+        followup_from=followup_from,
+        followup_to=followup_to,
+        dates=dates,
+        entity_type=ITR_ENTITY_TYPE,
+        category=category,
+        stage=stage,
+        follow_up_status=follow_up_status,
+        limit=limit,
+        offset=offset,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/followups/alerts",
+    summary="CRM ITR lead follow-up alerts (due within 24h)",
+)
+async def get_crm_itr_lead_followup_alerts(
+    category: str = Query("service", description="service or payment follow-up tab"),
+    stage: Optional[str] = Query(None),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    return await _svc_crm_followup_alerts(
         entity_type=ITR_ENTITY_TYPE,
         category=category,
         stage=stage,

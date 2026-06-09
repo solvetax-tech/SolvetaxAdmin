@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from zoneinfo import ZoneInfo
@@ -29,6 +29,7 @@ from app.redis_cache import (
     invalidate_tag as redis_invalidate_tag,
 )
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_or_filter
 from app.security.rbac import require_admin, require_permission
 from app.utils import (
     DB_SCHEMA,
@@ -132,6 +133,7 @@ async def filter_customer_services_staff(
     rm_id: Optional[int] = Query(None),
     op_id: Optional[int] = Query(None),
     mobile: Optional[str] = Query(None),
+    full_name: Optional[str] = Query(None, description="Fuzzy match on customer full_name."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -158,6 +160,7 @@ async def filter_customer_services_staff(
         rm_id=rm_id,
         op_id=op_id,
         mobile=mobile_q,
+        full_name=full_name.strip() if isinstance(full_name, str) and full_name.strip() else None,
         limit=limit,
         offset=offset,
     )
@@ -188,6 +191,15 @@ async def filter_customer_services_staff(
         if mobile_q:
             params.append(mobile_q)
             clauses.append(f"trim(c.mobile) = trim(${len(params)}::text)")
+        if full_name and full_name.strip():
+            filter_idx = len(params) + 1
+            filter_idx = append_fuzzy_name_or_filter(
+                clauses,
+                params,
+                filter_idx,
+                ["c.full_name", "c.business_name"],
+                full_name.strip(),
+            )
 
         vis_sql, vis_vals, _ = build_customer_service_visibility(
             role, emp_id if emp_id > 0 else None, len(params) + 1, DB_SCHEMA
@@ -1161,8 +1173,8 @@ async def filter_customer_services_extended(
     is_active: Optional[bool] = Query(None),
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     cursor: Optional[datetime] = None,
@@ -1206,12 +1218,6 @@ async def filter_customer_services_extended(
 
     if from_date and to_date and from_date > to_date:
         raise HTTPException(status_code=400, detail="from_date cannot be greater than to_date")
-
-    if from_date and from_date.tzinfo is None:
-        from_date = from_date.replace(tzinfo=timezone.utc)
-
-    if to_date and to_date.tzinfo is None:
-        to_date = to_date.replace(tzinfo=timezone.utc)
 
     if cursor and cursor.tzinfo is None:
         cursor = cursor.replace(tzinfo=timezone.utc)
@@ -1306,12 +1312,12 @@ async def filter_customer_services_extended(
                     idx += 1
 
             if from_date:
-                conditions.append(f"cs.created_at >= ${idx}")
+                conditions.append(f"cs.created_at::date >= ${idx}")
                 values.append(from_date)
                 idx += 1
 
             if to_date:
-                conditions.append(f"cs.created_at <= ${idx}")
+                conditions.append(f"cs.created_at::date <= ${idx}")
                 values.append(to_date)
                 idx += 1
 

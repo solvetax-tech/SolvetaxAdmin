@@ -26,7 +26,10 @@ async def list_gst_filing_rule_engines(
 ):
     """
     Fetches configuration records from gst_filing_rule_engine table.
-    Limited to specific columns as per user request.
+
+    Note: due dates and recurrence cadence for return-detail seeding/chaining are
+    implemented in gst_return_details_rebuild.py and gst_filing_auto_generation.py
+    (hardcoded). This table is reference/config only until wired into those paths.
     """
     request_id = generate_uuid()
     emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"

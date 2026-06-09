@@ -23,6 +23,7 @@ from app.Income_tax.income_tax_helpers import (
 )
 from app.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_filter, append_ilike_contains
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -756,6 +757,8 @@ async def filter_income_tax(
     id: Optional[int] = None,
     mobile: Optional[str] = None,
     pan_number: Optional[str] = None,
+    client_name: Optional[str] = Query(None, description="Fuzzy match on client name."),
+    email_id: Optional[str] = Query(None, description="Partial match on email."),
     financial_year: Optional[List[str]] = Query(
         None,
         description="One or more FY values (e.g. 2024-25). Records matching any selected FY are returned.",
@@ -795,6 +798,8 @@ async def filter_income_tax(
         id=id,
         mobile=mobile.strip() if mobile else None,
         pan_number=pan_number.strip().upper() if pan_number else None,
+        client_name=client_name.strip() if client_name else None,
+        email_id=email_id.strip().lower() if email_id else None,
         financial_year=normalize_query_str_list(financial_year) or None,
         filed_status=filed_status.strip().upper() if filed_status else None,
         priority=priority.strip().upper() if priority else None,
@@ -830,6 +835,10 @@ async def filter_income_tax(
         add_eq("trim(i.mobile)", mobile.strip())
     if pan_number:
         add_eq("upper(trim(i.pan_number))", pan_number.strip().upper())
+    if client_name:
+        idx = append_fuzzy_name_filter(conditions, values, idx, "i.client_name", client_name)
+    if email_id:
+        idx = append_ilike_contains(conditions, values, idx, "lower(i.email_id)", email_id)
     fy_filters = normalize_query_str_list(financial_year)
     if fy_filters:
         conditions.append(f"i.financial_year && ${idx}::varchar[]")
@@ -842,7 +851,7 @@ async def filter_income_tax(
     if language:
         add_eq("i.language", language.strip().upper())
     if state:
-        add_eq("i.state", state.strip().upper())
+        idx = append_fuzzy_name_filter(conditions, values, idx, "i.state", state)
     src_filters = [s.strip().upper() for s in normalize_query_str_list(source_of_income)]
     if src_filters:
         conditions.append(

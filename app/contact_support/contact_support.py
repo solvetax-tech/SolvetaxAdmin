@@ -12,6 +12,7 @@ from app.redis_cache import (
 )
 from app.security.public_security import enforce_public_security
 from app.security.rbac import require_permission
+from app.text_search_filters import append_ilike_contains
 from app.utils import (
     DB_SCHEMA,
     build_customer_visibility,
@@ -401,7 +402,9 @@ async def filter_contact_support(
     if phone_number:
         add_eq("trim(c.phone_number)", phone_number)
     if email_address:
-        add_eq("lower(trim(c.email_address))", email_address)
+        idx = append_ilike_contains(
+            conditions, values, idx, "lower(trim(c.email_address))", email_address.strip().lower()
+        )
     if service_required:
         # Case/whitespace-insensitive element match so legacy non-uppercased rows still match.
         conditions.append(

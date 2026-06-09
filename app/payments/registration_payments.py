@@ -20,12 +20,13 @@ from app.utils import (
     build_registration_payments_visibility,
 )
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_or_filter
 from app.payments.payment_cache_invalidation import invalidate_payment_related_caches
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
 )
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 import json
 
@@ -211,8 +212,12 @@ async def list_registration_payments(
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
 
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    customer_name: Optional[str] = Query(
+        None,
+        description="Fuzzy match on customer/entity display names.",
+    ),
 
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -339,6 +344,7 @@ async def list_registration_payments(
         include_inactive=include_inactive,
         from_date=from_date,
         to_date=to_date,
+        customer_name=customer_name.strip() if isinstance(customer_name, str) and customer_name.strip() else None,
         limit=limit,
         offset=offset,
         role=role_norm,
@@ -472,14 +478,28 @@ async def list_registration_payments(
         # --------------------------------------------------
 
         if from_date:
-            conditions.append(f"rp.created_at >= ${param_index}")
+            conditions.append(f"rp.created_at::date >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"rp.created_at <= ${param_index}")
+            conditions.append(f"rp.created_at::date <= ${param_index}")
             values.append(to_date)
             param_index += 1
+
+        if customer_name and customer_name.strip():
+            param_index = append_fuzzy_name_or_filter(
+                conditions,
+                values,
+                param_index,
+                [
+                    "c.full_name",
+                    "g.business_name",
+                    "f.business_name",
+                    "i.client_name",
+                ],
+                customer_name.strip(),
+            )
 
         # --------------------------------------------------
         # ROLE BASED VISIBILITY (CUSTOMER → PAYMENT)

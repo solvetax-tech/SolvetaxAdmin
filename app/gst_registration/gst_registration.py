@@ -2,7 +2,7 @@ import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from app.gst_registration.schemas import (
     GSTRegistrationIn,
     GSTRegistrationEditIn,
@@ -19,6 +19,7 @@ from app.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_c
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_filter
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -902,8 +903,8 @@ async def list_gst_registrations(
     has_service: Optional[bool] = None,       # ✅ ADDED
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -932,15 +933,6 @@ async def list_gst_registrations(
             status_code=400,
             detail="from_date cannot be greater than to_date.",
         )
-
-    # ✅ TIMEZONE NORMALIZATION
-    def normalize_dt(dt):
-        if dt and dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt
-
-    from_date = normalize_dt(from_date)
-    to_date = normalize_dt(to_date)
 
     # ✅ SAFE NORMALIZATION
     gstin = gstin.strip().upper() if gstin else None
@@ -1087,15 +1079,14 @@ async def list_gst_registrations(
             )
 
         elif business_name_clean:
-            conditions.append(
-                f"""(
-                    g.business_name ILIKE ${param_index}
-                    OR similarity(g.business_name, ${param_index + 1}) >= 0.8
-                )"""
+            param_index = append_fuzzy_name_filter(
+                conditions,
+                values,
+                param_index,
+                "g.business_name",
+                business_name_clean,
+                use_trigram=True,
             )
-            values.append(f"%{business_name_clean}%")
-            values.append(business_name_clean)
-            param_index += 2
 
         if business_type_norm:
             conditions.append(f"g.business_type = ${param_index}")
@@ -1113,9 +1104,13 @@ async def list_gst_registrations(
             param_index += 1
 
         if state_norm:
-            conditions.append(f"g.state = ${param_index}")
-            values.append(state_norm)
-            param_index += 1
+            param_index = append_fuzzy_name_filter(
+                conditions,
+                values,
+                param_index,
+                "g.state",
+                state_norm,
+            )
 
         if language_norm:
             conditions.append(f"g.{_gst_reg_sql_col('language')} = ${param_index}")
@@ -1123,9 +1118,13 @@ async def list_gst_registrations(
             param_index += 1
 
         if client_name_clean:
-            conditions.append(f"lower(g.client_name) LIKE ${param_index}")
-            values.append(f"%{client_name_clean.lower()}%")
-            param_index += 1
+            param_index = append_fuzzy_name_filter(
+                conditions,
+                values,
+                param_index,
+                "g.client_name",
+                client_name_clean,
+            )
 
         if referral_phone_clean:
             conditions.append(f"g.referral_phone_number = ${param_index}")
@@ -1152,12 +1151,12 @@ async def list_gst_registrations(
             conditions.append("g.is_active = TRUE")
 
         if from_date:
-            conditions.append(f"g.created_at >= ${param_index}")
+            conditions.append(f"g.created_at::date >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"g.created_at <= ${param_index}")
+            conditions.append(f"g.created_at::date <= ${param_index}")
             values.append(to_date)
             param_index += 1
 

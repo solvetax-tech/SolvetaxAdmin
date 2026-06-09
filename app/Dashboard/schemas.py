@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -38,4 +38,40 @@ class ServiceDonePaymentPendingListResponse(BaseModel):
     limit: int
     offset: int
     summary: ServiceDonePaymentPendingSummary
+    request_id: str
+
+
+class GstFilingMatrixFormCell(BaseModel):
+    status: Optional[str] = None
+    due_date: Optional[str] = None
+    tone: str = "none"
+
+
+class GstFilingMatrixMonthCell(BaseModel):
+    tone: str = "none"
+    status: Optional[str] = None
+    due_date: Optional[str] = None
+    status_label: Optional[str] = None
+    filing_id: Optional[int] = None
+    return_detail_id: Optional[int] = None
+    forms: Optional[Dict[str, GstFilingMatrixFormCell]] = None
+
+
+class GstFilingMatrixRow(BaseModel):
+    customer_id: int
+    display_name: Optional[str] = None
+    business_name: Optional[str] = None
+    mobile: Optional[str] = None
+    gstin: Optional[str] = None
+    rm_username: Optional[str] = None
+    op_username: Optional[str] = None
+    months: Dict[str, GstFilingMatrixMonthCell]
+
+
+class GstFilingMatrixListResponse(BaseModel):
+    months: List[str]
+    data: List[GstFilingMatrixRow]
+    total: int
+    limit: int
+    offset: int
     request_id: str

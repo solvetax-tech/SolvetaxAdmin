@@ -1,6 +1,6 @@
 import logging
 import asyncpg
-from datetime import datetime
+from datetime import date, datetime
 from fastapi import APIRouter, HTTPException, Query, Depends,status,UploadFile, File
 from typing import Optional, List
 from app.security.rbac import require_permission
@@ -10,6 +10,7 @@ from app.gst_registration.schemas import (
 )
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, get_blob_service_client, AZURE_STORAGE_CONTAINER, generate_blob_sas_url, extract_blob_path,build_gst_visibility
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_filter
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -265,8 +266,8 @@ async def list_registration_documents(
     mobile: Optional[str] = None,
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -370,9 +371,13 @@ async def list_registration_documents(
         # --------------------------------------------------
 
         if document_type_norm:
-            conditions.append(f"d.document_type ILIKE ${param_index}")
-            values.append(f"%{document_type_norm}%")
-            param_index += 1
+            param_index = append_fuzzy_name_filter(
+                conditions,
+                values,
+                param_index,
+                "d.document_type",
+                document_type_norm,
+            )
 
         # --------------------------------------------------
         # Active Filtering Pattern
@@ -390,12 +395,12 @@ async def list_registration_documents(
         # --------------------------------------------------
 
         if from_date:
-            conditions.append(f"d.created_at >= ${param_index}")
+            conditions.append(f"d.created_at::date >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"d.created_at <= ${param_index}")
+            conditions.append(f"d.created_at::date <= ${param_index}")
             values.append(to_date)
             param_index += 1
 

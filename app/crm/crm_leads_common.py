@@ -2,7 +2,8 @@
 
 import io
 import logging
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,7 @@ from pydantic import ValidationError
 from app.crm.schemas_common import (
     CRMBulkAssignExecuteIn,
     CRMBulkAutoAssignConfigIn,
+    CRMBulkAutoAssignEnabledPatchIn,
     CRMBulkImportIn,
     CRMLeadMarketingCreateIn,
     CRMLeadStagesOut,
@@ -23,8 +25,15 @@ from app.crm.schemas_common import (
     CRMUIStagePitchItem,
 )
 from app.logger import logger
+from app.text_search_filters import (
+    append_fuzzy_name_filter,
+    append_ilike_contains,
+    build_fuzzy_name_clause,
+)
 from app.redis_cache import (
+    CACHE_TTL_ALERTS,
     CACHE_TTL_COUNTS,
+    CACHE_TTL_LIST,
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
     invalidate_tag as redis_invalidate_tag,
@@ -85,6 +94,8 @@ def _crm_lead_activities_tag(lead_id: int) -> str:
 async def _invalidate_crm_cache(lead_id: Optional[int] = None) -> None:
     await redis_invalidate_tag(_crm_leads_filter_tag())
     await redis_invalidate_tag(_crm_followup_counts_tag())
+    await redis_invalidate_tag(_crm_followup_alerts_tag())
+    await redis_invalidate_tag(_crm_followup_list_tag())
     await redis_invalidate_tag(_crm_activities_filter_tag())
     await redis_invalidate_tag(_crm_lead_by_entity_tag())
     if lead_id is not None:
@@ -257,6 +268,24 @@ CRM_PAYMENT_FOLLOWUP_STAGES: tuple[str, ...] = (
 def _crm_followup_counts_tag() -> str:
     return "crm:leads:followup_counts:index"
 
+
+def _crm_followup_alerts_tag() -> str:
+    return "crm:leads:followup_alerts:index"
+
+
+def _crm_followup_list_tag() -> str:
+    return "crm:leads:followup_list:index"
+
+
+def _normalize_crm_followup_category(category: Optional[str]) -> str:
+    cat = (category or "service").strip().lower()
+    if cat not in ("service", "payment"):
+        raise _validation_error(
+            "Invalid follow-up category.",
+            {"category": "Must be service or payment."},
+        )
+    return cat
+
 # Re-engage from NOT_INTERESTED when the client agrees to send documents.
 SEND_DOCS_REOPEN_FROM_STAGE = "NOT_INTERESTED"
 
@@ -294,6 +323,34 @@ _REMARKS_FILTER_ALIASES = {
         "Payment done but service pending",
     ],
 }
+
+
+def _validate_optional_datetime_range(
+    from_val: Optional[datetime],
+    to_val: Optional[datetime],
+    *,
+    field_label: str,
+) -> None:
+    if from_val is not None and to_val is not None and from_val > to_val:
+        raise _validation_error(
+            f"Invalid {field_label} range.",
+            {field_label: f"{field_label}_from must be <= {field_label}_to."},
+        )
+
+
+def _append_timestamp_range_filter(
+    where: list,
+    params: list,
+    column: str,
+    from_val: Optional[datetime],
+    to_val: Optional[datetime],
+) -> None:
+    if from_val is not None:
+        params.append(from_val)
+        where.append(f"l.{column} >= ${len(params)}")
+    if to_val is not None:
+        params.append(to_val)
+        where.append(f"l.{column} <= ${len(params)}")
 
 
 def _append_remarks_filter(where: list, params: list, remarks: Optional[str]) -> None:
@@ -849,6 +906,14 @@ async def _svc_filter_crm_leads(
     stages: Optional[List[str]] = Query(None, description="Filter by multiple stages (OR logic)."),
     follow_up_status: Optional[str] = None,
     mobile: Optional[str] = None,
+    full_name: Optional[str] = Query(
+        None,
+        description="Fuzzy match on lead full_name (~35% word match).",
+    ),
+    email: Optional[str] = Query(
+        None,
+        description="Partial match on lead email.",
+    ),
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
     lead_type: Optional[str] = None,
@@ -861,6 +926,14 @@ async def _svc_filter_crm_leads(
     is_active: Optional[bool] = None,
     followup_at_from: Optional[datetime] = Query(None, description="Inclusive lower bound on crm_leads.followup_at."),
     followup_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.followup_at."),
+    rm_assigned_at_from: Optional[datetime] = Query(None, description="Inclusive lower bound on crm_leads.rm_assigned_at."),
+    rm_assigned_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.rm_assigned_at."),
+    op_assigned_at_from: Optional[datetime] = Query(None, description="Inclusive lower bound on crm_leads.op_assigned_at."),
+    op_assigned_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.op_assigned_at."),
+    last_dailed_at_from: Optional[datetime] = Query(None, description="Inclusive lower bound on crm_leads.last_dailed_at."),
+    last_dailed_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.last_dailed_at."),
+    last_connected_at_from: Optional[datetime] = Query(None, description="Inclusive lower bound on crm_leads.last_connected_at."),
+    last_connected_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.last_connected_at."),
     entity_type: Optional[str] = Query(None, description="Filter by crm_leads.entity_type (e.g. GST_REGISTRATION)."),
     entity_id: Optional[int] = Query(None, ge=1, description="Filter by crm_leads.entity_id."),
     smart_board: bool = Query(
@@ -896,6 +969,10 @@ async def _svc_filter_crm_leads(
             "Invalid followup_at range.",
             {"followup_at_from": "followup_at_from must be <= followup_at_to."},
         )
+    _validate_optional_datetime_range(rm_assigned_at_from, rm_assigned_at_to, field_label="rm_assigned_at")
+    _validate_optional_datetime_range(op_assigned_at_from, op_assigned_at_to, field_label="op_assigned_at")
+    _validate_optional_datetime_range(last_dailed_at_from, last_dailed_at_to, field_label="last_dailed_at")
+    _validate_optional_datetime_range(last_connected_at_from, last_connected_at_to, field_label="last_connected_at")
     if stage:
         stage = _normalize_code(stage)
     stages_norm: Optional[List[str]] = None
@@ -919,11 +996,22 @@ async def _svc_filter_crm_leads(
                 "Invalid follow_up_status filter.",
                 {"follow_up_status": "Unsupported follow-up status value."},
             )
+    mobile_exact: Optional[str] = None
+    mobile_partial: Optional[str] = None
     if mobile:
         m = mobile.strip()
-        if not m.isdigit() or len(m) != 10:
-            raise _validation_error("Invalid mobile filter.", {"mobile": "Must be a 10-digit number."})
-        mobile = m
+        digits = re.sub(r"\D", "", m)
+        if len(digits) == 10:
+            mobile_exact = digits
+        elif len(digits) >= 4:
+            mobile_partial = digits
+        else:
+            raise _validation_error(
+                "Invalid mobile filter.",
+                {"mobile": "Use a 10-digit number or at least 4 digits for partial match."},
+            )
+    full_name_norm = full_name.strip() if isinstance(full_name, str) and full_name.strip() else None
+    email_norm = email.strip().lower() if isinstance(email, str) and email.strip() else None
     lead_type_norm = _normalize_code(lead_type) if isinstance(lead_type, str) and lead_type.strip() else None
     tag_norm = tag.strip() if isinstance(tag, str) and tag.strip() else None
     lead_source_norm = _normalize_code(lead_source) if isinstance(lead_source, str) and lead_source.strip() else None
@@ -934,7 +1022,9 @@ async def _svc_filter_crm_leads(
         stages=stages_norm,
         smart_board=smart_board,
         follow_up_status=follow_up_status,
-        mobile=mobile,
+        mobile=mobile_exact or mobile_partial,
+        full_name=full_name_norm,
+        email=email_norm,
         rm_id=rm_id,
         op_id=op_id,
         lead_type=lead_type_norm,
@@ -944,6 +1034,14 @@ async def _svc_filter_crm_leads(
         is_active=is_active,
         followup_at_from=followup_at_from,
         followup_at_to=followup_at_to,
+        rm_assigned_at_from=rm_assigned_at_from,
+        rm_assigned_at_to=rm_assigned_at_to,
+        op_assigned_at_from=op_assigned_at_from,
+        op_assigned_at_to=op_assigned_at_to,
+        last_dailed_at_from=last_dailed_at_from,
+        last_dailed_at_to=last_dailed_at_to,
+        last_connected_at_from=last_connected_at_from,
+        last_connected_at_to=last_connected_at_to,
         entity_type=et_filter or _entity_type_query(entity_type) if entity_type is not None else None,
         entity_id=entity_id,
         limit=limit,
@@ -982,9 +1080,23 @@ async def _svc_filter_crm_leads(
                 if follow_up_status:
                     params.append(follow_up_status)
                     where.append(f"l.follow_up_status = ${len(params)}")
-                if mobile:
-                    params.append(mobile)
+                if mobile_exact:
+                    params.append(mobile_exact)
                     where.append(f"l.mobile = ${len(params)}")
+                elif mobile_partial:
+                    params.append(f"%{mobile_partial}%")
+                    where.append(
+                        f"regexp_replace(COALESCE(l.mobile, ''), '[^0-9]', '', 'g') LIKE ${len(params)}"
+                    )
+                filter_idx = len(params) + 1
+                if full_name_norm:
+                    filter_idx = append_fuzzy_name_filter(
+                        where, params, filter_idx, "l.full_name", full_name_norm
+                    )
+                if email_norm:
+                    filter_idx = append_ilike_contains(
+                        where, params, filter_idx, "lower(COALESCE(l.email, ''))", email_norm
+                    )
                 if rm_id is not None:
                     params.append(rm_id)
                     where.append(f"l.rm_id = ${len(params)}")
@@ -995,8 +1107,8 @@ async def _svc_filter_crm_leads(
                     params.append(lead_type_norm)
                     where.append(f"upper(trim(l.lead_type)) = ${len(params)}")
                 if tag_norm:
-                    params.append(f"%{tag_norm}%")
-                    where.append(f"l.tag ILIKE ${len(params)}")
+                    filter_idx = len(params) + 1
+                    filter_idx = append_fuzzy_name_filter(where, params, filter_idx, "l.tag", tag_norm)
                 if lead_source_norm:
                     params.append(lead_source_norm)
                     where.append(f"upper(trim(l.lead_source)) = ${len(params)}")
@@ -1010,6 +1122,18 @@ async def _svc_filter_crm_leads(
                 if followup_at_to is not None:
                     params.append(followup_at_to)
                     where.append(f"l.followup_at <= ${len(params)}")
+                _append_timestamp_range_filter(
+                    where, params, "rm_assigned_at", rm_assigned_at_from, rm_assigned_at_to
+                )
+                _append_timestamp_range_filter(
+                    where, params, "op_assigned_at", op_assigned_at_from, op_assigned_at_to
+                )
+                _append_timestamp_range_filter(
+                    where, params, "last_dailed_at", last_dailed_at_from, last_dailed_at_to
+                )
+                _append_timestamp_range_filter(
+                    where, params, "last_connected_at", last_connected_at_from, last_connected_at_to
+                )
                 if entity_id is not None:
                     params.append(entity_id)
                     where.append(f"l.entity_id = ${len(params)}")
@@ -1343,12 +1467,18 @@ async def _svc_get_bulk_assign_candidates(
                     else f"NOT (upper(trim(l.lead_type)) = ANY(${len(params)}))"
                 )
             if tags_n:
-                params.append(tags_n)
-                clauses.append(
-                    f"upper(trim(l.tag)) = ANY(${len(params)})"
-                    if filter_mode_norm == "IN"
-                    else f"NOT (upper(trim(l.tag)) = ANY(${len(params)}))"
-                )
+                tag_parts = []
+                for tag_item in tags_n:
+                    fuzzy_idx = len(params) + 1
+                    clause, clause_values, fuzzy_idx = build_fuzzy_name_clause(
+                        "l.tag", tag_item, fuzzy_idx
+                    )
+                    if clause:
+                        tag_parts.append(f"({clause})")
+                        params.extend(clause_values)
+                if tag_parts:
+                    joined = f"({' OR '.join(tag_parts)})"
+                    clauses.append(joined if filter_mode_norm == "IN" else f"NOT ({joined})")
             if lead_sources_n:
                 params.append(lead_sources_n)
                 clauses.append(
@@ -1505,7 +1635,8 @@ async def _svc_execute_bulk_assign(
                     unique_lead_ids,
                 )
                 per_employee_counts = {eid: 0 for eid in valid_emp_ids}
-                emp_cursor = 0
+                pool_size = len(valid_emp_ids)
+                emp_cursor = int(payload.round_robin_start_index or 0) % pool_size if pool_size else 0
 
                 for lead_id in lead_ids:
                     assigned = False
@@ -1551,6 +1682,7 @@ async def _svc_execute_bulk_assign(
             "total_selected": len(unique_lead_ids),
             "total_assigned": sum(per_employee_counts.values()),
             "per_employee_counts": per_employee_counts,
+            "round_robin_next_index": (emp_cursor % pool_size) if pool_size else 0,
         }
         try:
             from app.crm.crm_bulk_auto_assign import insert_bulk_assign_log
@@ -2210,6 +2342,74 @@ async def _svc_list_crm_activities(
 
 
 
+def _append_crm_followup_scope_conditions(
+    conditions: list,
+    values: list,
+    idx: int,
+    *,
+    range_start: datetime,
+    range_end: datetime,
+    date_keys: Optional[list],
+    entity_type: str,
+    category: str,
+    stage: Optional[str],
+    role,
+    emp_id,
+    follow_up_status: Optional[str] = None,
+) -> int:
+    """Shared WHERE fragments for CRM follow-up counts, list, and alerts."""
+    cat = _normalize_crm_followup_category(category)
+    stage_norm = _normalize_code(stage) if isinstance(stage, str) and stage.strip() else None
+    et_filter = _entity_type_query(entity_type)
+
+    conditions.extend(
+        [
+            "l.followup_at IS NOT NULL",
+            "l.is_active = TRUE",
+            f"l.followup_at >= ${idx}",
+            f"l.followup_at <= ${idx + 1}",
+        ]
+    )
+    values.extend([range_start, range_end])
+    idx += 2
+
+    if date_keys:
+        conditions.append(
+            f"to_char(l.followup_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = ANY(${idx}::text[])"
+        )
+        values.append(date_keys)
+        idx += 1
+
+    if cat == "payment":
+        conditions.append(f"upper(trim(l.stage)) = ANY(${idx}::text[])")
+        values.append(list(CRM_PAYMENT_FOLLOWUP_STAGES))
+    else:
+        conditions.append(f"upper(trim(l.stage)) = ANY(${idx}::text[])")
+        values.append(list(CRM_SERVICE_FOLLOWUP_STAGES))
+    idx += 1
+
+    if stage_norm:
+        conditions.append(f"upper(trim(l.stage)) = ${idx}")
+        values.append(stage_norm)
+        idx += 1
+
+    if follow_up_status:
+        conditions.append(f"upper(trim(COALESCE(l.follow_up_status, 'PENDING'))) = ${idx}")
+        values.append(follow_up_status)
+        idx += 1
+
+    values.append(et_filter)
+    conditions.append(_crm_entity_type_match_sql(et_filter, idx))
+    idx += 1
+
+    vis_sql, vis_vals, idx = _build_crm_visibility(role, emp_id, idx)
+    if vis_sql:
+        conditions.append(vis_sql)
+        values.extend(vis_vals)
+
+    return idx
+
+
 async def _svc_crm_followup_counts(
     *,
     followup_from: Optional[datetime],
@@ -2240,13 +2440,7 @@ async def _svc_crm_followup_counts(
     if isinstance(dates, str) and dates.strip():
         date_keys = sorted({d.strip() for d in dates.split(",") if d.strip()})
 
-    cat = (category or "service").strip().lower()
-    if cat not in ("service", "payment"):
-        raise _validation_error(
-            "Invalid follow-up category.",
-            {"category": "Must be service or payment."},
-        )
-
+    cat = _normalize_crm_followup_category(category)
     et_filter = _entity_type_query(entity_type)
     stage_norm = _normalize_code(stage) if isinstance(stage, str) and stage.strip() else None
 
@@ -2265,70 +2459,46 @@ async def _svc_crm_followup_counts(
     pool = await get_db_pool()
 
     async def _load_counts():
-        conditions = [
-            "l.followup_at IS NOT NULL",
-            "l.is_active = TRUE",
-            "l.followup_at >= $1",
-            "l.followup_at <= $2",
-        ]
-        values: list = [range_start, range_end]
-        idx = 3
-
-        if date_keys:
-            conditions.append(
-                f"to_char(l.followup_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') = ANY(${idx}::text[])"
-            )
-            values.append(date_keys)
-            idx += 1
-
-        if cat == "payment":
-            conditions.append(f"upper(trim(l.stage)) = ANY(${idx}::text[])")
-            values.append(list(CRM_PAYMENT_FOLLOWUP_STAGES))
-            idx += 1
-        else:
-            conditions.append(f"upper(trim(l.stage)) = ANY(${idx}::text[])")
-            values.append(list(CRM_SERVICE_FOLLOWUP_STAGES))
-            idx += 1
-
-        if stage_norm:
-            conditions.append(f"upper(trim(l.stage)) = ${idx}")
-            values.append(stage_norm)
-            idx += 1
-
-        values.append(et_filter)
-        conditions.append(_crm_entity_type_match_sql(et_filter, idx))
-        idx += 1
-
-        vis_sql, vis_vals, idx = _build_crm_visibility(role, emp_id, idx)
-        if vis_sql:
-            conditions.append(vis_sql)
-            values.extend(vis_vals)
+        conditions: list = []
+        values: list = []
+        idx = 1
+        idx = _append_crm_followup_scope_conditions(
+            conditions,
+            values,
+            idx,
+            range_start=range_start,
+            range_end=range_end,
+            date_keys=date_keys,
+            entity_type=entity_type,
+            category=cat,
+            stage=stage_norm,
+            role=role,
+            emp_id=emp_id,
+        )
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
         query = f"""
             SELECT
                 COUNT(*) AS scheduled_today,
                 COUNT(*) FILTER (
-                    WHERE l.completed_at IS NULL
-                      AND upper(trim(COALESCE(l.follow_up_status, 'PENDING'))) = 'PENDING'
-                      AND l.missed_at IS NULL
-                      AND l.followup_at IS NOT NULL
-                      AND l.followup_at < NOW()
+                    WHERE l.followup_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+                       OR l.completed_at IS NOT NULL
+                ) AS evaluated_today,
+                COUNT(*) FILTER (
+                    WHERE l.missed_at IS NOT NULL
+                      AND l.completed_at IS NULL
                 ) AS overdue_pending_today,
                 COUNT(*) FILTER (
                     WHERE l.missed_at IS NOT NULL
-                      AND upper(trim(l.follow_up_status)) = 'COMPLETED'
                       AND l.completed_at IS NOT NULL
                 ) AS overdue_completed_today,
                 COUNT(*) FILTER (
-                    WHERE upper(trim(l.follow_up_status)) = 'COMPLETED'
+                    WHERE l.completed_at IS NOT NULL
                       AND l.missed_at IS NULL
-                      AND l.completed_at IS NOT NULL
                 ) AS completed_today,
                 COUNT(*) FILTER (
-                    WHERE upper(trim(l.follow_up_status)) = 'COMPLETED'
+                    WHERE l.completed_at IS NOT NULL
                       AND l.missed_at IS NULL
-                      AND l.completed_at IS NOT NULL
                 ) AS successful_today,
                 COUNT(*) FILTER (
                     WHERE l.completed_at IS NULL
@@ -2369,6 +2539,242 @@ async def _svc_crm_followup_counts(
     )
 
 
+async def _svc_crm_followup_list(
+    *,
+    followup_from: Optional[datetime],
+    followup_to: Optional[datetime],
+    dates: Optional[str],
+    entity_type: str,
+    category: str,
+    stage: Optional[str],
+    follow_up_status: Optional[str],
+    limit: int,
+    offset: int,
+    current_user,
+):
+    """Paginated CRM lead follow-ups for dashboard scheduled list (aligned with main follow-ups list)."""
+    request_id = generate_uuid()
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+
+    now = datetime.now(IST)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+    range_start = followup_from if followup_from is not None else today_start
+    range_end = followup_to if followup_to is not None else today_end
+    if range_start > range_end:
+        raise _validation_error(
+            "Invalid followup range.",
+            {"followup_from": "followup_from must be <= followup_to."},
+        )
+
+    date_keys = None
+    if isinstance(dates, str) and dates.strip():
+        date_keys = sorted({d.strip() for d in dates.split(",") if d.strip()})
+
+    cat = _normalize_crm_followup_category(category)
+    et_filter = _entity_type_query(entity_type)
+    stage_norm = _normalize_code(stage) if isinstance(stage, str) and stage.strip() else None
+    status_norm = (
+        _normalize_code(follow_up_status)
+        if isinstance(follow_up_status, str) and follow_up_status.strip()
+        else None
+    )
+    if status_norm and status_norm not in FOLLOWUP_STATUSES:
+        raise _validation_error(
+            "Invalid follow_up_status filter.",
+            {"follow_up_status": "Unsupported follow-up status value."},
+        )
+
+    cache_key = build_cache_key(
+        "crm:leads:followup_list",
+        role=role,
+        emp_id=emp_id,
+        followup_from=range_start,
+        followup_to=range_end,
+        dates=tuple(date_keys) if date_keys else None,
+        entity_type=et_filter,
+        category=cat,
+        stage=stage_norm,
+        follow_up_status=status_norm,
+        limit=limit,
+        offset=offset,
+    )
+
+    pool = await get_db_pool()
+
+    async def _load_list():
+        conditions: list = []
+        values: list = []
+        idx = 1
+        idx = _append_crm_followup_scope_conditions(
+            conditions,
+            values,
+            idx,
+            range_start=range_start,
+            range_end=range_end,
+            date_keys=date_keys,
+            entity_type=entity_type,
+            category=cat,
+            stage=stage_norm,
+            role=role,
+            emp_id=emp_id,
+            follow_up_status=status_norm,
+        )
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+        lim_idx = idx
+        off_idx = idx + 1
+
+        query = f"""
+            SELECT
+                l.*,
+                erm.first_name AS rm_name,
+                eop.first_name AS op_name,
+                COUNT(*) OVER()::bigint AS total_count
+            FROM {DB_SCHEMA}.crm_leads l
+            LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
+            LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
+            {where_clause}
+            ORDER BY l.followup_at ASC NULLS LAST, l.id DESC
+            LIMIT ${lim_idx} OFFSET ${off_idx}
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *values, limit, offset)
+                total = int(rows[0]["total_count"]) if rows else 0
+        except asyncpg.PostgresError:
+            logger.exception("DB error while listing CRM follow-ups")
+            raise HTTPException(status_code=500, detail="Database error occurred")
+        except Exception:
+            logger.exception("Unexpected error while listing CRM follow-ups")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+        items = []
+        for row in rows:
+            row_dict = dict(row)
+            row_dict.pop("total_count", None)
+            items.append(row_dict)
+
+        return {
+            "data": items,
+            "total": int(total or 0),
+            "limit": limit,
+            "offset": offset,
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_list,
+        ttl_seconds=CACHE_TTL_LIST,
+        tags=[_crm_followup_list_tag()],
+    )
+
+
+async def _svc_crm_followup_alerts(
+    *,
+    entity_type: str,
+    category: str,
+    stage: Optional[str],
+    current_user,
+):
+    """CRM lead follow-up alerts due within the next 24 hours (aligned with main /alerts)."""
+    request_id = generate_uuid()
+    role, emp_id = _get_user_context(current_user)
+    _require_crm_row_context(role, emp_id)
+
+    now = datetime.now(timezone.utc)
+    next_24h = now + timedelta(hours=24)
+    time_bucket = int(now.timestamp() // 300)
+
+    cat = _normalize_crm_followup_category(category)
+    et_filter = _entity_type_query(entity_type)
+    stage_norm = _normalize_code(stage) if isinstance(stage, str) and stage.strip() else None
+
+    cache_key = build_cache_key(
+        "crm:leads:followup_alerts",
+        role=role,
+        emp_id=emp_id,
+        entity_type=et_filter,
+        category=cat,
+        stage=stage_norm,
+        time_bucket=time_bucket,
+    )
+
+    pool = await get_db_pool()
+
+    async def _load_alerts():
+        conditions: list = [
+            "l.followup_at IS NOT NULL",
+            "l.is_active = TRUE",
+            "upper(trim(COALESCE(l.follow_up_status, 'PENDING'))) IN ('PENDING', 'MISSED')",
+            f"l.followup_at >= ${1}",
+            f"l.followup_at <= ${2}",
+        ]
+        values: list = [now, next_24h]
+        idx = 3
+
+        if cat == "payment":
+            conditions.append(f"upper(trim(l.stage)) = ANY(${idx}::text[])")
+            values.append(list(CRM_PAYMENT_FOLLOWUP_STAGES))
+        else:
+            conditions.append(f"upper(trim(l.stage)) = ANY(${idx}::text[])")
+            values.append(list(CRM_SERVICE_FOLLOWUP_STAGES))
+        idx += 1
+
+        if stage_norm:
+            conditions.append(f"upper(trim(l.stage)) = ${idx}")
+            values.append(stage_norm)
+            idx += 1
+
+        values.append(et_filter)
+        conditions.append(_crm_entity_type_match_sql(et_filter, idx))
+        idx += 1
+
+        vis_sql, vis_vals, idx = _build_crm_visibility(role, emp_id, idx)
+        if vis_sql:
+            conditions.append(vis_sql)
+            values.extend(vis_vals)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+        query = f"""
+            SELECT
+                l.*,
+                erm.first_name AS rm_name,
+                eop.first_name AS op_name
+            FROM {DB_SCHEMA}.crm_leads l
+            LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
+            LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
+            {where_clause}
+            ORDER BY l.followup_at ASC
+            LIMIT 50
+        """
+
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(query, *values)
+        except asyncpg.PostgresError:
+            logger.exception("DB error while fetching CRM follow-up alerts")
+            raise HTTPException(status_code=500, detail="Database error occurred")
+        except Exception:
+            logger.exception("Unexpected error while fetching CRM follow-up alerts")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+        return {
+            "data": [dict(r) for r in rows],
+            "request_id": request_id,
+        }
+
+    return await redis_get_or_set_json(
+        cache_key,
+        loader=_load_alerts,
+        ttl_seconds=CACHE_TTL_ALERTS,
+        tags=[_crm_followup_alerts_tag()],
+    )
+
+
 router = APIRouter(prefix="/api/v1/crm/leads", tags=["CRM Leads Common"])
 
 
@@ -2392,6 +2798,57 @@ async def get_crm_lead_followup_counts(
         followup_from=followup_from,
         followup_to=followup_to,
         dates=dates,
+        entity_type=entity_type,
+        category=category,
+        stage=stage,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/followups",
+    summary="List CRM lead follow-ups for dashboard scheduled panel",
+)
+async def list_crm_lead_followups(
+    followup_from: Optional[datetime] = Query(None),
+    followup_to: Optional[datetime] = Query(None),
+    dates: Optional[str] = Query(
+        None,
+        description="Comma-separated YYYY-MM-DD keys; when set, only those calendar days are included",
+    ),
+    entity_type: str = Query(...),
+    category: str = Query("service", description="service or payment follow-up tab"),
+    stage: Optional[str] = Query(None, description="Optional stage filter (service tab)"),
+    follow_up_status: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    return await _svc_crm_followup_list(
+        followup_from=followup_from,
+        followup_to=followup_to,
+        dates=dates,
+        entity_type=entity_type,
+        category=category,
+        stage=stage,
+        follow_up_status=follow_up_status,
+        limit=limit,
+        offset=offset,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/followups/alerts",
+    summary="CRM lead follow-up alerts (due within 24h)",
+)
+async def get_crm_lead_followup_alerts(
+    entity_type: str = Query(...),
+    category: str = Query("service", description="service or payment follow-up tab"),
+    stage: Optional[str] = Query(None, description="Optional stage filter (service tab)"),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    return await _svc_crm_followup_alerts(
         entity_type=entity_type,
         category=category,
         stage=stage,
@@ -2531,6 +2988,8 @@ async def filter_crm_leads(
     stages: Optional[List[str]] = Query(None, description="Filter by multiple stages (OR logic)."),
     follow_up_status: Optional[str] = None,
     mobile: Optional[str] = None,
+    full_name: Optional[str] = Query(None, description="Fuzzy match on lead full_name."),
+    email: Optional[str] = Query(None, description="Partial match on lead email."),
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
     lead_type: Optional[str] = None,
@@ -2543,6 +3002,14 @@ async def filter_crm_leads(
     is_active: Optional[bool] = None,
     followup_at_from: Optional[datetime] = Query(None),
     followup_at_to: Optional[datetime] = Query(None),
+    rm_assigned_at_from: Optional[datetime] = Query(None),
+    rm_assigned_at_to: Optional[datetime] = Query(None),
+    op_assigned_at_from: Optional[datetime] = Query(None),
+    op_assigned_at_to: Optional[datetime] = Query(None),
+    last_dailed_at_from: Optional[datetime] = Query(None),
+    last_dailed_at_to: Optional[datetime] = Query(None),
+    last_connected_at_from: Optional[datetime] = Query(None),
+    last_connected_at_to: Optional[datetime] = Query(None),
     entity_type: str = Query(...),
     entity_id: Optional[int] = Query(None, ge=1),
     smart_board: bool = Query(False, description="Smart Board stage filter and priority sort."),
@@ -2555,6 +3022,8 @@ async def filter_crm_leads(
         stages=stages,
         follow_up_status=follow_up_status,
         mobile=mobile,
+        full_name=full_name,
+        email=email,
         rm_id=rm_id,
         op_id=op_id,
         lead_type=lead_type,
@@ -2564,6 +3033,14 @@ async def filter_crm_leads(
         is_active=is_active,
         followup_at_from=followup_at_from,
         followup_at_to=followup_at_to,
+        rm_assigned_at_from=rm_assigned_at_from,
+        rm_assigned_at_to=rm_assigned_at_to,
+        op_assigned_at_from=op_assigned_at_from,
+        op_assigned_at_to=op_assigned_at_to,
+        last_dailed_at_from=last_dailed_at_from,
+        last_dailed_at_to=last_dailed_at_to,
+        last_connected_at_from=last_connected_at_from,
+        last_connected_at_to=last_connected_at_to,
         entity_type=entity_type,
         entity_id=entity_id,
         smart_board=smart_board,
@@ -2580,6 +3057,8 @@ async def filter_crm_leads(
 async def smart_board_crm_leads(
     follow_up_status: Optional[str] = None,
     mobile: Optional[str] = None,
+    full_name: Optional[str] = Query(None, description="Fuzzy match on lead full_name."),
+    email: Optional[str] = Query(None, description="Partial match on lead email."),
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
     lead_type: Optional[str] = None,
@@ -2589,6 +3068,14 @@ async def smart_board_crm_leads(
     is_active: Optional[bool] = True,
     followup_at_from: Optional[datetime] = Query(None),
     followup_at_to: Optional[datetime] = Query(None),
+    rm_assigned_at_from: Optional[datetime] = Query(None),
+    rm_assigned_at_to: Optional[datetime] = Query(None),
+    op_assigned_at_from: Optional[datetime] = Query(None),
+    op_assigned_at_to: Optional[datetime] = Query(None),
+    last_dailed_at_from: Optional[datetime] = Query(None),
+    last_dailed_at_to: Optional[datetime] = Query(None),
+    last_connected_at_from: Optional[datetime] = Query(None),
+    last_connected_at_to: Optional[datetime] = Query(None),
     entity_type: str = Query(...),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -2600,6 +3087,8 @@ async def smart_board_crm_leads(
     return await _svc_filter_crm_leads(
         follow_up_status=follow_up_status,
         mobile=mobile,
+        full_name=full_name,
+        email=email,
         rm_id=rm_id,
         op_id=op_id,
         lead_type=lead_type,
@@ -2609,6 +3098,14 @@ async def smart_board_crm_leads(
         is_active=is_active,
         followup_at_from=followup_at_from,
         followup_at_to=followup_at_to,
+        rm_assigned_at_from=rm_assigned_at_from,
+        rm_assigned_at_to=rm_assigned_at_to,
+        op_assigned_at_from=op_assigned_at_from,
+        op_assigned_at_to=op_assigned_at_to,
+        last_dailed_at_from=last_dailed_at_from,
+        last_dailed_at_to=last_dailed_at_to,
+        last_connected_at_from=last_connected_at_from,
+        last_connected_at_to=last_connected_at_to,
         entity_type=entity_type,
         smart_board=True,
         limit=limit,
@@ -2817,10 +3314,13 @@ async def execute_bulk_assign(
 
 @router.get(
     "/bulk-assign/schedulers",
-    summary="List saved auto-assign schedulers for an entity type",
+    summary="List saved auto-assign schedulers (all entities, or filter by entity_type)",
 )
 async def list_bulk_assign_schedulers(
-    entity_type: str = Query(...),
+    entity_type: Optional[str] = Query(
+        None,
+        description="Omit to list schedulers across all CRM entity types.",
+    ),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     from app.crm.crm_bulk_auto_assign import svc_list_bulk_assign_schedulers
@@ -2861,6 +3361,27 @@ async def save_bulk_assign_scheduler(
     if role not in {"ADMIN"}:
         raise HTTPException(status_code=403, detail="Only ADMIN can configure bulk-assign schedulers.")
     return await svc_save_bulk_auto_assign_config(payload, updated_by=emp_id)
+
+
+@router.patch(
+    "/bulk-assign/schedulers/{scheduler_id}/enabled",
+    summary="Turn a saved auto-assign scheduler on or off",
+)
+async def patch_bulk_assign_scheduler_enabled(
+    scheduler_id: int,
+    payload: CRMBulkAutoAssignEnabledPatchIn,
+    current_user=Depends(require_permission("EMPLOYEE", "DELETE")),
+):
+    from app.crm.crm_bulk_auto_assign import svc_toggle_bulk_assign_scheduler_enabled
+
+    role, emp_id = _get_user_context(current_user)
+    if role not in {"ADMIN"}:
+        raise HTTPException(status_code=403, detail="Only ADMIN can configure bulk-assign schedulers.")
+    return await svc_toggle_bulk_assign_scheduler_enabled(
+        scheduler_id,
+        enabled=payload.enabled,
+        updated_by=emp_id,
+    )
 
 
 @router.delete(

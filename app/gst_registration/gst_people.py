@@ -9,12 +9,13 @@ from app.gst_registration.schemas import (
 )
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_filter
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
     invalidate_tag as redis_invalidate_tag,
 )
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 import json
 import re
@@ -569,8 +570,8 @@ async def list_registration_persons(
     is_primary_customer: Optional[bool] = None,
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -712,14 +713,22 @@ async def list_registration_persons(
         # --------------------------------------------------
 
         if full_name_norm:
-            conditions.append(f"p.full_name ILIKE ${param_index}")
-            values.append(f"%{full_name_norm}%")
-            param_index += 1
+            param_index = append_fuzzy_name_filter(
+                conditions,
+                values,
+                param_index,
+                "p.full_name",
+                full_name_norm,
+            )
 
         if designation_norm:
-            conditions.append(f"p.designation ILIKE ${param_index}")
-            values.append(f"%{designation_norm}%")
-            param_index += 1
+            param_index = append_fuzzy_name_filter(
+                conditions,
+                values,
+                param_index,
+                "p.designation",
+                designation_norm,
+            )
 
         # --------------------------------------------------
         # Active Filtering Pattern
@@ -737,12 +746,12 @@ async def list_registration_persons(
         # --------------------------------------------------
 
         if from_date:
-            conditions.append(f"p.created_at >= ${param_index}")
+            conditions.append(f"p.created_at::date >= ${param_index}")
             values.append(from_date)
             param_index += 1
 
         if to_date:
-            conditions.append(f"p.created_at <= ${param_index}")
+            conditions.append(f"p.created_at::date <= ${param_index}")
             values.append(to_date)
             param_index += 1
 

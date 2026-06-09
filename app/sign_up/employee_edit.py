@@ -3,11 +3,12 @@ import re
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
-from datetime import datetime
+from datetime import date, datetime
 from app.utils import get_db_pool, DB_SCHEMA, generate_uuid, hash_password, is_password_strong
 from app.sign_up.schemas import EmployeeEditIn, EmployeeOut, ChangePasswordRequest, ActiveAssigneeOption
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_filter, append_ilike_contains
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -311,8 +312,8 @@ async def filter_employees(
 
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
-    from_date: Optional[datetime] = None,
-    to_date: Optional[datetime] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
     limit: int = Query(20, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -387,16 +388,18 @@ async def filter_employees(
                 param_index += 1
 
             if full_name and full_name.strip():
-                conditions.append(
-                    f"(first_name || ' ' || last_name) ILIKE ${param_index}"
+                param_index = append_fuzzy_name_filter(
+                    conditions,
+                    values,
+                    param_index,
+                    "(first_name || ' ' || last_name)",
+                    full_name.strip(),
                 )
-                values.append(f"%{full_name.strip()}%")
-                param_index += 1
 
             if email and email.strip():
-                conditions.append(f"email ILIKE ${param_index}")
-                values.append(f"%{email.strip()}%")
-                param_index += 1
+                param_index = append_ilike_contains(
+                    conditions, values, param_index, "email", email.strip()
+                )
 
             if phone_number and phone_number.strip():
                 conditions.append(f"trim(phone_number) = trim(${param_index})")
@@ -416,12 +419,12 @@ async def filter_employees(
                 conditions.append("is_active = TRUE")
 
             if from_date:
-                conditions.append(f"created_at >= ${param_index}")
+                conditions.append(f"created_at::date >= ${param_index}")
                 values.append(from_date)
                 param_index += 1
 
             if to_date:
-                conditions.append(f"created_at <= ${param_index}")
+                conditions.append(f"created_at::date <= ${param_index}")
                 values.append(to_date)
                 param_index += 1
 

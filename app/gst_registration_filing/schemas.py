@@ -4,6 +4,11 @@ from datetime import datetime
 from typing import Optional, Literal, Annotated
 
 from pydantic import Field, field_validator, model_validator, BaseModel, EmailStr
+
+from app.gst_registration_filing.status_constants import (
+    GstFilingStatusLiteral,
+    GstReturnDetailStatusLiteral,
+)
 # =========================================================
 # Base Schema (Global Config - same as customer_registration)
 # =========================================================
@@ -369,8 +374,10 @@ class GSTFilingEditIn(BaseSchema):
     ] = None
 
     # =====================================================
-    # NON-STATUS FIELDS ONLY
+    # WORKFLOW STATUS (parent gst_filings.status)
     # =====================================================
+    status: Optional[GstFilingStatusLiteral] = None
+
     priority: Optional[Literal["LOW", "NORMAL", "HIGH"]] = None
 
     remarks: Optional[str] = Field(None, max_length=500)
@@ -421,6 +428,7 @@ class GSTFilingEditIn(BaseSchema):
         "referral_entity",
         "gst_reg_status",
         "business_type",
+        "status",
         mode="before"
     )
     @classmethod
@@ -489,12 +497,12 @@ class GSTFilingEditIn(BaseSchema):
         return self
 class GSTReturnStatusUpdateIn(BaseSchema):
 
-    gstr1_status: Optional[Literal["FILED", "NOT_FILED"]] = None
-    gstr3b_status: Optional[Literal["FILED", "NOT_FILED"]] = None
-    gstr9_status: Optional[Literal["FILED", "NOT_FILED"]] = None
-    gstr9c_status: Optional[Literal["FILED", "NOT_FILED"]] = None
-    cmp08_status: Optional[Literal["FILED", "NOT_FILED"]] = None
-    gstr4_status: Optional[Literal["FILED", "NOT_FILED"]] = None
+    gstr1_status: Optional[GstReturnDetailStatusLiteral] = None
+    gstr3b_status: Optional[GstReturnDetailStatusLiteral] = None
+    gstr9_status: Optional[GstReturnDetailStatusLiteral] = None
+    gstr9c_status: Optional[GstReturnDetailStatusLiteral] = None
+    cmp08_status: Optional[GstReturnDetailStatusLiteral] = None
+    gstr4_status: Optional[GstReturnDetailStatusLiteral] = None
     is_active: Optional[bool] = None
     filing_frequency: Optional[Literal["MONTHLY", "QUARTERLY", "YEARLY"]] = Field(
         None,
@@ -510,6 +518,21 @@ class GSTReturnStatusUpdateIn(BaseSchema):
             u = v.strip().upper()
             return u if u else None
         return v
+
+    @field_validator(
+        "gstr1_status",
+        "gstr3b_status",
+        "gstr9_status",
+        "gstr9c_status",
+        "cmp08_status",
+        "gstr4_status",
+        mode="before",
+    )
+    @classmethod
+    def normalize_return_status_fields(cls, v):
+        if v is None or v == "":
+            return None
+        return v.strip().upper() if isinstance(v, str) else v
 
     @model_validator(mode="after")
     def validate_at_least_one(self):

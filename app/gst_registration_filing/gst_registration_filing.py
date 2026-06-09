@@ -2,7 +2,7 @@ import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from app.gst_registration_filing.schemas import (
     GSTFilingIn,
     GSTFilingYearlyIn,
@@ -18,6 +18,17 @@ from app.gst_registration_filing.gst_return_details_rebuild import (
     infer_explicit_template_from_prior_row_count,
     validate_merged_filing_business_rules,
 )
+from app.gst_registration_filing.status_constants import (
+    GST_RETURN_STATUS_COLUMNS,
+    normalize_gst_filing_status,
+    normalize_return_detail_status,
+)
+from app.gst_registration_filing.gst_filter_rules import (
+    append_due_date_rule_group,
+    append_filing_attribute_rule_group,
+    normalize_match_mode,
+    parse_return_status_rules_list,
+)
 from app.utils import (
     get_db_pool,
     DB_SCHEMA,
@@ -27,6 +38,7 @@ from app.utils import (
 )
 from app.security.rbac import require_permission
 from app.logger import logger
+from app.text_search_filters import append_fuzzy_name_filter, append_fuzzy_name_or_filter, append_ilike_contains
 from app.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -42,6 +54,80 @@ router = APIRouter(
     prefix="/api/v1/gst-filings",
     tags=["GST Filings"]
 )
+
+
+def _validate_filing_status_filter(status: Optional[str], statuses: Optional[List[str]]) -> None:
+    try:
+        if status:
+            normalize_gst_filing_status(status)
+        if statuses:
+            for item in statuses:
+                normalize_gst_filing_status(item)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def _append_return_detail_status_filters(
+    conditions: list,
+    values: list,
+    idx: int,
+    *,
+    status: Optional[str] = None,
+    return_status: Optional[str] = None,
+    return_status_match: Optional[str] = None,
+    return_status_rules: Optional[List[str]] = None,
+    gstr1_status: Optional[str] = None,
+    gstr3b_status: Optional[str] = None,
+    gstr9_status: Optional[str] = None,
+    gstr9c_status: Optional[str] = None,
+    cmp08_status: Optional[str] = None,
+    gstr4_status: Optional[str] = None,
+) -> int:
+    try:
+        parent_status = normalize_gst_filing_status(status) if status else None
+        any_return_status = normalize_return_detail_status(return_status) if return_status else None
+        parsed_rules = parse_return_status_rules_list(return_status_rules)
+        column_filters = {
+            "gstr1_status": normalize_return_detail_status(gstr1_status) if gstr1_status else None,
+            "gstr3b_status": normalize_return_detail_status(gstr3b_status) if gstr3b_status else None,
+            "gstr9_status": normalize_return_detail_status(gstr9_status) if gstr9_status else None,
+            "gstr9c_status": normalize_return_detail_status(gstr9c_status) if gstr9c_status else None,
+            "cmp08_status": normalize_return_detail_status(cmp08_status) if cmp08_status else None,
+            "gstr4_status": normalize_return_detail_status(gstr4_status) if gstr4_status else None,
+        }
+        match_mode = (return_status_match or "AND").strip().upper()
+        if match_mode not in {"AND", "OR"}:
+            raise ValueError("return_status_match must be AND or OR.")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if parent_status:
+        conditions.append(f"upper(trim(f.status)) = ${idx}")
+        values.append(parent_status)
+        idx += 1
+
+    if parsed_rules:
+        rule_parts = []
+        for column, rule_status in parsed_rules:
+            rule_parts.append(f"d.{column} = ${idx}")
+            values.append(rule_status)
+            idx += 1
+        joiner = " AND " if match_mode == "AND" else " OR "
+        conditions.append(f"({joiner.join(rule_parts)})")
+    elif any_return_status:
+        or_parts = [f"d.{col} = ${idx}" for col in GST_RETURN_STATUS_COLUMNS]
+        conditions.append(f"({' OR '.join(or_parts)})")
+        values.append(any_return_status)
+        idx += 1
+
+    if not parsed_rules:
+        for column, value in column_filters.items():
+            if value:
+                conditions.append(f"d.{column} = ${idx}")
+                values.append(value)
+                idx += 1
+
+    return idx
 
 class GstFilingApiMessages:
     """User-facing strings for HTTP responses in this module (UI copy)."""
@@ -192,6 +278,7 @@ async def _invalidate_gst_filing_cache(gst_registration_id: Optional[int] = None
     await redis_invalidate_tag("customer_services:filter:index")
     await redis_invalidate_tag("customer_services:dashboard:index")
     await redis_invalidate_tag("customer_services:pending:index")
+    await redis_invalidate_tag("dashboard:gst_filing_monthly_matrix:index")
     await redis_invalidate_tag(_gst_filing_table_filings_tag())
     await redis_invalidate_tag(_gst_filing_table_return_details_tag())
     if gst_registration_id is not None:
@@ -235,13 +322,14 @@ def _collect_gst_filings_only_conditions(
     op_id: Optional[int] = None,
     username: Optional[str] = None,
     email_id: Optional[str] = None,
+    business_name: Optional[str] = None,
     rent_min: Optional[float] = None,
     rent_max: Optional[float] = None,
     rule14a: Optional[bool] = None,
     due_from: Optional[datetime] = None,
     due_to: Optional[datetime] = None,
-    created_from: Optional[datetime] = None,
-    created_to: Optional[datetime] = None,
+    created_from: Optional[date] = None,
+    created_to: Optional[date] = None,
     data_received_from: Optional[datetime] = None,
     data_received_to: Optional[datetime] = None,
     is_active: Optional[bool] = None,
@@ -250,6 +338,8 @@ def _collect_gst_filings_only_conditions(
     is_upcoming: Optional[bool] = None,
     is_auto_enabled: Optional[bool] = None,
     is_auto_generated: Optional[bool] = None,
+    filing_filter_match: Optional[str] = None,
+    filing_filter_rules: Optional[List[str]] = None,
 ) -> tuple[list, list, int]:
     """
     WHERE fragments for ``gst_filings`` alias ``f`` only (no join to return_details).
@@ -284,6 +374,7 @@ def _collect_gst_filings_only_conditions(
     )
     email_id_norm = email_id.strip().lower() if isinstance(email_id, str) and email_id.strip() else None
     username_norm = username.strip() if isinstance(username, str) and username.strip() else None
+    business_name_norm = business_name.strip() if isinstance(business_name, str) and business_name.strip() else None
     gstin_norm = gstin.strip().upper() if isinstance(gstin, str) and gstin.strip() else None
     statuses_norm = (
         [s.strip().upper() for s in statuses if isinstance(s, str) and s.strip()]
@@ -320,7 +411,9 @@ def _collect_gst_filings_only_conditions(
         values.append(service_id)
         idx += 1
 
-    if filing_category_norm:
+    use_filing_attribute_rules = bool(filing_filter_rules)
+
+    if not use_filing_attribute_rules and filing_category_norm:
         conditions.append(f"f.filing_category = ${idx}")
         values.append(filing_category_norm)
         idx += 1
@@ -330,12 +423,12 @@ def _collect_gst_filings_only_conditions(
         values.append(filing_period_norm)
         idx += 1
 
-    if filing_frequency_norm:
+    if not use_filing_attribute_rules and filing_frequency_norm:
         conditions.append(f"f.filing_frequency = ${idx}")
         values.append(filing_frequency_norm)
         idx += 1
 
-    if taxpayer_type_norm:
+    if not use_filing_attribute_rules and taxpayer_type_norm:
         conditions.append(f"f.taxpayer_type = ${idx}")
         values.append(taxpayer_type_norm)
         idx += 1
@@ -345,17 +438,23 @@ def _collect_gst_filings_only_conditions(
         values.append(turnover_details_norm)
         idx += 1
 
-    if state_norm:
-        # Match the displayed value, which is COALESCE(f.state, r.state) in the SELECT.
-        conditions.append(f"upper(trim(COALESCE(f.state, r.state))) = ${idx}")
-        values.append(state_norm)
-        idx += 1
+    if not use_filing_attribute_rules and state_norm:
+        idx = append_fuzzy_name_filter(
+            conditions,
+            values,
+            idx,
+            "upper(trim(COALESCE(f.state, r.state)))",
+            state,
+        )
 
     if language_norm:
-        # Match the displayed value, which is COALESCE(f.language, r.language) in the SELECT.
-        conditions.append(f"upper(trim(COALESCE(f.language, r.language))) = ${idx}")
-        values.append(language_norm)
-        idx += 1
+        idx = append_fuzzy_name_filter(
+            conditions,
+            values,
+            idx,
+            "upper(trim(COALESCE(f.language, r.language)))",
+            language,
+        )
 
     if referral_id is not None:
         conditions.append(f"f.referral_id = ${idx}")
@@ -363,19 +462,44 @@ def _collect_gst_filings_only_conditions(
         idx += 1
 
     if referral_entity_norm:
-        conditions.append(f"upper(trim(f.referral_entity)) = ${idx}")
-        values.append(referral_entity_norm)
-        idx += 1
+        idx = append_fuzzy_name_filter(
+            conditions,
+            values,
+            idx,
+            "f.referral_entity",
+            referral_entity,
+        )
 
-    if status_norm:
+    if business_name_norm:
+        idx = append_fuzzy_name_or_filter(
+            conditions,
+            values,
+            idx,
+            [
+                "COALESCE(f.business_name, r.business_name)",
+                "COALESCE(f.business_name, '')",
+            ],
+            business_name,
+        )
+
+    if not use_filing_attribute_rules and status_norm:
         conditions.append(f"f.status = ${idx}")
         values.append(status_norm)
         idx += 1
 
-    if statuses_norm:
+    if not use_filing_attribute_rules and statuses_norm:
         conditions.append(f"f.status = ANY(${idx})")
         values.append(statuses_norm)
         idx += 1
+
+    if use_filing_attribute_rules:
+        idx = append_filing_attribute_rule_group(
+            conditions,
+            values,
+            idx,
+            rules=filing_filter_rules,
+            match_mode=filing_filter_match or "AND",
+        )
 
     if rm_id:
         conditions.append(f"f.rm_id = ${idx}")
@@ -388,14 +512,10 @@ def _collect_gst_filings_only_conditions(
         idx += 1
 
     if username_norm:
-        conditions.append(f"f.username ILIKE ${idx}")
-        values.append(f"%{username_norm}%")
-        idx += 1
+        idx = append_fuzzy_name_filter(conditions, values, idx, "f.username", username_norm)
 
     if email_id_norm:
-        conditions.append(f"lower(f.email_id) = ${idx}")
-        values.append(email_id_norm)
-        idx += 1
+        idx = append_ilike_contains(conditions, values, idx, "lower(f.email_id)", email_id_norm)
 
     if rent_min is not None:
         conditions.append(f"f.rent >= ${idx}")
@@ -462,12 +582,12 @@ def _collect_gst_filings_only_conditions(
                 WHERE dx.gst_filing_id = f.id
                   AND dx.is_current = TRUE
                   AND (
-                    (dx.gstr1_status = 'NOT_FILED' AND dx.gstr1_due_date < NOW())
-                    OR (dx.gstr3b_status = 'NOT_FILED' AND dx.gstr3b_due_date < NOW())
-                    OR (dx.gstr9_status = 'NOT_FILED' AND dx.gstr9_due_date < NOW())
-                    OR (dx.gstr9c_status = 'NOT_FILED' AND dx.gstr9c_due_date < NOW())
-                    OR (dx.cmp08_status = 'NOT_FILED' AND dx.cmp08_due_date < NOW())
-                    OR (dx.gstr4_status = 'NOT_FILED' AND dx.gstr4_due_date < NOW())
+                    (dx.gstr1_status IN ('NOT_FILED', 'MISSED', 'OVERDUE') AND dx.gstr1_due_date < NOW())
+                    OR (dx.gstr3b_status IN ('NOT_FILED', 'MISSED', 'OVERDUE') AND dx.gstr3b_due_date < NOW())
+                    OR (dx.gstr9_status IN ('NOT_FILED', 'MISSED', 'OVERDUE') AND dx.gstr9_due_date < NOW())
+                    OR (dx.gstr9c_status IN ('NOT_FILED', 'MISSED', 'OVERDUE') AND dx.gstr9c_due_date < NOW())
+                    OR (dx.cmp08_status IN ('NOT_FILED', 'MISSED', 'OVERDUE') AND dx.cmp08_due_date < NOW())
+                    OR (dx.gstr4_status IN ('NOT_FILED', 'MISSED', 'OVERDUE') AND dx.gstr4_due_date < NOW())
                   )
             )
             """
@@ -514,12 +634,12 @@ def _collect_gst_filings_only_conditions(
         idx += 1
 
     if created_from:
-        conditions.append(f"f.created_at >= ${idx}")
+        conditions.append(f"f.created_at::date >= ${idx}")
         values.append(created_from)
         idx += 1
 
     if created_to:
-        conditions.append(f"f.created_at <= ${idx}")
+        conditions.append(f"f.created_at::date <= ${idx}")
         values.append(created_to)
         idx += 1
 
@@ -557,17 +677,29 @@ async def list_gst_filings_table(
     referral_entity: Optional[str] = None,
     status: Optional[str] = None,
     statuses: Optional[List[str]] = Query(None),
+    filing_filter_match: Optional[str] = Query(
+        "AND",
+        description="Combine filing_filter_rules with AND or OR.",
+    ),
+    filing_filter_rules: Optional[List[str]] = Query(
+        None,
+        description="Filing attribute rules like STATUS:FILED and PRIORITY:HIGH.",
+    ),
     rm_id: Optional[int] = None,
     op_id: Optional[int] = None,
     username: Optional[str] = None,
     email_id: Optional[str] = None,
+    business_name: Optional[str] = Query(
+        None,
+        description="Fuzzy match on filing/registration business name (~35% word match).",
+    ),
     rent_min: Optional[float] = None,
     rent_max: Optional[float] = None,
     rule14a: Optional[bool] = None,
     due_from: Optional[datetime] = None,
     due_to: Optional[datetime] = None,
-    created_from: Optional[datetime] = None,
-    created_to: Optional[datetime] = None,
+    created_from: Optional[date] = None,
+    created_to: Optional[date] = None,
     data_received_from: Optional[datetime] = None,
     data_received_to: Optional[datetime] = None,
     is_active: Optional[bool] = None,
@@ -605,8 +737,27 @@ async def list_gst_filings_table(
         raise HTTPException(400, "data_received_from must be <= data_received_to")
     if status and statuses:
         raise HTTPException(400, "Provide either status or statuses, not both")
+    if filing_filter_rules and (status or statuses):
+        raise HTTPException(400, "Use filing_filter_rules or status/statuses, not both")
+    if filing_filter_rules and any([
+        filing_category,
+        filing_frequency,
+        taxpayer_type,
+        state,
+    ]):
+        raise HTTPException(
+            400,
+            "Use filing_filter_rules or filing_category/filing_frequency/taxpayer_type/state, not both",
+        )
     if is_overdue and is_upcoming:
         raise HTTPException(400, "is_overdue and is_upcoming cannot both be true")
+    if not filing_filter_rules:
+        _validate_filing_status_filter(status, statuses)
+    try:
+        if filing_filter_rules:
+            normalize_match_mode(filing_filter_match)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     conditions, values, idx = _collect_gst_filings_only_conditions(
         filing_id=id,
@@ -629,6 +780,7 @@ async def list_gst_filings_table(
         op_id=op_id,
         username=username,
         email_id=email_id,
+        business_name=business_name,
         rent_min=rent_min,
         rent_max=rent_max,
         rule14a=rule14a,
@@ -644,6 +796,8 @@ async def list_gst_filings_table(
         is_upcoming=is_upcoming,
         is_auto_enabled=is_auto_enabled,
         is_auto_generated=is_auto_generated,
+        filing_filter_match=filing_filter_match,
+        filing_filter_rules=filing_filter_rules,
     )
 
     visibility_sql, visibility_values, idx = build_gst_filing_visibility(
@@ -701,10 +855,13 @@ async def list_gst_filings_table(
         referral_entity=(referral_entity or "").strip().upper() or None,
         status=(status or "").strip().upper() or None,
         statuses=[s.upper() for s in statuses] if statuses else None,
+        filing_filter_match=filing_filter_match,
+        filing_filter_rules=filing_filter_rules,
         rm_id=rm_id,
         op_id=op_id,
         username=(username or "").strip() or None,
         email_id=(email_id or "").strip().lower() or None,
+        business_name=(business_name or "").strip() or None,
         rent_min=rent_min,
         rent_max=rent_max,
         rule14a=rule14a,
@@ -826,6 +983,33 @@ async def list_gst_filing_return_details_table(
     filing_period: Optional[str] = None,
     filing_frequency: Optional[str] = None,
     filing_category: Optional[str] = None,
+    status: Optional[str] = Query(None, description="Parent gst_filings.status"),
+    return_status: Optional[str] = Query(
+        None,
+        description="Legacy: same status on any return column (OR across forms).",
+    ),
+    return_status_match: Optional[str] = Query(
+        "AND",
+        description="Combine return_status_rules with AND or OR.",
+    ),
+    return_status_rules: Optional[List[str]] = Query(
+        None,
+        description="Per-form rules like GSTR1:MISSED and GSTR3B:NOT_FILED.",
+    ),
+    gstr1_status: Optional[str] = None,
+    gstr3b_status: Optional[str] = None,
+    gstr9_status: Optional[str] = None,
+    gstr9c_status: Optional[str] = None,
+    cmp08_status: Optional[str] = None,
+    gstr4_status: Optional[str] = None,
+    due_date_match: Optional[str] = Query(
+        "AND",
+        description="Combine due_date_rules with AND or OR.",
+    ),
+    due_date_rules: Optional[List[str]] = Query(
+        None,
+        description="Per-form due date ranges like GSTR1:2024-01-01:2024-03-31.",
+    ),
     is_active: Optional[bool] = None,
     include_inactive: bool = Query(False),
     is_current: Optional[bool] = Query(True),
@@ -938,6 +1122,30 @@ async def list_gst_filing_return_details_table(
     else:
         conditions.append("f.is_active = TRUE")
 
+    idx = _append_return_detail_status_filters(
+        conditions,
+        values,
+        idx,
+        status=status,
+        return_status=return_status,
+        return_status_match=return_status_match,
+        return_status_rules=return_status_rules,
+        gstr1_status=gstr1_status,
+        gstr3b_status=gstr3b_status,
+        gstr9_status=gstr9_status,
+        gstr9c_status=gstr9c_status,
+        cmp08_status=cmp08_status,
+        gstr4_status=gstr4_status,
+    )
+
+    idx = append_due_date_rule_group(
+        conditions,
+        values,
+        idx,
+        rules=due_date_rules,
+        match_mode=due_date_match or "AND",
+    )
+
     visibility_sql, visibility_values, idx = build_gst_filing_visibility(
         role_norm, emp_id, idx, DB_SCHEMA
     )
@@ -976,6 +1184,18 @@ async def list_gst_filing_return_details_table(
         filing_period=filing_period_norm,
         filing_frequency=filing_frequency_norm,
         filing_category=filing_category_norm,
+        status=status,
+        return_status=return_status,
+        return_status_match=return_status_match,
+        return_status_rules=return_status_rules,
+        gstr1_status=gstr1_status,
+        gstr3b_status=gstr3b_status,
+        gstr9_status=gstr9_status,
+        gstr9c_status=gstr9c_status,
+        cmp08_status=cmp08_status,
+        gstr4_status=gstr4_status,
+        due_date_match=due_date_match,
+        due_date_rules=due_date_rules,
         is_active=is_active,
         include_inactive=include_inactive,
         is_current=is_current,
@@ -1667,6 +1887,7 @@ async def update_gst_filing(
                     "state",
                     "language",
                     "referral_entity",
+                    "status",
                 ]:
                     if key in update_data and update_data[key]:
                         update_data[key] = update_data[key].upper()
@@ -1822,9 +2043,7 @@ async def update_gst_filing(
                 # 🔥 REBUILD RETURN DETAILS (IF REQUIRED)
                 # =====================================================
                 if recalc_required:
-                    supersede_with_is_current = any(
-                        k in update_data for k in ["turnover_details", "filing_frequency"]
-                    )
+                    supersede_with_is_current = True
                     prior_n = await count_active_return_details(conn, filing_id)
                     explicit_template = infer_explicit_template_from_prior_row_count(
                         prior_n,
