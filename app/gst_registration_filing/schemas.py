@@ -504,6 +504,12 @@ class GSTReturnStatusUpdateIn(BaseSchema):
     cmp08_status: Optional[GstReturnDetailStatusLiteral] = None
     gstr4_status: Optional[GstReturnDetailStatusLiteral] = None
     is_active: Optional[bool] = None
+    gstr1_followup_at: Optional[datetime] = None
+    gstr3b_followup_at: Optional[datetime] = None
+    gstr9_followup_at: Optional[datetime] = None
+    gstr9c_followup_at: Optional[datetime] = None
+    cmp08_followup_at: Optional[datetime] = None
+    gstr4_followup_at: Optional[datetime] = None
     filing_frequency: Optional[Literal["MONTHLY", "QUARTERLY", "YEARLY"]] = Field(
         None,
         description="Cadence for this return-detail row (`gst_filing_return_details.filing_frequency`).",
@@ -536,6 +542,16 @@ class GSTReturnStatusUpdateIn(BaseSchema):
 
     @model_validator(mode="after")
     def validate_at_least_one(self):
+        followup_fields = (
+            "gstr1_followup_at",
+            "gstr3b_followup_at",
+            "gstr9_followup_at",
+            "gstr9c_followup_at",
+            "cmp08_followup_at",
+            "gstr4_followup_at",
+        )
+        if any(field in self.model_fields_set for field in followup_fields):
+            return self
         if not any([
             self.gstr1_status,
             self.gstr3b_status,
@@ -547,7 +563,7 @@ class GSTReturnStatusUpdateIn(BaseSchema):
             self.filing_frequency is not None,
         ]):
             raise ValueError(
-                "At least one status, is_active, or filing_frequency must be provided"
+                "At least one status, follow-up field, is_active, or filing_frequency must be provided"
             )
 
         return self

@@ -359,7 +359,7 @@ def build_gst_visibility(role: str, emp_id: int, idx: int, schema: str):
     return f"(g.rm_id = ${idx} OR g.created_by = ${idx})", [emp_id], idx + 1
 def build_gst_filing_visibility(role: str, emp_id: int, idx: int, schema: str):
 
-    if role == "ADMIN":
+    if role in ("ADMIN", "SPECIAL"):
         return None, [], idx
 
     if role == "RM":

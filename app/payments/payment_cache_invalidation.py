@@ -17,6 +17,7 @@ _PAYMENT_FOLLOWUP_TAGS = (
 _GST_FILING_TABLE_TAGS = (
     "gst_filing:table:filings:index",
     "gst_filing:table:return_details:index",
+    "dashboard:gst_filing_monthly_matrix:index",
 )
 
 _CUSTOMER_SERVICE_TAGS = (

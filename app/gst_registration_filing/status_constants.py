@@ -14,6 +14,19 @@ GST_FILING_STATUSES: Tuple[str, ...] = (
 
 GST_RETURN_DETAIL_STATUSES: Tuple[str, ...] = GST_FILING_STATUSES + ("NOT_FILED", "MISSED")
 
+# Manual PATCH / UI only — MISSED & OVERDUE are system-assigned (due dates, scheduler).
+GST_RETURN_DETAIL_EDITABLE_STATUSES: Tuple[str, ...] = (
+    "DATA_PENDING",
+    "DATA_RECEIVED",
+    "IN_PREPARATION",
+    "PENDING_OTP",
+    "READY_TO_FILE",
+    "FILED",
+    "NOT_FILED",
+)
+
+GST_RETURN_DETAIL_SYSTEM_ONLY_STATUSES = frozenset({"MISSED", "OVERDUE"})
+
 GST_RETURN_STATUS_COLUMNS: Tuple[str, ...] = (
     "gstr1_status",
     "gstr3b_status",
@@ -31,6 +44,26 @@ RETURN_FORM_TO_STATUS_COLUMN: dict[str, str] = {
     "CMP08": "cmp08_status",
     "GSTR4": "gstr4_status",
 }
+
+RETURN_FORM_TO_FOLLOWUP_COLUMN: dict[str, str] = {
+    "GSTR1": "gstr1_followup_at",
+    "GSTR3B": "gstr3b_followup_at",
+    "GSTR9": "gstr9_followup_at",
+    "GSTR9C": "gstr9c_followup_at",
+    "CMP08": "cmp08_followup_at",
+    "GSTR4": "gstr4_followup_at",
+}
+
+RETURN_FORM_TO_DUE_DATE_COLUMN: dict[str, str] = {
+    "GSTR1": "gstr1_due_date",
+    "GSTR3B": "gstr3b_due_date",
+    "GSTR9": "gstr9_due_date",
+    "GSTR9C": "gstr9c_due_date",
+    "CMP08": "cmp08_due_date",
+    "GSTR4": "gstr4_due_date",
+}
+
+GST_RETURN_FOLLOWUP_COLUMNS: Tuple[str, ...] = tuple(RETURN_FORM_TO_FOLLOWUP_COLUMN.values())
 
 GstFilingStatusLiteral = Literal[
     "DATA_PENDING",

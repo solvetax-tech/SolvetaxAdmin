@@ -19,6 +19,7 @@ from app.gst_registration_filing.gst_return_details_rebuild import (
     validate_merged_filing_business_rules,
 )
 from app.gst_registration_filing.status_constants import (
+    GST_RETURN_DETAIL_SYSTEM_ONLY_STATUSES,
     GST_RETURN_STATUS_COLUMNS,
     normalize_gst_filing_status,
     normalize_return_detail_status,
@@ -54,7 +55,6 @@ router = APIRouter(
     prefix="/api/v1/gst-filings",
     tags=["GST Filings"]
 )
-
 
 def _validate_filing_status_filter(status: Optional[str], statuses: Optional[List[str]]) -> None:
     try:
@@ -2523,11 +2523,11 @@ async def activate_gst_filing(
             raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
 
 # -------------------------------------------------------------------
-# UPDATE RETURN STATUSES (FILED/NOT_FILED + ACTIVATE/DEACTIVATE ROWS)
+# UPDATE RETURN STATUSES (all return-detail statuses + optional activation)
 # -------------------------------------------------------------------
 @router.patch(
     "/{filing_id}/returns/status",
-    summary="Update GST return statuses (GSTR1/3B/9/9C/CMP08/GSTR4) and optional activation",
+    summary="Update GST return statuses (DATA_PENDING … FILED, NOT_FILED, MISSED, OVERDUE) per form",
 )
 async def update_return_statuses(
     filing_id: int,
@@ -2620,40 +2620,67 @@ async def update_return_statuses(
                 }
 
                 if any(v is not None for v in status_fields.values()):
-                    requested_fields = [
-                        field_name for field_name, field_value in status_fields.items()
-                        if field_value is not None
+                    manual_only_blocked = [
+                        column
+                        for column, new_value in status_fields.items()
+                        if new_value is not None
+                        and str(new_value).strip().upper() in GST_RETURN_DETAIL_SYSTEM_ONLY_STATUSES
                     ]
-                    applicable_fields = []
-                    non_applicable_fields = []
-
-                    for field_name in requested_fields:
-                        has_applicable_row = any(
-                            row[field_name] is not None for row in detail_rows
-                        )
-                        if has_applicable_row:
-                            applicable_fields.append(field_name)
-                        else:
-                            non_applicable_fields.append(field_name)
-
-                    if non_applicable_fields:
+                    if manual_only_blocked:
                         raise HTTPException(
                             400,
-                            GstFilingApiMessages.return_status_not_applicable(non_applicable_fields),
+                            "MISSED and OVERDUE are system-assigned only and cannot be set via this API.",
                         )
 
                     set_clauses = []
                     values = [filing_id]
                     idx = 2
 
-                    for column in applicable_fields:
-                        new_value = status_fields[column]
-                        if new_value is not None:
-                            set_clauses.append(
-                                f"{column} = CASE WHEN {column} IS NOT NULL THEN ${idx}::varchar ELSE {column} END"
+                    for column, new_value in status_fields.items():
+                        if new_value is None:
+                            continue
+                        set_clauses.append(f"{column} = ${idx}::varchar")
+                        values.append(new_value)
+                        idx += 1
+
+                    if set_clauses:
+                        update_result = await conn.execute(
+                            f"""
+                            UPDATE {DB_SCHEMA}.gst_filing_return_details
+                            SET {', '.join(set_clauses)},
+                                updated_at = NOW()
+                            WHERE id = $1
+                            """,
+                            *values,
+                        )
+                        updated_count = int(update_result.split(" ")[-1])
+                        if updated_count == 0:
+                            raise HTTPException(
+                                400,
+                                GstFilingApiMessages.RETURN_STATUS_NONE_UPDATED,
                             )
-                            values.append(new_value)
-                            idx += 1
+
+                followup_fields = {
+                    "gstr1_followup_at": payload.gstr1_followup_at,
+                    "gstr3b_followup_at": payload.gstr3b_followup_at,
+                    "gstr9_followup_at": payload.gstr9_followup_at,
+                    "gstr9c_followup_at": payload.gstr9c_followup_at,
+                    "cmp08_followup_at": payload.cmp08_followup_at,
+                    "gstr4_followup_at": payload.gstr4_followup_at,
+                }
+                requested_followup_fields = [
+                    field_name
+                    for field_name in followup_fields
+                    if field_name in payload.model_fields_set
+                ]
+                if requested_followup_fields:
+                    set_clauses = []
+                    values = [filing_id]
+                    idx = 2
+                    for column in requested_followup_fields:
+                        set_clauses.append(f"{column} = ${idx}::timestamptz")
+                        values.append(followup_fields[column])
+                        idx += 1
 
                     if set_clauses:
                         update_result = await conn.execute(
@@ -2688,6 +2715,7 @@ async def update_return_statuses(
                 ]
                 if payload.filing_frequency is not None:
                     updated_fields.append("filing_frequency")
+                updated_fields.extend(requested_followup_fields)
                 active_rows = sum(1 for r in rows if r["is_active"])
 
                 await _invalidate_gst_filing_cache()

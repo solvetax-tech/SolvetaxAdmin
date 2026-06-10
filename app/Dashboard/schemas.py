@@ -44,6 +44,8 @@ class ServiceDonePaymentPendingListResponse(BaseModel):
 class GstFilingMatrixFormCell(BaseModel):
     status: Optional[str] = None
     due_date: Optional[str] = None
+    followup_at: Optional[str] = None
+    return_detail_id: Optional[int] = None
     tone: str = "none"
 
 
@@ -54,6 +56,8 @@ class GstFilingMatrixMonthCell(BaseModel):
     status_label: Optional[str] = None
     filing_id: Optional[int] = None
     return_detail_id: Optional[int] = None
+    payment_completed: bool = False
+    payment_status: Optional[str] = None
     forms: Optional[Dict[str, GstFilingMatrixFormCell]] = None
 
 
@@ -74,4 +78,26 @@ class GstFilingMatrixListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    request_id: str
+
+
+class GstFilingFollowupAlertItem(BaseModel):
+    return_detail_id: int
+    filing_id: int
+    customer_id: Optional[int] = None
+    period: Optional[str] = None
+    form_key: str
+    form_label: str
+    followup_at: str
+    display_name: Optional[str] = None
+    business_name: Optional[str] = None
+    gstin: Optional[str] = None
+    mobile: Optional[str] = None
+    rm_id: Optional[int] = None
+    op_id: Optional[int] = None
+
+
+class GstFilingFollowupAlertsResponse(BaseModel):
+    data: List[GstFilingFollowupAlertItem]
+    total: int
     request_id: str
