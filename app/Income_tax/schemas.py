@@ -121,6 +121,21 @@ class IncomeTaxLeadCreateIn(BaseSchema):
     rm_id: Optional[int] = Field(None, gt=0)
     op_id: Optional[int] = Field(None, gt=0)
     remarks: Optional[str] = None
+    ay: Optional[str] = Field(
+        None,
+        max_length=20,
+        description="Assessment year for CRM (e.g. 2024-25). Defaults from financial year when omitted.",
+    )
+
+    @field_validator("ay", mode="before")
+    @classmethod
+    def normalize_ay(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else None
+        return v
 
     @model_validator(mode="after")
     def require_identity_fields(self):

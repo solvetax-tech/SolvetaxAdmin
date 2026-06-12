@@ -216,6 +216,37 @@ def normalize_source_of_income_list(value: Any) -> Optional[List[str]]:
     return out or None
 
 
+def normalize_ay_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()[:20]
+        return s or None
+    return str(value).strip()[:20] or None
+
+
+def resolve_income_tax_ay(
+    *,
+    ay: Optional[str] = None,
+    financial_year: Optional[List[str]] = None,
+    crm_lead_ay: Optional[str] = None,
+) -> Optional[str]:
+    """Assessment year for CRM (defaults to primary financial year, e.g. 2024-25)."""
+    explicit = normalize_ay_value(ay)
+    if explicit:
+        return explicit
+    existing = normalize_ay_value(crm_lead_ay)
+    if existing:
+        return existing
+    if financial_year:
+        for raw in financial_year:
+            fy = normalize_ay_value(raw)
+            if fy and FY_PATTERN.match(fy):
+                return fy
+    default_fy = default_intake_financial_year()
+    return default_fy[0] if default_fy else None
+
+
 def income_tax_row_to_dict(row: Any) -> dict:
     data = dict(row)
     data.pop("password", None)

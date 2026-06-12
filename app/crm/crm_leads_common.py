@@ -531,6 +531,13 @@ def _normalize_optional_upper(value: Optional[str]) -> Optional[str]:
     return None
 
 
+def _normalize_ay(value: Optional[str]) -> Optional[str]:
+    if isinstance(value, str):
+        s = value.strip()
+        return s[:20] if s else None
+    return None
+
+
 def _parse_optional_bool(v):
     if v is None:
         return None
@@ -936,6 +943,7 @@ async def _svc_filter_crm_leads(
     last_connected_at_to: Optional[datetime] = Query(None, description="Inclusive upper bound on crm_leads.last_connected_at."),
     entity_type: Optional[str] = Query(None, description="Filter by crm_leads.entity_type (e.g. GST_REGISTRATION)."),
     entity_id: Optional[int] = Query(None, ge=1, description="Filter by crm_leads.entity_id."),
+    ay: Optional[str] = Query(None, description="Filter by assessment year (exact match on crm_leads.ay)."),
     smart_board: bool = Query(
         False,
         description=(
@@ -1015,9 +1023,10 @@ async def _svc_filter_crm_leads(
     lead_type_norm = _normalize_code(lead_type) if isinstance(lead_type, str) and lead_type.strip() else None
     tag_norm = tag.strip() if isinstance(tag, str) and tag.strip() else None
     lead_source_norm = _normalize_code(lead_source) if isinstance(lead_source, str) and lead_source.strip() else None
+    ay_norm = _normalize_ay(ay) if isinstance(ay, str) else None
     et_filter = _entity_type_query(entity_type) if (entity_type is not None or entity_id is not None) else None
     cache_key = build_cache_key(
-        "crm:leads:filter:v2",
+        "crm:leads:filter:v3",
         stage=stage,
         stages=stages_norm,
         smart_board=smart_board,
@@ -1044,6 +1053,7 @@ async def _svc_filter_crm_leads(
         last_connected_at_to=last_connected_at_to,
         entity_type=et_filter or _entity_type_query(entity_type) if entity_type is not None else None,
         entity_id=entity_id,
+        ay=ay_norm,
         limit=limit,
         offset=offset,
         role=role,
@@ -1112,6 +1122,9 @@ async def _svc_filter_crm_leads(
                 if lead_source_norm:
                     params.append(lead_source_norm)
                     where.append(f"upper(trim(l.lead_source)) = ${len(params)}")
+                if ay_norm:
+                    params.append(ay_norm)
+                    where.append(f"trim(l.ay) = ${len(params)}")
                 _append_remarks_filter(where, params, remarks_norm)
                 if is_active is not None:
                     params.append(is_active)
@@ -1227,6 +1240,7 @@ async def _bulk_import_crm_leads(
                         preferred_language = row.preferred_language.strip()[:50]
                         email = row.email
                         full_name_bulk = row.full_name
+                        ay_val = _normalize_ay(row.ay)
 
                         if row.followup_at is not None and row.followup_at <= datetime.now(IST):
                             raise _validation_error(
@@ -1272,7 +1286,7 @@ async def _bulk_import_crm_leads(
                                     INSERT INTO {DB_SCHEMA}.crm_leads (
                                         mobile, full_name, email, entity_id, entity_type, preferred_language,
                                         stage, followup_at, rm_id, op_id, rm_assigned_at, op_assigned_at, remarks,
-                                        is_active, follow_up_status, lead_type, tag, lead_source,
+                                        is_active, follow_up_status, lead_type, tag, lead_source, ay,
                                         created_at, updated_at
                                     ) VALUES (
                                         $1, $2, $3, $4, $5, $6,
@@ -1281,7 +1295,7 @@ async def _bulk_import_crm_leads(
                                         CASE WHEN $10 IS NOT NULL THEN NOW() ELSE NULL END,
                                         $11,
                                         COALESCE($12, TRUE), COALESCE($13, 'PENDING'),
-                                        $14, $15, $16,
+                                        $14, $15, $16, $17,
                                         NOW(), NOW()
                                     )
                                     RETURNING id
@@ -1302,6 +1316,7 @@ async def _bulk_import_crm_leads(
                                     lead_type,
                                     tag,
                                     lead_source,
+                                    ay_val,
                                 )
                             inserted_count += 1
                     except HTTPException as ex:
@@ -1354,6 +1369,7 @@ async def _svc_get_bulk_assign_candidates(
     rm_ids: Optional[List[int]] = None,
     op_ids: Optional[List[int]] = None,
     lead_types: Optional[List[str]] = None,
+    ays: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
     lead_sources: Optional[List[str]] = None,
     entity_types: List[str],
@@ -1385,6 +1401,12 @@ async def _svc_get_bulk_assign_candidates(
 
     stages_n = norm_str_list(stages)
     lead_types_n = norm_str_list(lead_types)
+    ays_n = list(
+        dict.fromkeys(
+            [_normalize_ay(v) for v in (ays or []) if isinstance(v, str) and v.strip()]
+        )
+    )
+    ays_n = [v for v in ays_n if v]
     tags_n = norm_str_list(tags)
     lead_sources_n = norm_str_list(lead_sources)
     entity_types_n = norm_str_list(entity_types)
@@ -1406,6 +1428,7 @@ async def _svc_get_bulk_assign_candidates(
         "LEAD_SOURCE": "l.lead_source",
         "ENTITY_TYPE": "l.entity_type",
         "FOLLOW_UP_STATUS": "l.follow_up_status",
+        "AY": "l.ay",
     }
     allowed_null_fields = set(null_field_sql.keys())
 
@@ -1465,6 +1488,13 @@ async def _svc_get_bulk_assign_candidates(
                     f"upper(trim(l.lead_type)) = ANY(${len(params)})"
                     if filter_mode_norm == "IN"
                     else f"NOT (upper(trim(l.lead_type)) = ANY(${len(params)}))"
+                )
+            if ays_n:
+                params.append(ays_n)
+                clauses.append(
+                    f"trim(l.ay) = ANY(${len(params)})"
+                    if filter_mode_norm == "IN"
+                    else f"NOT (trim(l.ay) = ANY(${len(params)}))"
                 )
             if tags_n:
                 tag_parts = []
@@ -1684,31 +1714,32 @@ async def _svc_execute_bulk_assign(
             "per_employee_counts": per_employee_counts,
             "round_robin_next_index": (emp_cursor % pool_size) if pool_size else 0,
         }
-        try:
-            from app.crm.crm_bulk_auto_assign import insert_bulk_assign_log
+        if not payload.suppress_log:
+            try:
+                from app.crm.crm_bulk_auto_assign import insert_bulk_assign_log
 
-            log_summary = {
-                "run_type": "MANUAL",
-                "assignment_role": payload.assignment_role,
-                "total_selected": result["total_selected"],
-                "total_assigned": result["total_assigned"],
-                "per_employee_counts": result["per_employee_counts"],
-                "roles": {
-                    payload.assignment_role: {
-                        "total_assigned": result["total_assigned"],
-                        "per_employee_counts": result["per_employee_counts"],
-                    }
-                },
-            }
-            await insert_bulk_assign_log(
-                run_type="MANUAL",
-                entity_type=entity_type_row or "UNKNOWN",
-                scheduler_id=None,
-                triggered_by=emp_id,
-                summary=log_summary,
-            )
-        except Exception:
-            logger.warning("Manual bulk-assign log insert failed", exc_info=True)
+                roles_for_log: dict = dict(payload.batch_log_roles or {})
+                roles_for_log[payload.assignment_role] = {
+                    "total_assigned": result["total_assigned"],
+                    "per_employee_counts": result["per_employee_counts"],
+                }
+                log_summary = {
+                    "run_type": "MANUAL",
+                    "assignment_role": payload.assignment_role,
+                    "total_selected": result["total_selected"],
+                    "total_assigned": result["total_assigned"],
+                    "per_employee_counts": result["per_employee_counts"],
+                    "roles": roles_for_log,
+                }
+                await insert_bulk_assign_log(
+                    run_type="MANUAL",
+                    entity_type=entity_type_row or "UNKNOWN",
+                    scheduler_id=None,
+                    triggered_by=emp_id,
+                    summary=log_summary,
+                )
+            except Exception:
+                logger.warning("Manual bulk-assign log insert failed", exc_info=True)
         return result
     except asyncpg.PostgresError:
         logger.exception("Database error during CRM bulk assign execute")
@@ -2880,8 +2911,9 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
     lead_source_u = payload.lead_source.strip().upper()[:100]
     tag_v = payload.tag.strip()[:100]
     preferred_lang = payload.preferred_language.strip()[:50]
+    ay_val = _normalize_ay(payload.ay)
 
-    remarks = "Inbound digital marketing capture."
+    remarks = payload.remarks
     pool = await get_db_pool()
     try:
         async with pool.acquire() as conn:
@@ -2916,6 +2948,7 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
                         lead_type,
                         tag,
                         lead_source,
+                        ay,
                         created_at,
                         updated_at
                     )
@@ -2932,6 +2965,7 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
                         $7,
                         $8,
                         $9,
+                        $10,
                         NOW(),
                         NOW()
                     )
@@ -2946,6 +2980,7 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
                     lead_type_u,
                     tag_v,
                     lead_source_u,
+                    ay_val,
                 )
             except asyncpg.UndefinedColumnError as exc:
                 raise HTTPException(
@@ -3012,6 +3047,7 @@ async def filter_crm_leads(
     last_connected_at_to: Optional[datetime] = Query(None),
     entity_type: str = Query(...),
     entity_id: Optional[int] = Query(None, ge=1),
+    ay: Optional[str] = Query(None, description="Filter by assessment year (exact match)."),
     smart_board: bool = Query(False, description="Smart Board stage filter and priority sort."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -3043,6 +3079,7 @@ async def filter_crm_leads(
         last_connected_at_to=last_connected_at_to,
         entity_type=entity_type,
         entity_id=entity_id,
+        ay=ay,
         smart_board=smart_board,
         limit=limit,
         offset=offset,
@@ -3077,6 +3114,7 @@ async def smart_board_crm_leads(
     last_connected_at_from: Optional[datetime] = Query(None),
     last_connected_at_to: Optional[datetime] = Query(None),
     entity_type: str = Query(...),
+    ay: Optional[str] = Query(None, description="Filter by assessment year (exact match)."),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -3107,6 +3145,7 @@ async def smart_board_crm_leads(
         last_connected_at_from=last_connected_at_from,
         last_connected_at_to=last_connected_at_to,
         entity_type=entity_type,
+        ay=ay,
         smart_board=True,
         limit=limit,
         offset=offset,
@@ -3198,6 +3237,7 @@ async def bulk_import_crm_leads_file(
         "lead_type",
         "tag",
         "lead_source",
+        "ay",
     }
 
     rows = []
@@ -3245,6 +3285,8 @@ async def bulk_import_crm_leads_file(
             row["email"] = str(email_raw).strip().lower() if email_raw is not None else None
             name_raw = _csv_nullish_to_none(row.get("full_name"))
             row["full_name"] = str(name_raw).strip()[:200] if name_raw is not None else None
+            ay_raw = _csv_nullish_to_none(row.get("ay"))
+            row["ay"] = _normalize_ay(str(ay_raw).strip()) if ay_raw is not None else None
             rows.append(row)
         except Exception as ex:
             raise _validation_error(
@@ -3271,6 +3313,7 @@ async def get_bulk_assign_candidates(
     rm_ids: Optional[List[int]] = Query(None),
     op_ids: Optional[List[int]] = Query(None),
     lead_types: Optional[List[str]] = Query(None),
+    ays: Optional[List[str]] = Query(None, description="Filter by assessment year(s)."),
     tags: Optional[List[str]] = Query(None),
     lead_sources: Optional[List[str]] = Query(None),
     entity_types: List[str] = Query(...),
@@ -3289,6 +3332,7 @@ async def get_bulk_assign_candidates(
         rm_ids=rm_ids,
         op_ids=op_ids,
         lead_types=lead_types,
+        ays=ays,
         tags=tags,
         lead_sources=lead_sources,
         entity_types=entity_types,

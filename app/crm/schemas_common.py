@@ -53,6 +53,18 @@ class CRMLeadMarketingCreateIn(CRMBaseSchema):
     tag: str = Field(..., min_length=1, max_length=100)
     lead_source: str = Field(..., min_length=1, max_length=100)
     email: Optional[str] = Field(default=None, max_length=255)
+    remarks: Optional[str] = Field(default=None, max_length=2000)
+    ay: Optional[str] = Field(default=None, max_length=20, description="Assessment year (e.g. 2024-25).")
+
+    @field_validator("ay", mode="before")
+    @classmethod
+    def normalize_ay_marketing(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            return s[:20] if s else None
+        return v
 
     @field_validator("full_name", mode="before")
     @classmethod
@@ -98,6 +110,16 @@ class CRMLeadMarketingCreateIn(CRMBaseSchema):
             return s if s else None
         return v
 
+    @field_validator("remarks", mode="before")
+    @classmethod
+    def normalize_remarks_optional(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else None
+        return v
+
     @model_validator(mode="after")
     def validate_mobile_digits(self):
         if not self.mobile.isdigit() or len(self.mobile) != 10:
@@ -130,6 +152,19 @@ class CRMBulkImportRowIn(CRMBaseSchema):
     is_active: Optional[bool] = True
     follow_up_status: Optional[Literal["PENDING", "COMPLETED", "MISSED"]] = "PENDING"
     entity_id: Optional[int] = Field(default=None, gt=0)
+    ay: Optional[str] = Field(default=None, max_length=20, description="Assessment year (e.g. 2024-25).")
+
+    @field_validator("ay", mode="before")
+    @classmethod
+    def normalize_ay_bulk(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            if not s or s.lower() in {"null", "none", "na", "nan"}:
+                return None
+            return s[:20]
+        return v
 
     @field_validator("mobile", mode="before")
     @classmethod
@@ -245,6 +280,14 @@ class CRMBulkAssignExecuteIn(CRMBaseSchema):
         ge=0,
         description="Auto-assign: resume round-robin from this index in selected_usernames order.",
     )
+    suppress_log: bool = Field(
+        default=False,
+        description="When true, skip writing assignment history (use with batch_log_roles on final chained call).",
+    )
+    batch_log_roles: Optional[dict] = Field(
+        default=None,
+        description="Optional prior role results for one combined MANUAL log row (RM+OP in one action).",
+    )
 
     @model_validator(mode="after")
     def _require_assignees(self):
@@ -262,6 +305,7 @@ class CRMBulkAutoAssignFiltersIn(CRMBaseSchema):
     rm_ids: List[int] = Field(default_factory=list)
     op_ids: List[int] = Field(default_factory=list)
     lead_types: List[str] = Field(default_factory=list)
+    ays: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     lead_sources: List[str] = Field(default_factory=list)
     entity_types: List[str] = Field(default_factory=list)

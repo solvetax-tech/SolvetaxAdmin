@@ -30,6 +30,9 @@ from app.Dashboard.schemas import (
 from app.gst_registration_filing.gst_registration_filing import (
     _return_detail_effective_period_lateral,
 )
+from app.gst_registration_filing.status_constants import (
+    normalize_return_detail_status,
+)
 from app.logger import logger
 from app.redis_cache import (
     build_cache_key,
@@ -156,6 +159,41 @@ def _generate_month_columns(count: int = 6) -> List[str]:
             year -= 1
     columns.reverse()
     return columns
+
+
+_PERIOD_RE = re.compile(
+    r"^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)-(\d{4})$",
+    re.IGNORECASE,
+)
+
+
+def _period_sort_key(period: str) -> tuple[int, int]:
+    mon, year_str = period.split("-", 1)
+    return (int(year_str), _MONTH_ABBR.index(mon.upper()))
+
+
+def _parse_period_list(periods: Optional[str]) -> Optional[List[str]]:
+    """Parse comma-separated MON-YYYY periods; returns sorted unique list or None."""
+    if not isinstance(periods, str) or not periods.strip():
+        return None
+    parsed: List[str] = []
+    for part in periods.split(","):
+        token = part.strip().upper()
+        if not token:
+            continue
+        if not _PERIOD_RE.match(token):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid period '{part.strip()}'; use MON-YYYY (e.g. APR-2026).",
+            )
+        parsed.append(token)
+    if not parsed:
+        return None
+    unique = list(dict.fromkeys(parsed))
+    unique.sort(key=_period_sort_key)
+    if len(unique) > 24:
+        raise HTTPException(status_code=400, detail="At most 24 periods allowed.")
+    return unique
 
 
 def _to_ist_date(value: Any) -> Optional[date]:
@@ -292,6 +330,150 @@ def _parse_followup_dates(raw: Optional[str]) -> list[date]:
     return ordered
 
 
+def _parse_return_status_list(raw: Optional[str]) -> list[str]:
+    if not raw or not str(raw).strip():
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for part in re.split(r"[,;\s]+", str(raw).strip()):
+        token = part.strip()
+        if not token:
+            continue
+        try:
+            normalized = normalize_return_detail_status(token)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            ordered.append(normalized)
+    return ordered
+
+
+def _matrix_status_customer_filter_clause(
+    *,
+    role: str,
+    emp_id: Optional[int],
+    idx: int,
+    periods_param_idx: int,
+    return_statuses: list[str],
+    followup_scheduled: bool,
+    followup_columns_exist: bool,
+) -> tuple[str, list[Any], int]:
+    if not return_statuses and not followup_scheduled:
+        return "", [], idx
+    if followup_scheduled and not followup_columns_exist:
+        raise HTTPException(
+            status_code=400,
+            detail="Follow-up filter is not available until per-form follow-up columns are migrated.",
+        )
+
+    match_parts: list[str] = []
+    values: list[Any] = []
+    cur = idx
+
+    if return_statuses:
+        status_or = " OR ".join(
+            (
+                f"(d_st.{due_col} IS NOT NULL "
+                f"AND upper(coalesce(d_st.{status_col}, '')) = ANY(${cur}::text[]))"
+            )
+            for _, status_col, due_col, _ in RETURN_FORMS
+        )
+        match_parts.append(f"({status_or})")
+        values.append(return_statuses)
+        cur += 1
+
+    if followup_scheduled:
+        followup_or = " OR ".join(
+            f"d_st.{col} IS NOT NULL" for col in _PER_FORM_FOLLOWUP_COLUMNS
+        )
+        match_parts.append(f"({followup_or})")
+
+    vis_sql, vis_vals, cur = build_gst_filing_visibility(role, emp_id, cur, DB_SCHEMA)
+    vis_clause = ""
+    if vis_sql:
+        vis_clause = f" AND {vis_sql.replace('f.', 'f_st.')}"
+
+    period_join = _return_detail_effective_period_lateral("d_st", "f_st")
+    sql = f"""
+        f.customer_id IN (
+            SELECT f_st.customer_id
+              FROM {DB_SCHEMA}.gst_filings f_st
+             INNER JOIN {DB_SCHEMA}.gst_filing_return_details d_st
+                     ON d_st.gst_filing_id = f_st.id
+             {period_join}
+             WHERE f_st.is_active IS TRUE
+               AND d_st.is_active IS TRUE
+               AND {_monthly_period_filter_sql()}
+               AND upper(trim(ep.eff_period)) = ANY(${periods_param_idx})
+               AND (
+                   upper(trim(coalesce(d_st.filing_frequency, f_st.filing_frequency, ''))) = 'MONTHLY'
+                   OR d_st.gstr1_due_date IS NOT NULL
+                   OR d_st.gstr3b_due_date IS NOT NULL
+                   OR d_st.cmp08_due_date IS NOT NULL
+                   OR d_st.gstr4_due_date IS NOT NULL
+                   OR d_st.gstr9_due_date IS NOT NULL
+                   OR d_st.gstr9c_due_date IS NOT NULL
+               )
+               AND ({' OR '.join(match_parts)})
+               {vis_clause}
+        )
+    """
+    values.extend(vis_vals)
+    return sql, values, cur
+
+
+def _remaining_payment_customer_filter_clause(
+    *,
+    role: str,
+    emp_id: Optional[int],
+    idx: int,
+    periods_param_idx: int,
+) -> tuple[str, list[Any], int]:
+    period_join = _return_detail_effective_period_lateral("d_st", "f_st")
+    vis_sql, vis_vals, cur = build_gst_filing_visibility(role, emp_id, idx, DB_SCHEMA)
+    vis_clause = ""
+    if vis_sql:
+        vis_clause = f" AND {vis_sql.replace('f.', 'f_st.')}"
+    sql = f"""
+        f.customer_id IN (
+            SELECT f_st.customer_id
+              FROM {DB_SCHEMA}.gst_filings f_st
+             INNER JOIN {DB_SCHEMA}.gst_filing_return_details d_st
+                     ON d_st.gst_filing_id = f_st.id
+             {period_join}
+             LEFT JOIN LATERAL (
+                SELECT p.remaining_amount,
+                       upper(p.payment_status) AS payment_status
+                  FROM {DB_SCHEMA}.payments p
+                 WHERE p.entity_type = '{_RETURN_DETAIL_PAYMENT_TYPE}'
+                   AND p.entity_id = d_st.id
+                   AND p.is_active IS TRUE
+                   AND upper(p.payment_status) != 'CANCELLED'
+                 ORDER BY p.created_at DESC NULLS LAST, p.id DESC
+                 LIMIT 1
+             ) pay ON TRUE
+             WHERE f_st.is_active IS TRUE
+               AND d_st.is_active IS TRUE
+               AND {_monthly_period_filter_sql()}
+               AND upper(trim(ep.eff_period)) = ANY(${periods_param_idx})
+               AND (
+                   upper(trim(coalesce(d_st.filing_frequency, f_st.filing_frequency, ''))) = 'MONTHLY'
+                   OR d_st.gstr1_due_date IS NOT NULL
+                   OR d_st.gstr3b_due_date IS NOT NULL
+                   OR d_st.cmp08_due_date IS NOT NULL
+                   OR d_st.gstr4_due_date IS NOT NULL
+                   OR d_st.gstr9_due_date IS NOT NULL
+                   OR d_st.gstr9c_due_date IS NOT NULL
+               )
+               AND COALESCE(pay.remaining_amount, 0) > 0
+               AND COALESCE(pay.payment_status, '') != 'PAID'
+               {vis_clause}
+        )
+    """
+    return sql, vis_vals, cur
+
+
 def _followup_dates_customer_filter_clause(
     role: str,
     emp_id: Optional[int],
@@ -398,34 +580,45 @@ def _resolve_cell_return_detail_id(
 async def _fetch_return_detail_payment_map(
     conn: asyncpg.Connection,
     return_detail_ids: list[int],
-) -> dict[int, str]:
+) -> dict[int, Dict[str, Any]]:
     if not return_detail_ids:
         return {}
     rows = await conn.fetch(
         f"""
-        SELECT entity_id::int AS entity_id,
-               CASE
-                   WHEN BOOL_OR(upper(payment_status) = 'PAID') THEN 'PAID'
-                   ELSE 'PENDING'
-               END AS payment_status
+        SELECT DISTINCT ON (entity_id)
+               entity_id::int AS entity_id,
+               id AS payment_id,
+               upper(payment_status) AS payment_status,
+               COALESCE(remaining_amount, 0)::float AS remaining_amount,
+               COALESCE(paid_amount, 0)::float AS paid_amount,
+               COALESCE(net_amount, 0)::float AS net_amount
           FROM {DB_SCHEMA}.payments
          WHERE entity_type = $1
            AND entity_id = ANY($2::int[])
            AND is_active IS TRUE
            AND upper(payment_status) != 'CANCELLED'
-         GROUP BY entity_id
+         ORDER BY entity_id, created_at DESC NULLS LAST, id DESC
         """,
         _RETURN_DETAIL_PAYMENT_TYPE,
         return_detail_ids,
     )
-    return {int(row["entity_id"]): str(row["payment_status"]) for row in rows}
+    return {
+        int(row["entity_id"]): {
+            "payment_id": int(row["payment_id"]),
+            "payment_status": str(row["payment_status"] or "PENDING"),
+            "remaining_amount": float(row["remaining_amount"] or 0),
+            "paid_amount": float(row["paid_amount"] or 0),
+            "net_amount": float(row["net_amount"] or 0),
+        }
+        for row in rows
+    }
 
 
 def _build_month_cell(
     forms_raw: Dict[str, Dict[str, Any]],
     filing_id: Optional[int],
     return_detail_id: Optional[int] = None,
-    payment_status: Optional[str] = None,
+    payment: Optional[Dict[str, Any]] = None,
 ) -> GstFilingMatrixMonthCell:
     form_cells: Dict[str, GstFilingMatrixFormCell] = {}
     tones: list[str] = []
@@ -446,6 +639,15 @@ def _build_month_cell(
 
     status = primary.get("status")
     resolved_return_detail_id = _resolve_cell_return_detail_id(forms_raw, return_detail_id)
+    payment_status = (payment or {}).get("payment_status")
+    remaining_amount = (payment or {}).get("remaining_amount")
+    paid_amount = (payment or {}).get("paid_amount")
+    net_amount = (payment or {}).get("net_amount")
+    payment_id = (payment or {}).get("payment_id")
+    payment_completed = (
+        payment_status == "PAID"
+        or (payment is not None and remaining_amount is not None and remaining_amount <= 0)
+    )
     return GstFilingMatrixMonthCell(
         tone=tone,
         status=status,
@@ -453,8 +655,12 @@ def _build_month_cell(
         status_label=_status_label(status),
         filing_id=filing_id,
         return_detail_id=resolved_return_detail_id,
-        payment_completed=payment_status == "PAID",
+        payment_completed=payment_completed,
         payment_status=payment_status,
+        payment_id=payment_id,
+        payment_remaining_amount=remaining_amount,
+        payment_paid_amount=paid_amount,
+        payment_net_amount=net_amount,
         forms=form_cells,
     )
 
@@ -480,6 +686,22 @@ async def list_gst_filing_monthly_matrix(
     followup_dates: Optional[str] = Query(
         None,
         description="Filter customers with per-form follow-ups on these IST calendar days (YYYY-MM-DD, comma-separated).",
+    ),
+    periods: Optional[str] = Query(
+        None,
+        description="Comma-separated MON-YYYY columns to show (overrides months count when set).",
+    ),
+    return_statuses: Optional[str] = Query(
+        None,
+        description="Comma-separated return statuses; customer matches if any form in visible months has one.",
+    ),
+    followup_scheduled: Optional[bool] = Query(
+        None,
+        description="When true, only customers with a per-form follow-up in visible months.",
+    ),
+    has_remaining_payment: Optional[bool] = Query(
+        None,
+        description="When true, only customers with partial return-detail payments (paid some, remaining balance > 0) in visible months.",
     ),
     months: int = Query(6, ge=3, le=24, description="Number of monthly columns to show."),
     limit: int = Query(25, ge=1, le=200),
@@ -508,15 +730,23 @@ async def list_gst_filing_monthly_matrix(
     followup_dates_key = (
         ",".join(d.isoformat() for d in followup_dates_list) if followup_dates_list else None
     )
-    month_columns = _generate_month_columns(months)
+    period_list = _parse_period_list(periods)
+    month_columns = period_list if period_list else _generate_month_columns(months)
+    return_statuses_list = _parse_return_status_list(return_statuses)
+    followup_scheduled_filter = followup_scheduled is True
+    remaining_payment_filter = has_remaining_payment is True
     today_ist = datetime.now(_IST).date()
 
     cache_key = build_cache_key(
-        "dashboard:gst_filing_monthly_matrix:v12",
+        "dashboard:gst_filing_monthly_matrix:v18",
         phone=phone_norm,
         business_name=business_norm,
         customer_id=customer_id,
         followup_dates=followup_dates_key,
+        periods=",".join(period_list) if period_list else None,
+        return_statuses=",".join(return_statuses_list) if return_statuses_list else None,
+        followup_scheduled=followup_scheduled_filter or None,
+        has_remaining_payment=remaining_payment_filter or None,
         months=months,
         limit=limit,
         offset=offset,
@@ -573,6 +803,29 @@ async def list_gst_filing_monthly_matrix(
         month_idx = idx
         values.append(month_columns)
         idx += 1
+
+        if return_statuses_list or followup_scheduled_filter:
+            clause, clause_vals, idx = _matrix_status_customer_filter_clause(
+                role=role,
+                emp_id=emp_id,
+                idx=idx,
+                periods_param_idx=month_idx,
+                return_statuses=return_statuses_list,
+                followup_scheduled=followup_scheduled_filter,
+                followup_columns_exist=followup_columns_exist,
+            )
+            filter_clauses.append(clause)
+            values.extend(clause_vals)
+
+        if remaining_payment_filter:
+            clause, clause_vals, idx = _remaining_payment_customer_filter_clause(
+                role=role,
+                emp_id=emp_id,
+                idx=idx,
+                periods_param_idx=month_idx,
+            )
+            filter_clauses.append(clause)
+            values.extend(clause_vals)
 
         extra_where = ""
         if filter_clauses:
@@ -719,14 +972,14 @@ async def list_gst_filing_monthly_matrix(
                         resolved_id = _resolve_cell_return_detail_id(
                             raw, meta.get("return_detail_id")
                         )
-                        payment_status = (
+                        payment_info = (
                             payment_map.get(resolved_id) if resolved_id is not None else None
                         )
                         month_map[period] = _build_month_cell(
                             raw,
                             meta.get("filing_id"),
                             meta.get("return_detail_id"),
-                            payment_status,
+                            payment_info,
                         )
                     else:
                         month_map[period] = GstFilingMatrixMonthCell(tone="none")

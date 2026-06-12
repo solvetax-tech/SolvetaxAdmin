@@ -83,6 +83,7 @@ def _payload_to_db_fields(payload: CRMBulkAutoAssignConfigIn, *, updated_by: int
         "rm_ids": f.rm_ids,
         "op_ids": f.op_ids,
         "lead_types": f.lead_types,
+        "ays": f.ays,
         "tags": f.tags,
         "lead_sources": f.lead_sources,
         "entity_types": entity_types,
@@ -399,6 +400,27 @@ async def svc_delete_bulk_assign_scheduler(scheduler_id: int, *, updated_by: int
     return {"message": f"Scheduler '{row['name']}' removed.", "id": int(row["id"])}
 
 
+def _role_assigned_count(roles: Dict[str, Any], role: str, summary: Dict[str, Any]) -> int:
+    role_block = roles.get(role)
+    if isinstance(role_block, dict) and role_block.get("total_assigned") is not None:
+        return int(role_block["total_assigned"])
+    if (summary.get("assignment_role") or "").strip().upper() == role:
+        return int(summary.get("total_assigned") or 0)
+    return int(summary.get(f"total_assigned_{role.lower()}") or 0)
+
+
+def _assigned_roles_label(summary: Dict[str, Any]) -> str:
+    roles = summary.get("roles") or {}
+    labels = []
+    for role in ("RM", "OP"):
+        if _role_assigned_count(roles, role, summary) > 0:
+            labels.append(role)
+    if labels:
+        return " + ".join(labels)
+    ar = (summary.get("assignment_role") or "").strip().upper()
+    return ar if ar in {"RM", "OP"} else "—"
+
+
 async def insert_bulk_assign_log(
     *,
     run_type: str,
@@ -408,8 +430,8 @@ async def insert_bulk_assign_log(
     summary: Dict[str, Any],
 ) -> None:
     roles = summary.get("roles") or {}
-    rm_n = int((roles.get("RM") or {}).get("total_assigned") or summary.get("total_assigned_rm") or 0)
-    op_n = int((roles.get("OP") or {}).get("total_assigned") or summary.get("total_assigned_op") or 0)
+    rm_n = _role_assigned_count(roles, "RM", summary)
+    op_n = _role_assigned_count(roles, "OP", summary)
     matched = int(summary.get("candidates_matched") or summary.get("total_selected") or 0)
     pool = await get_db_pool()
     try:
@@ -497,6 +519,7 @@ async def svc_list_bulk_assign_logs(
                 "candidates_matched": row["candidates_matched"],
                 "total_assigned_rm": row["total_assigned_rm"],
                 "total_assigned_op": row["total_assigned_op"],
+                "assigned_roles": _assigned_roles_label(sm or {}),
                 "summary": sm,
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             }
@@ -531,6 +554,7 @@ async def _fetch_matching_leads(rule: Dict[str, Any]) -> List[Dict[str, Any]]:
         rm_ids=f.get("rm_ids") or None,
         op_ids=f.get("op_ids") or None,
         lead_types=f.get("lead_types") or None,
+        ays=f.get("ays") or None,
         tags=f.get("tags") or None,
         lead_sources=f.get("lead_sources") or None,
         entity_types=entity_types,

@@ -58,6 +58,10 @@ class GstFilingMatrixMonthCell(BaseModel):
     return_detail_id: Optional[int] = None
     payment_completed: bool = False
     payment_status: Optional[str] = None
+    payment_id: Optional[int] = None
+    payment_remaining_amount: Optional[float] = None
+    payment_paid_amount: Optional[float] = None
+    payment_net_amount: Optional[float] = None
     forms: Optional[Dict[str, GstFilingMatrixFormCell]] = None
 
 

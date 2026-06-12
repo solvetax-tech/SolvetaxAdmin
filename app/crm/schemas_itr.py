@@ -62,6 +62,17 @@ class CRMLeadEditIn(CRMBaseSchema):
     lead_type: Optional[str] = Field(default=None, max_length=50)
     tag: Optional[str] = Field(default=None, max_length=100)
     lead_source: Optional[str] = Field(default=None, max_length=100)
+    ay: Optional[str] = Field(default=None, max_length=20, description="Assessment year (e.g. 2024-25).")
+
+    @field_validator("ay", mode="before")
+    @classmethod
+    def normalize_ay(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            s = v.strip()
+            return s[:20] if s else None
+        return v
 
     @field_validator("lead_type", mode="before")
     @classmethod
