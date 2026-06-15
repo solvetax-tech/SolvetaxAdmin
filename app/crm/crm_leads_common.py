@@ -538,6 +538,50 @@ def _normalize_ay(value: Optional[str]) -> Optional[str]:
     return None
 
 
+async def _fetch_existing_crm_lead_for_import_duplicate(
+    conn: asyncpg.Connection,
+    *,
+    mobile: str,
+    entity_type: str,
+    ay: Optional[str] = None,
+) -> Optional[asyncpg.Record]:
+    """
+    Import duplicate key:
+    - INCOME_TAX: mobile + entity_type + ay (NULL/blank ay treated as empty string)
+    - other entity types (e.g. GST_REGISTRATION): mobile + entity_type
+    """
+    entity_norm = _normalize_code(entity_type)
+    if entity_norm == "INCOME_TAX":
+        return await conn.fetchrow(
+            f"""
+            SELECT id
+            FROM {DB_SCHEMA}.crm_leads
+            WHERE trim(mobile) = trim($1)
+              AND entity_type IS NOT DISTINCT FROM $2
+              AND trim(COALESCE(ay, '')) = trim(COALESCE($3::varchar, ''))
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            mobile,
+            entity_norm,
+            ay,
+        )
+    return await conn.fetchrow(
+        f"""
+        SELECT id
+        FROM {DB_SCHEMA}.crm_leads
+        WHERE trim(mobile) = trim($1)
+          AND entity_type IS NOT DISTINCT FROM $2
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+        """,
+        mobile,
+        entity_norm,
+    )
+
+
 def _parse_optional_bool(v):
     if v is None:
         return None
@@ -1262,63 +1306,65 @@ async def _bulk_import_crm_leads(
                                 {"stage": f"{stage} is not supported for {stage_scope}."},
                             )
 
-                        existing = await conn.fetchrow(
-                            f"""
-                            SELECT *
-                            FROM {DB_SCHEMA}.crm_leads
-                            WHERE trim(mobile) = trim($1)
-                              AND entity_type IS NOT DISTINCT FROM $2
-                            ORDER BY id DESC
-                            LIMIT 1
-                            FOR UPDATE
-                            """,
-                            mobile,
-                            entity_type,
+                        existing = await _fetch_existing_crm_lead_for_import_duplicate(
+                            conn,
+                            mobile=mobile,
+                            entity_type=entity_type,
+                            ay=ay_val,
                         )
 
                         if existing:
-                            # Duplicate (mobile + entity_type): skip — never update existing rows.
+                            # Duplicate import key — skip; never update existing rows.
+                            # GST: mobile + entity_type | ITR: mobile + entity_type + ay
                             skipped_count += 1
                         else:
+                            row_inserted = False
                             if not payload.validate_only:
-                                await conn.fetchval(
-                                    f"""
-                                    INSERT INTO {DB_SCHEMA}.crm_leads (
-                                        mobile, full_name, email, entity_id, entity_type, preferred_language,
-                                        stage, followup_at, rm_id, op_id, rm_assigned_at, op_assigned_at, remarks,
-                                        is_active, follow_up_status, lead_type, tag, lead_source, ay,
-                                        created_at, updated_at
-                                    ) VALUES (
-                                        $1, $2, $3, $4, $5, $6,
-                                        $7, $8, $9, $10,
-                                        CASE WHEN $9 IS NOT NULL THEN NOW() ELSE NULL END,
-                                        CASE WHEN $10 IS NOT NULL THEN NOW() ELSE NULL END,
-                                        $11,
-                                        COALESCE($12, TRUE), COALESCE($13, 'PENDING'),
-                                        $14, $15, $16, $17,
-                                        NOW(), NOW()
+                                try:
+                                    await conn.fetchval(
+                                        f"""
+                                        INSERT INTO {DB_SCHEMA}.crm_leads (
+                                            mobile, full_name, email, entity_id, entity_type, preferred_language,
+                                            stage, followup_at, rm_id, op_id, rm_assigned_at, op_assigned_at, remarks,
+                                            is_active, follow_up_status, lead_type, tag, lead_source, ay,
+                                            created_at, updated_at
+                                        ) VALUES (
+                                            $1, $2, $3, $4, $5, $6,
+                                            $7, $8, $9, $10,
+                                            CASE WHEN $9 IS NOT NULL THEN NOW() ELSE NULL END,
+                                            CASE WHEN $10 IS NOT NULL THEN NOW() ELSE NULL END,
+                                            $11,
+                                            COALESCE($12, TRUE), COALESCE($13, 'PENDING'),
+                                            $14, $15, $16, $17,
+                                            NOW(), NOW()
+                                        )
+                                        RETURNING id
+                                        """,
+                                        mobile,
+                                        full_name_bulk,
+                                        email,
+                                        row.entity_id,
+                                        entity_type,
+                                        preferred_language,
+                                        stage,
+                                        row.followup_at,
+                                        row.rm_id,
+                                        row.op_id,
+                                        row.remarks,
+                                        row.is_active,
+                                        row.follow_up_status,
+                                        lead_type,
+                                        tag,
+                                        lead_source,
+                                        ay_val,
                                     )
-                                    RETURNING id
-                                    """,
-                                    mobile,
-                                    full_name_bulk,
-                                    email,
-                                    row.entity_id,
-                                    entity_type,
-                                    preferred_language,
-                                    stage,
-                                    row.followup_at,
-                                    row.rm_id,
-                                    row.op_id,
-                                    row.remarks,
-                                    row.is_active,
-                                    row.follow_up_status,
-                                    lead_type,
-                                    tag,
-                                    lead_source,
-                                    ay_val,
-                                )
-                            inserted_count += 1
+                                    row_inserted = True
+                                except asyncpg.UniqueViolationError:
+                                    skipped_count += 1
+                            else:
+                                row_inserted = True
+                            if row_inserted:
+                                inserted_count += 1
                     except HTTPException as ex:
                         failed_count += 1
                         errors.append({"row_number": i, "detail": ex.detail})
@@ -2928,6 +2974,20 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
                     },
                 )
             try:
+                existing = await _fetch_existing_crm_lead_for_import_duplicate(
+                    conn,
+                    mobile=mobile,
+                    entity_type=entity_norm,
+                    ay=ay_val,
+                )
+                if existing:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "Duplicate CRM lead: a row already exists for this mobile and entity type"
+                            + (" and assessment year." if entity_norm == "INCOME_TAX" else ".")
+                        ),
+                    )
                 row = await conn.fetchrow(
                     f"""
                     INSERT INTO {DB_SCHEMA}.crm_leads (

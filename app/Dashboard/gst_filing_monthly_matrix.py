@@ -767,6 +767,7 @@ async def list_gst_filing_monthly_matrix(
 
         base_from, values, idx = _build_base_from(role, emp_id, 1)
         filter_clauses: list[str] = []
+        matrix_selection_clauses: list[str] = []
         if phone_norm:
             digits = _digits_only(phone_norm)
             if len(digits) < 4:
@@ -814,7 +815,7 @@ async def list_gst_filing_monthly_matrix(
                 followup_scheduled=followup_scheduled_filter,
                 followup_columns_exist=followup_columns_exist,
             )
-            filter_clauses.append(clause)
+            matrix_selection_clauses.append(clause)
             values.extend(clause_vals)
 
         if remaining_payment_filter:
@@ -824,8 +825,14 @@ async def list_gst_filing_monthly_matrix(
                 idx=idx,
                 periods_param_idx=month_idx,
             )
-            filter_clauses.append(clause)
+            matrix_selection_clauses.append(clause)
             values.extend(clause_vals)
+
+        if matrix_selection_clauses:
+            if len(matrix_selection_clauses) == 1:
+                filter_clauses.append(matrix_selection_clauses[0])
+            else:
+                filter_clauses.append(f"({' OR '.join(matrix_selection_clauses)})")
 
         extra_where = ""
         if filter_clauses:
