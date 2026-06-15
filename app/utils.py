@@ -235,14 +235,19 @@ def build_customer_visibility(role: str, emp_id: Optional[int], idx: int, schema
         return f"c.op_id = ${idx}", [emp_id], idx + 1
 
     # --------------------------------------------------
-    # Managers → reporting-tree customers (rm/op slots)
+    # SALES_MANAGER → RM team; OP_MANAGER → OP team
     # --------------------------------------------------
-    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+    if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
         tree = employee_report_tree_subquery(schema, idx)
-        sql = f"(c.rm_id IN {tree} OR c.op_id IN {tree})"
-        return sql, [emp_id], idx + 1
+        return f"c.rm_id IN {tree}", [emp_id], idx + 1
+
+    if role == "OP_MANAGER":
+        if not emp_id:
+            return "1=0", [], idx
+        tree = employee_report_tree_subquery(schema, idx)
+        return f"c.op_id IN {tree}", [emp_id], idx + 1
 
     # --------------------------------------------------
     # Everyone else → only rows assigned to them as RM or OP
@@ -280,10 +285,13 @@ def build_registration_payments_visibility(
     if role == "OP":
         return f"{op_col} = ${idx}", [emp_id], idx + 1
 
-    if role in ("SALES_MANAGER", "OP_MANAGER"):
+    if role == "SALES_MANAGER":
         tree = employee_report_tree_subquery(schema, idx)
-        sql = f"(({rm_col} IN {tree}) OR ({op_col} IN {tree}))"
-        return sql, [emp_id], idx + 1
+        return f"{rm_col} IN {tree}", [emp_id], idx + 1
+
+    if role == "OP_MANAGER":
+        tree = employee_report_tree_subquery(schema, idx)
+        return f"{op_col} IN {tree}", [emp_id], idx + 1
 
     return (
         f"(({rm_col} = ${idx}) OR ({op_col} = ${idx + 1}))",
@@ -319,10 +327,13 @@ def build_payment_followup_visibility(
     if role == "OP":
         return f"{op_col} = ${idx}", [emp_id], idx + 1
 
-    if role in ("SALES_MANAGER", "OP_MANAGER"):
+    if role == "SALES_MANAGER":
         tree = employee_report_tree_subquery(schema, idx)
-        sql = f"(({rm_col} IN {tree}) OR ({op_col} IN {tree}))"
-        return sql, [emp_id], idx + 1
+        return f"{rm_col} IN {tree}", [emp_id], idx + 1
+
+    if role == "OP_MANAGER":
+        tree = employee_report_tree_subquery(schema, idx)
+        return f"{op_col} IN {tree}", [emp_id], idx + 1
 
     return (
         f"(({rm_col} = ${idx}) OR ({op_col} = ${idx + 1}))",
@@ -347,19 +358,26 @@ def build_gst_visibility(role: str, emp_id: int, idx: int, schema: str):
             return "1=0", [], idx
         return f"g.created_by = ${idx}", [emp_id], idx + 1
 
-    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+    if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
         tree = employee_report_tree_subquery(schema, idx)
-        sql = f"(g.rm_id IN {tree} OR g.created_by IN {tree})"
-        return sql, [emp_id], idx + 1
+        return f"g.rm_id IN {tree}", [emp_id], idx + 1
+
+    if role == "OP_MANAGER":
+        if not emp_id:
+            return "1=0", [], idx
+        tree = employee_report_tree_subquery(schema, idx)
+        return f"g.created_by IN {tree}", [emp_id], idx + 1
 
     if not emp_id:
         return "1=0", [], idx
     return f"(g.rm_id = ${idx} OR g.created_by = ${idx})", [emp_id], idx + 1
+
+
 def build_gst_filing_visibility(role: str, emp_id: int, idx: int, schema: str):
 
-    if role in ("ADMIN", "SPECIAL"):
+    if role == "ADMIN":
         return None, [], idx
 
     if role == "RM":
@@ -372,12 +390,17 @@ def build_gst_filing_visibility(role: str, emp_id: int, idx: int, schema: str):
             return "1=0", [], idx
         return f"f.op_id = ${idx}", [emp_id], idx + 1
 
-    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+    if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
         tree = employee_report_tree_subquery(schema, idx)
-        sql = f"(f.rm_id IN {tree} OR f.op_id IN {tree})"
-        return sql, [emp_id], idx + 1
+        return f"f.rm_id IN {tree}", [emp_id], idx + 1
+
+    if role == "OP_MANAGER":
+        if not emp_id:
+            return "1=0", [], idx
+        tree = employee_report_tree_subquery(schema, idx)
+        return f"f.op_id IN {tree}", [emp_id], idx + 1
 
     if not emp_id:
         return "1=0", [], idx
@@ -404,16 +427,23 @@ def build_income_tax_visibility(
             return "1=0", [], idx
         return f"{alias}.op_id = ${idx}", [emp_id], idx + 1
 
-    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+    if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
         tree = employee_report_tree_subquery(schema, idx)
-        sql = f"({alias}.rm_id IN {tree} OR {alias}.op_id IN {tree})"
-        return sql, [emp_id], idx + 1
+        return f"{alias}.rm_id IN {tree}", [emp_id], idx + 1
+
+    if role == "OP_MANAGER":
+        if not emp_id:
+            return "1=0", [], idx
+        tree = employee_report_tree_subquery(schema, idx)
+        return f"{alias}.op_id IN {tree}", [emp_id], idx + 1
 
     if not emp_id:
         return "1=0", [], idx
     return f"({alias}.rm_id = ${idx} OR {alias}.op_id = ${idx})", [emp_id], idx + 1
+
+
 def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: str):
 
     # ADMIN → Full access
@@ -432,12 +462,17 @@ def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: 
             return "1=0", [], idx
         return f"cs.op_id = ${idx}", [emp_id], idx + 1
 
-    if role in ["SALES_MANAGER", "OP_MANAGER"]:
+    if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
         tree = employee_report_tree_subquery(schema, idx)
-        sql = f"(cs.rm_id IN {tree} OR cs.op_id IN {tree})"
-        return sql, [emp_id], idx + 1
+        return f"cs.rm_id IN {tree}", [emp_id], idx + 1
+
+    if role == "OP_MANAGER":
+        if not emp_id:
+            return "1=0", [], idx
+        tree = employee_report_tree_subquery(schema, idx)
+        return f"cs.op_id IN {tree}", [emp_id], idx + 1
 
     if not emp_id:
         return "1=0", [], idx
