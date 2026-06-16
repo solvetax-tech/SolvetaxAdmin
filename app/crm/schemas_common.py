@@ -132,8 +132,7 @@ class CRMBulkImportRowIn(CRMBaseSchema):
     Bulk row aligned with ``CRMLeadMarketingCreateIn``: required capture fields per row.
     Inserts/updates operate on ``crm_leads`` only (no gst_registration / income_tax writes).
     ``entity_id`` is optional on each row (stored on insert). Duplicate detection for
-    skip uses ``mobile`` + ``entity_type`` for GST; ``mobile`` + ``entity_type`` + ``ay``
-    for INCOME_TAX (NULL/blank ``ay`` treated as empty string).
+    update/skip uses ``mobile`` + ``entity_type`` only (latest row by ``id`` wins).
     """
 
     mobile: str = Field(..., min_length=10, max_length=20)
