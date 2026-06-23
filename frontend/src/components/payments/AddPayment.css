@@ -1,0 +1,169 @@
+/* AddPayment.css - Tailored for the premium-edit-modal-v4 structure */
+
+.add-payment-content {
+    max-width: 850px !important;
+    /* Increased width for Step 2 */
+    margin: 0 auto;
+    transition: max-width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.add-payment-content.step-1-modal {
+    max-width: 480px !important;
+}
+
+/* Success State Refinements */
+.modal-success-state .success-tick {
+    animation: scaleIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes scaleIn {
+    from {
+        transform: scale(0);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* Form Layout Refinements */
+.add-payment-content .edit-modal-header-v4 {
+    padding: 24px 36px 20px;
+    /* Reduced vertical padding */
+}
+
+.add-payment-content .edit-modal-body-v4 {
+    padding: 20px 36px 24px;
+    /* Reduced vertical padding */
+}
+
+.add-payment-content .premium-edit-grid-v4 {
+    margin-top: 0;
+    gap: 16px 20px;
+    /* Reduced vertical gap */
+}
+
+.add-payment-content .selected-badge-v2 {
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+/* Ensure textarea matches V4 input style */
+.add-payment-content textarea {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    color: var(--text-primary);
+    padding: 14px 16px;
+    border-radius: 16px;
+    font-size: 15px;
+    min-height: 120px;
+    line-height: 1.6;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    outline: none;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+    resize: vertical;
+}
+
+.add-payment-content textarea:hover {
+    border-color: rgba(var(--fg-rgb), 0.2);
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.add-payment-content textarea:focus {
+    border-color: #2eb87a;
+    background: rgba(0, 0, 0, 0.45);
+    box-shadow: 0 0 0 4px rgba(46, 184, 122, 0.1), inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.add-payment-content textarea::placeholder {
+    color: var(--text-primary);
+}
+
+/* Input group variations */
+.add-payment-content .input-group-v4 label svg {
+    color: #2eb87a;
+    opacity: 0.8;
+}
+
+/* Modal body scroll if needed */
+.add-payment-content .edit-modal-body-v4 {
+    max-height: 70vh;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--fg-rgb), 0.1) transparent;
+}
+
+.add-payment-content .edit-modal-body-v4::-webkit-scrollbar {
+    width: 6px;
+}
+
+.add-payment-content .edit-modal-body-v4::-webkit-scrollbar-thumb {
+    background: rgba(var(--fg-rgb), 0.1);
+    border-radius: 10px;
+}
+
+/* Read-only and Highlighted States */
+.add-payment-content .read-only-input {
+    opacity: 0.7;
+    cursor: not-allowed;
+    background: rgba(var(--fg-rgb), 0.03) !important;
+}
+
+.add-payment-content .input-wrapper-v4.highlighted input {
+    color: #ef4444 !important;
+    font-weight: 800 !important;
+    border: 1px solid rgba(239, 68, 68, 0.3) !important;
+    background: rgba(239, 68, 68, 0.05) !important;
+}
+
+.add-payment-content .input-wrapper-v4.highlighted:hover input {
+    border-color: rgba(239, 68, 68, 0.5) !important;
+}
+
+.add-payment-content .btn-save-v4:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: grayscale(1);
+}
+
+/* --- Premium Select Dropdown Styling --- */
+.add-payment-content select {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3) !important;
+    border: 1px solid rgba(var(--fg-rgb), 0.1) !important;
+    color: var(--text-primary) !important;
+    padding: 14px 16px !important;
+    border-radius: 16px !important;
+    font-size: 15px !important;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    outline: none !important;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    cursor: pointer !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%232eb87a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 16px center !important;
+    background-size: 18px !important;
+}
+
+.add-payment-content select:hover {
+    border-color: rgba(var(--fg-rgb), 0.2) !important;
+    background-color: rgba(0, 0, 0, 0.4) !important;
+}
+
+.add-payment-content select:focus {
+    border-color: #2eb87a !important;
+    background: rgba(0, 0, 0, 0.45) !important;
+    box-shadow: 0 0 0 4px rgba(46, 184, 122, 0.1), inset 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+}
+
+.add-payment-content select option {
+    background: var(--bg-surface) !important;
+    color: var(--text-primary) !important;
+    padding: 12px !important;
+}

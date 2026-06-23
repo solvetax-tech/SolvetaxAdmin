@@ -1,0 +1,82 @@
+/* Right-side drawer (view + edit) — width from AppSideDrawer.css */
+.customer-service-details-drawer .cs-service-details-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 16px 24px !important;
+}
+
+.customer-service-details-drawer .cs-service-details-grid .input-group-v4.full {
+    grid-column: span 3 !important;
+}
+
+.customer-service-details-drawer .code-badge-input {
+    font-family: monospace;
+    color: #3b82f6 !important;
+}
+
+.customer-service-details-drawer .status-text-active {
+    color: #2eb87a !important;
+    font-weight: 600;
+}
+
+.customer-service-details-drawer .status-text-inactive {
+    color: #ef4444 !important;
+    font-weight: 600;
+}
+
+.customer-service-details-drawer .status-text-success {
+    color: #2eb87a !important;
+    font-weight: 600;
+}
+
+.customer-service-details-drawer .status-text-pending {
+    color: #f59e0b !important;
+    font-weight: 600;
+}
+
+.customer-service-details-drawer .modal-inner-loading-overlay {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-primary);
+    min-height: 240px;
+}
+
+.customer-service-details-drawer .cs-drawer-error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 12px;
+    min-height: 280px;
+    color: var(--text-muted);
+}
+
+.customer-service-details-drawer .cs-drawer-error-state h2 {
+    color: var(--text-primary);
+    margin: 0;
+    font-size: 18px;
+}
+
+@media (max-width: 900px) {
+    .customer-service-details-drawer .cs-service-details-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .customer-service-details-drawer .cs-service-details-grid .input-group-v4.full {
+        grid-column: span 2 !important;
+    }
+}
+
+@media (max-width: 560px) {
+    .customer-service-details-drawer .cs-service-details-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    .customer-service-details-drawer .cs-service-details-grid .input-group-v4.full {
+        grid-column: span 1 !important;
+    }
+}

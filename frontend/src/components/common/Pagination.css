@@ -1,0 +1,107 @@
+.premium-pagination-wrapper {
+    position: fixed;
+    left: 50%;
+    bottom: 8px;
+    transform: translateX(-50%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 0;
+    background: transparent;
+    z-index: 50;
+    pointer-events: none;
+}
+
+.premium-pagination {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 12px;
+    background: rgba(var(--bg-rgb), 0.4);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-radius: 100px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    pointer-events: auto;
+}
+
+.pagination-arrow {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-radius: 50%;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 0;
+}
+
+.pagination-arrow:hover:not(:disabled) {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--text-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(46, 184, 122, 0.4);
+}
+
+.pagination-arrow:active:not(:disabled) {
+    transform: translateY(0) scale(0.95);
+}
+
+.pagination-arrow:disabled {
+    opacity: 0.15;
+    cursor: not-allowed;
+    filter: grayscale(1);
+}
+
+.pagination-current {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    position: relative;
+}
+
+.page-number {
+    font-family: var(--font-accent);
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--text-primary);
+    letter-spacing: 0.05em;
+    opacity: 0.9;
+    text-shadow: 0 0 10px rgba(var(--fg-rgb), 0.1);
+}
+
+/* Minimalist indicator dots or subtle background if needed */
+.pagination-current::after {
+    content: '';
+    position: absolute;
+    bottom: -3px;
+    width: 3px;
+    height: 3px;
+    background: var(--accent-color);
+    border-radius: 50%;
+    opacity: 0.6;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+    .premium-pagination-wrapper {
+        bottom: 6px;
+    }
+
+    .premium-pagination {
+        gap: 8px;
+        padding: 3px 10px;
+    }
+
+    .pagination-arrow {
+        width: 26px;
+        height: 26px;
+    }
+}

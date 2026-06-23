@@ -1,0 +1,241 @@
+.sdpp-page {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 0 0 auto;
+    min-height: 0;
+}
+
+/* Full-page flow: no inner vertical scroll on the table panel */
+.sdpp-page .service-records-shell-v5,
+.sdpp-page .progress-content-layout,
+.sdpp-page .progress-main-column {
+    overflow: visible;
+}
+
+.sdpp-page .progress-content-layout {
+    padding: 0 0 8px;
+}
+
+.sdpp-page .progress-tracker-container-v4 {
+    flex: 0 0 auto;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+.sdpp-page .progress-tracker-container-v4::-webkit-scrollbar {
+    width: 0;
+    height: 6px;
+}
+
+.sdpp-page .progress-tracker-container-v4::-webkit-scrollbar-thumb {
+    background: rgba(var(--fg-rgb), 0.12);
+    border-radius: 10px;
+}
+
+.sdpp-page .filings-ledger-body {
+    overflow: visible;
+    max-height: none;
+}
+
+.sdpp-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px 16px;
+    padding: 0 0 4px;
+}
+
+.sdpp-entity-pills {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 280px;
+}
+
+.sdpp-entity-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    background: rgba(var(--fg-rgb), 0.03);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.sdpp-entity-pill:hover {
+    background: rgba(var(--fg-rgb), 0.06);
+    color: var(--text-primary);
+}
+
+.sdpp-entity-pill.is-active {
+    background: rgba(46, 184, 122, 0.12);
+    border-color: rgba(46, 184, 122, 0.45);
+    color: #2eb87a;
+}
+
+.sdpp-entity-pill-count {
+    font-weight: 800;
+    font-size: 12px;
+    color: inherit;
+}
+
+.sdpp-entity-pill-label {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    opacity: 0.9;
+}
+
+.sdpp-entity-pill--gst_registration.is-active { border-color: rgba(139, 92, 246, 0.5); color: #8b5cf6; background: rgba(139, 92, 246, 0.1); }
+.sdpp-entity-pill--gst_filing.is-active { border-color: rgba(6, 182, 212, 0.5); color: #67e8f9; background: rgba(6, 182, 212, 0.1); }
+.sdpp-entity-pill--income_tax.is-active { border-color: rgba(245, 158, 11, 0.5); color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
+.sdpp-entity-pill--customer_service.is-active { border-color: rgba(16, 185, 129, 0.5); color: #2eb87a; background: rgba(16, 185, 129, 0.1); }
+
+.sdpp-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 10px 12px;
+    flex-shrink: 0;
+}
+
+.sdpp-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sdpp-filter-field label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-primary);
+}
+
+.sdpp-filter-field input {
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--text-primary);
+    font-size: 13px;
+    width: 150px;
+}
+
+.sdpp-filter-field input:focus {
+    outline: none;
+    border-color: rgba(46, 184, 122, 0.45);
+}
+
+.sdpp-filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 1px;
+}
+
+.sdpp-table-meta {
+    padding: 0 4px 6px;
+}
+
+.sdpp-ledger-grid {
+    display: grid !important;
+    grid-template-columns:
+        minmax(90px, 0.6fr)
+        minmax(90px, 0.55fr)
+        minmax(100px, 0.55fr)
+        minmax(160px, 1.1fr)
+        minmax(120px, 0.8fr)
+        minmax(100px, 0.7fr)
+        minmax(90px, 0.5fr)
+        minmax(90px, 0.5fr)
+        minmax(110px, 0.65fr)
+        minmax(100px, 0.55fr);
+    width: 100% !important;
+    min-width: 1080px !important;
+}
+
+.sdpp-entity-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid rgba(var(--fg-rgb), 0.12);
+    background: rgba(var(--fg-rgb), 0.04);
+    color: var(--text-primary);
+}
+
+.sdpp-entity-chip.GST_REGISTRATION {
+    border-color: rgba(139, 92, 246, 0.35);
+    color: #8b5cf6;
+}
+
+.sdpp-entity-chip.GST_FILING {
+    border-color: rgba(6, 182, 212, 0.35);
+    color: #67e8f9;
+}
+
+.sdpp-entity-chip.INCOME_TAX {
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #f59e0b;
+}
+
+.sdpp-entity-chip.CUSTOMER_SERVICE {
+    border-color: rgba(16, 185, 129, 0.35);
+    color: #2eb87a;
+}
+
+.sdpp-status-chip {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #2eb87a;
+}
+
+.sdpp-col-pending {
+    text-align: right;
+}
+
+.sdpp-pending-amount {
+    font-size: 12px;
+    font-weight: 700;
+    color: #f59e0b;
+    font-variant-numeric: tabular-nums;
+}
+
+.sdpp-row-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(46, 184, 122, 0.25);
+    background: rgba(46, 184, 122, 0.08);
+    color: #2eb87a;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sdpp-row-action:hover {
+    background: #2eb87a;
+    color: var(--text-primary);
+}

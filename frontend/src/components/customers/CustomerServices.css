@@ -1,0 +1,694 @@
+/* CustomerServices.css */
+.customer-services-container {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    min-width: 0; /* allow the table's horizontal scroll viewport to bound itself */
+    background: transparent;
+    overflow: visible;
+    flex: 0 0 auto;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.customer-services-container .gst-action-bar-v2 {
+    margin-bottom: 4px;
+    padding: 0;
+    gap: 8px;
+}
+
+.btn-cs-payments-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: linear-gradient(135deg, rgba(46, 184, 122, 0.22), rgba(46, 184, 122, 0.08));
+    border: 1px solid rgba(46, 184, 122, 0.55);
+    border-radius: 14px;
+    color: #3dd494;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    box-shadow: 0 0 0 1px rgba(46, 184, 122, 0.15), 0 4px 14px rgba(46, 184, 122, 0.18);
+    font-family: inherit;
+}
+
+.btn-cs-payments-entry:hover {
+    border-color: #2eb87a;
+    color: #52f0b3;
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px rgba(46, 184, 122, 0.35), 0 6px 18px rgba(46, 184, 122, 0.28);
+}
+
+.btn-cs-payments-entry:active {
+    transform: translateY(0);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Table Container (fluid width — vertical page scroll only, like Customers) --- */
+.customer-services-container .cs-services-table-wrapper {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+    overflow-y: visible;
+    border-radius: 12px;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    background: rgba(var(--bg-rgb), 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    position: relative;
+}
+
+.customer-services-container .cs-services-table-wrapper .gst-table-container {
+    overflow: visible;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    backdrop-filter: none;
+}
+
+/* --- Grid Ledger Layout (fluid columns, fits viewport) --- */
+.cs-services-grid-template {
+    display: grid !important;
+    grid-template-columns:
+        minmax(48px, 0.35fr)   /* ID */
+        minmax(64px, 0.45fr)   /* Cust ID */
+        minmax(120px, 1fr)     /* Customer Name */
+        minmax(120px, 1fr)     /* Business Name */
+        minmax(100px, 0.75fr)  /* Phone */
+        minmax(96px, 0.8fr)    /* Code */
+        minmax(88px, 0.65fr)   /* RM */
+        minmax(88px, 0.65fr)   /* OP */
+        minmax(72px, 0.5fr)    /* Status */
+        minmax(96px, 0.65fr)   /* Service Status */
+        minmax(96px, 0.65fr)   /* Follow-up */
+        minmax(108px, 0.7fr)   /* Created At */
+        minmax(80px, 0.5fr);   /* Actions */
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+}
+
+.cs-services-table-v2 {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.filings-ledger-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--bg-surface);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.08);
+    height: 48px;
+}
+
+.filings-ledger-header-cell {
+    padding: 0 16px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.filings-ledger-body {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+}
+
+.filings-ledger-row {
+    height: 56px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
+    background: transparent;
+    transition: background 0.2s;
+}
+
+.filings-ledger-row.cs-row-active {
+    background: rgba(46, 184, 122, 0.08) !important;
+    border-bottom: 1px solid rgba(46, 184, 122, 0.2);
+}
+
+.filings-ledger-row:hover {
+    background: rgba(var(--fg-rgb), 0.02);
+}
+
+.filings-ledger-row.active-drawer-row {
+    background: rgba(46, 184, 122, 0.08) !important;
+    border-bottom: 1px solid rgba(46, 184, 122, 0.2);
+}
+
+.filings-ledger-cell {
+    padding: 0 16px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    color: var(--text-primary);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Sticky first column (ID) */
+.cs-services-grid-template > :nth-child(1),
+.filings-ledger-header-cell:nth-child(1),
+.filings-ledger-cell:nth-child(1) {
+    position: sticky;
+    left: 0;
+    z-index: 15;
+    background: var(--bg-app-2);
+    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+    justify-content: center;
+}
+
+.filings-ledger-header-cell:nth-child(1) {
+    z-index: 25;
+    background: var(--bg-surface);
+}
+
+.filings-ledger-row:hover .filings-ledger-cell:nth-child(1),
+.filings-ledger-row.cs-row-active .filings-ledger-cell:nth-child(1),
+.filings-ledger-row.active-drawer-row .filings-ledger-cell:nth-child(1) {
+    background: var(--bg-surface);
+}
+
+/* Sticky Actions column (right edge) */
+.cs-services-grid-template > .cs-actions-sticky,
+.filings-ledger-header-cell.cs-actions-sticky {
+    position: sticky;
+    right: 0;
+    z-index: 10;
+    background: var(--bg-app) !important;
+    border-left: 1px solid rgba(var(--fg-rgb), 0.08);
+    justify-content: center;
+}
+
+.filings-ledger-header.cs-services-grid-template > .cs-actions-sticky {
+    background: var(--bg-surface) !important;
+    z-index: 25;
+}
+
+.filings-ledger-row:hover > .cs-actions-sticky,
+.filings-ledger-row.cs-row-active > .cs-actions-sticky,
+.filings-ledger-row.active-drawer-row > .cs-actions-sticky {
+    background: var(--bg-surface) !important;
+}
+
+.table-actions-combined {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+}
+
+.btn-view-services-mini {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(var(--fg-rgb), 0.12);
+    background: rgba(var(--fg-rgb), 0.04);
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-view-services-mini.btn-view-icon-only {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 8px;
+}
+
+.btn-view-services-mini:hover {
+    background: rgba(var(--fg-rgb), 0.08);
+    border-color: rgba(var(--fg-rgb), 0.2);
+    color: var(--text-primary);
+}
+
+.btn-edit-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(46, 184, 122, 0.25);
+    background: rgba(46, 184, 122, 0.08);
+    color: #2eb87a;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-edit-action:hover {
+    background: rgba(46, 184, 122, 0.18);
+    border-color: rgba(46, 184, 122, 0.45);
+    transform: translateY(-1px);
+}
+
+/* --- Badges & Elements --- */
+.code-badge {
+    background: rgba(172, 200, 255, 0.08);
+    padding: 3px 6px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #3b82f6;
+    border: 1px solid rgba(172, 200, 255, 0.15);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.entity-id-badge {
+    background: rgba(46, 184, 122, 0.1);
+    color: #2eb87a;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-weight: 700;
+    font-size: 11px;
+    border: 1px solid rgba(46, 184, 122, 0.2);
+}
+
+.bold-cell {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.muted-text {
+    color: var(--text-primary);
+    font-style: italic;
+}
+
+/* --- SERVICE STATUS CHIPS (v23) --- */
+.service-status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    white-space: nowrap;
+}
+
+.service-status-chip.status-provided {
+    background: rgba(77, 171, 247, 0.08); /* Sapphire Blue */
+    color: #4dabf7;
+    border-color: rgba(77, 171, 247, 0.15);
+    box-shadow: 0 0 10px rgba(77, 171, 247, 0.05);
+}
+
+.service-status-chip.status-active {
+    background: rgba(0, 255, 170, 0.08); /* Emerald Green */
+    color: #2eb87a;
+    border-color: rgba(0, 255, 170, 0.15);
+    box-shadow: 0 0 10px rgba(0, 255, 170, 0.05);
+}
+
+.service-status-chip.pending {
+    background: rgba(255, 171, 0, 0.08);
+    color: #f59e0b;
+    border-color: rgba(255, 171, 0, 0.15);
+}
+
+.service-status-chip.partial {
+    background: rgba(172, 200, 255, 0.08);
+    color: #3b82f6;
+    border-color: rgba(172, 200, 255, 0.15);
+}
+
+.service-status-chip.required {
+    background: rgba(248, 121, 111, 0.08);
+    color: #ef4444;
+    border-color: rgba(248, 121, 111, 0.15);
+}
+
+/* Status-dot removed as per user request */
+
+/* Tab Header Consistency */
+.tab-header-v2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 16px;
+}
+
+.active-filters-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1;
+}
+
+/* --- Sticky First Column (ID) --- */
+.cs-services-table th:first-child,
+.cs-services-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    background: var(--bg-app-2);
+    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+}
+
+.cs-services-table thead th:first-child {
+    z-index: 15;
+    background: var(--bg-surface);
+}
+
+/* Ensure background doesn't vanish on hover for sticky cells */
+.cs-services-table tbody tr:hover td:first-child {
+    background: var(--bg-surface);
+}
+/* --- FOLLOW-UP DRAWER --- */
+.followup-drawer-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    display: flex;
+    justify-content: flex-end;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.followup-drawer-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.followup-drawer-panel {
+    width: 520px;
+    height: 100%;
+    background: linear-gradient(165deg, var(--bg-app) 0%, var(--bg-app) 100%);
+    backdrop-filter: blur(40px);
+    border-left: 1px solid rgba(var(--fg-rgb), 0.08);
+    box-shadow: -20px 0 50px rgba(0, 0, 0, 0.8), inset 1px 0 0 rgba(var(--fg-rgb), 0.02);
+    transform: translateX(100%);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: visible !important; /* Extremely critical for date pickers */
+}
+
+.followup-drawer-panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(172, 200, 255, 0.2), transparent);
+    z-index: 1001;
+}
+
+.followup-drawer-panel.show {
+    transform: translateX(0);
+}
+
+.drawer-header {
+    padding: 32px 24px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(180deg, rgba(172, 200, 255, 0.03) 0%, transparent 100%);
+}
+
+.drawer-title {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    overflow: visible;
+}
+
+.drawer-title svg {
+    color: #3b82f6;
+    padding: 10px;
+    background: rgba(172, 200, 255, 0.05);
+    border-radius: 12px;
+    border: 1px solid rgba(172, 200, 255, 0.1);
+    box-shadow: 0 0 20px rgba(172, 200, 255, 0.05);
+}
+
+.drawer-title h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.drawer-title p {
+    margin: 4px 0 0;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* Shared Task Identity Styling */
+.drawer-task-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px !important;
+}
+
+.task-id-pill {
+    background: rgba(0, 255, 170, 0.1);
+    color: #2eb87a;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 255, 170, 0.2);
+    box-shadow: 0 0 15px rgba(0, 255, 170, 0.1);
+    letter-spacing: 0.05em;
+}
+
+.task-service-text {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.btn-close-drawer {
+    width: 36px;
+    height: 36px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 50%;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-close-drawer:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.2);
+    transform: rotate(90deg);
+}
+
+.drawer-body {
+    flex: 1;
+    overflow: visible !important; /* Critical for floating pickers */
+}
+
+/* Updated Button Column Hover Background */
+.cs-services-table tr.active-drawer-row {
+    background: rgba(46, 184, 122, 0.08) !important;
+    border-bottom: 1px solid rgba(46, 184, 122, 0.2);
+}
+
+.btn-followup-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 4px;
+    padding: 4px 10px;
+    color: #3b82f6;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.btn-followup-toggle:hover {
+    background: rgba(172, 200, 255, 0.15);
+    border-color: #3b82f6;
+    transform: translateY(-1px);
+}
+
+.btn-followup-toggle.active {
+    background: #3b82f6;
+    color: var(--bg-app);
+    border-color: #3b82f6;
+    box-shadow: 0 0 10px rgba(172, 200, 255, 0.3);
+}
+
+.btn-secondary-v3-mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    color: #3b82f6;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+}
+
+.btn-secondary-v3-mini:hover {
+    background: rgba(172, 200, 255, 0.1);
+    border-color: rgba(172, 200, 255, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.btn-secondary-v3-mini svg {
+    opacity: 0.8;
+}
+/* --- SKELETON LOADING (v4) --- */
+.cs-services-table-skeleton-row {
+    display: grid;
+    grid-template-columns: inherit;
+    align-items: center;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
+    background: rgba(var(--fg-rgb), 0.01);
+}
+
+.cs-skeleton-cell {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.cs-services-table-skeleton-row:last-child {
+    border-bottom: none;
+}
+
+/* Ensure sticky first column for skeleton too */
+.cs-services-table-skeleton-row .cs-skeleton-cell:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    background: var(--bg-app-2);
+    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+}
+
+/* --- PREMIUM EMPTY STATE (v4) --- */
+.cs-empty-state-v4 {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 100px 20px;
+    text-align: center;
+    background: rgba(var(--fg-rgb), 0.01);
+    border-radius: 12px;
+    margin: 20px;
+    border: 1px dashed rgba(var(--fg-rgb), 0.05);
+}
+
+.empty-icon-stack {
+    position: relative;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.empty-icon-stack .icon-main {
+    color: rgba(46, 184, 122, 0.15);
+    filter: drop-shadow(0 0 20px rgba(46, 184, 122, 0.1));
+}
+
+.empty-icon-stack .icon-sub {
+    position: absolute;
+    bottom: -5px;
+    right: -5px;
+    color: #2eb87a;
+    background: var(--bg-app-2);
+    padding: 4px;
+    border-radius: 50%;
+    border: 2px solid rgba(46, 184, 122, 0.2);
+}
+
+.cs-empty-state-v4 h3 {
+    color: var(--text-primary);
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0 0 8px 0;
+    letter-spacing: -0.01em;
+}
+
+.cs-empty-state-v4 p {
+    color: var(--text-primary);
+    font-size: 13px;
+    max-width: 320px;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.employee-table-error {
+    padding: 40px;
+    text-align: center;
+    color: #ef4444;
+    background: rgba(244, 63, 94, 0.05);
+    border-radius: 12px;
+    margin: 20px;
+    border: 1px solid rgba(244, 63, 94, 0.1);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}

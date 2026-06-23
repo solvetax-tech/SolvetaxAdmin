@@ -1,0 +1,460 @@
+:root {
+    --ledger-bg: var(--bg-surface);
+    --ledger-header-bg: var(--bg-surface);
+    --ledger-border: rgba(var(--fg-rgb), 0.05);
+    --ledger-hover: rgba(var(--fg-rgb), 0.02);
+    --ledger-text-primary: var(--text-primary);
+    --ledger-text-secondary: rgba(var(--fg-rgb), 0.4);
+    --ledger-accent: #6366f1;
+}
+
+.gst-filings-returns-module {
+    width: 100%;
+    overflow: hidden; /* Clips to border-radius, inner scroll still works */
+    border-radius: 16px;
+    background: var(--ledger-bg);
+    border: 1px solid var(--ledger-border);
+}
+
+.gst-ledger-container {
+    --returns-col-1: 80px;
+    --returns-col-2: 80px;
+    --returns-col-3: 110px;
+    --returns-col-4: 140px;
+    --returns-col-5: 140px;
+    --returns-col-6: 120px;
+    --returns-col-7: 120px;
+    --returns-col-8: 120px;
+    --returns-col-9: 120px;
+    --returns-col-10: 90px;
+    --returns-col-11: 90px;
+    --returns-col-12: 140px;
+    --returns-col-13: 130px;
+
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    max-height: none;
+    position: relative;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--fg-rgb), 0.1) transparent;
+}
+
+/* 🔥 The Grid Engine: Scales on full screens, scrolls on small screens */
+.ledger-grid-template {
+    display: grid !important;
+    /* Rigid fixed widths based on variables to ensure headers and data (skeletons) always align perfectly */
+    grid-template-columns: 
+        var(--returns-col-1)
+        var(--returns-col-2)
+        var(--returns-col-3)
+        var(--returns-col-4)
+        var(--returns-col-5)
+        var(--returns-col-6)
+        var(--returns-col-7)
+        var(--returns-col-8)
+        var(--returns-col-9)
+        var(--returns-col-10)
+        var(--returns-col-11)
+        var(--returns-col-12)
+        var(--returns-col-13) !important;
+    width: fit-content !important;
+    min-width: 100% !important;
+    gap: 0 !important;
+}
+
+/* Status Badges */
+.ledger-status-pill {
+    font-size: 9px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ledger-status-pill.active {
+    background: rgba(52, 211, 153, 0.1);
+    color: #2eb87a;
+    border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.ledger-status-pill.inactive {
+    background: rgba(244, 63, 94, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(244, 63, 94, 0.2);
+}
+
+
+.ledger-header {
+    background: var(--bg-surface-2); /* Slightly lighter for differentiation */
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.12); /* Subtle accent bottom border */
+    position: sticky;
+    top: 0;
+    z-index: 25;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.ledger-header-cell {
+    padding: 16px 12px;
+    font-size: 10px;
+    font-weight: 900; 
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted); /* Muted silver headers */
+    text-align: center;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.12);
+}
+
+
+.ledger-row {
+    border-bottom: 1px solid var(--ledger-border);
+    background: transparent;
+    transition: background 0.15s ease;
+    will-change: background;
+}
+
+.ledger-row:hover {
+    background: var(--ledger-hover);
+}
+
+.ledger-cell {
+    padding: 18px 12px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    font-size: 11px;
+    color: var(--ledger-text-primary);
+    overflow: hidden;
+    white-space: nowrap;
+    width: 100% !important;
+    justify-self: stretch !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.08) !important;
+    min-width: 0;
+}
+
+/* Special Cell Alignments */
+.ledger-cell.align-left { justify-content: flex-start; text-align: left; }
+
+/* 🔥 Sticky logic for ID columns (The 3 left columns) */
+.ledger-sticky-id {
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    background: var(--ledger-bg);
+}
+
+.ledger-header .ledger-sticky-id {
+    z-index: 25;
+    background: var(--bg-surface-2) !important;
+}
+
+/* Offset for multiple sticky columns */
+.ledger-sticky-col-1,
+.ledger-cell.gst-filing-returns-id-cell {
+    left: 0 !important; 
+    width: var(--returns-col-1) !important;
+    color: #2eb87a !important;
+    font-weight: 700 !important;
+    font-family: 'JetBrains Mono', monospace;
+}
+.ledger-sticky-col-2,
+.ledger-cell.gst-filing-returns-filing-id-cell {
+    left: var(--returns-col-1) !important; 
+    width: var(--returns-col-2) !important;
+    color: var(--text-primary) !important;
+    font-weight: 700 !important;
+    font-family: 'JetBrains Mono', monospace;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.3);
+}
+
+.ledger-row:hover .gst-filing-returns-id-cell {
+    color: #2eb87a !important;
+}
+
+/* Sticky Actions column (right) — returns */
+.ledger-grid-template .gst-sticky-actions {
+    position: sticky !important;
+    right: 0 !important;
+    z-index: 6 !important;
+    min-width: var(--returns-col-13) !important;
+    max-width: var(--returns-col-13) !important;
+    width: var(--returns-col-13) !important;
+    background-color: var(--bg-surface) !important;
+    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    box-shadow: -4px 0 10px rgba(0, 0, 0, 0.45);
+}
+
+.ledger-header.ledger-grid-template .gst-sticky-actions {
+    z-index: 26 !important;
+    background-color: var(--bg-surface-2) !important;
+}
+
+.ledger-row.ledger-grid-template:hover .gst-sticky-actions {
+    background-color: var(--bg-surface) !important;
+}
+
+.ledger-row:hover .ledger-sticky-id {
+    background-color: var(--bg-surface) !important;
+}
+.ledger-sticky-col-3 { left: 160px; }
+
+/* Sub-components */
+.ledger-id-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.ledger-id-sub {
+    color: var(--ledger-text-secondary);
+    font-size: 10px;
+}
+
+.ledger-business-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    overflow: hidden;
+}
+
+.ledger-business-name {
+    font-weight: 700;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ledger-business-type {
+    font-size: 10px;
+    color: var(--ledger-text-secondary);
+}
+
+.ledger-compliance-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+}
+
+.ledger-status-badge {
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 9px;
+    font-weight: 800;
+    text-align: center;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+/* Status Specific Styles with Premium Glows */
+.ledger-status-badge.completed {
+    background: rgba(16, 185, 129, 0.1);
+    color: #2eb87a;
+    border-color: rgba(16, 185, 129, 0.2);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.05);
+}
+
+.ledger-status-badge.overdue,
+.ledger-status-badge.missed {
+    background: rgba(244, 63, 94, 0.1);
+    color: #ef4444;
+    border-color: rgba(244, 63, 94, 0.2);
+    box-shadow: 0 0 12px rgba(244, 63, 94, 0.05);
+}
+
+.ledger-status-badge.pending {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+    border-color: rgba(245, 158, 11, 0.2);
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.05);
+}
+
+.ledger-status-badge.not-filed {
+    background: rgba(99, 102, 241, 0.1);
+    color: #a5b4fc;
+    border-color: rgba(99, 102, 241, 0.2);
+}
+
+.ledger-status-badge.default {
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+}
+
+.ledger-status-badge:hover {
+    transform: translateY(-1px);
+    border-color: rgba(var(--fg-rgb), 0.2);
+    filter: brightness(1.1);
+}
+
+.ledger-due-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ledger-compliance-stack:hover .ledger-due-box {
+    background: rgba(var(--fg-rgb), 0.08);
+    border-color: rgba(var(--fg-rgb), 0.15);
+}
+
+.ledger-perf-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #c7d2fe; /* Brighter Indigo */
+    box-shadow: 0 0 10px rgba(199, 210, 254, 0.6);
+}
+
+/* 🔥 High-Visibility Date styles */
+.ledger-date-small {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace; /* Monospace is better for scanning numbers */
+    font-weight: 700;
+    color: var(--text-primary); /* Near white for maximum readability */
+    letter-spacing: 0.02em;
+}
+
+.ledger-status-badge.completed ~ .ledger-due-box .ledger-perf-dot { background: #2eb87a; box-shadow: 0 0 12px rgba(52, 211, 153, 0.5); }
+.ledger-status-badge.overdue ~ .ledger-due-box .ledger-perf-dot { background: #ef4444; box-shadow: 0 0 12px rgba(251, 113, 133, 0.6); }
+
+.ledger-auto-tag {
+    font-size: 9px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+}
+
+.ledger-auto-tag.verified { background: rgba(52, 211, 153, 0.1); color: #2eb87a; }
+.ledger-auto-tag.manual { background: rgba(251, 191, 36, 0.1); color: #f59e0b; }
+
+.ledger-action-btn {
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+    font-size: 10px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.ledger-action-btn:hover {
+    background: #6366f1;
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+/* Empty State */
+.ledger-empty-container {
+    padding: 80px 20px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    grid-column: 1 / -1;
+}
+
+.ledger-empty-title { font-size: 18px; font-weight: 700; color: var(--text-muted); }
+.ledger-empty-text { font-size: 14px; color: var(--text-muted); }
+
+/* Skeletons */
+.ledger-skeleton-row {
+    background: transparent;
+}
+
+.ledger-skeleton-bar {
+    height: 12px;
+    width: 100%;
+    background: rgba(var(--fg-rgb), 0.07);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+}
+
+.period-tag.small {
+    background: rgba(99, 102, 241, 0.15);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-weight: 800;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.1);
+}
+
+/* --- Archived / History Styles (v.69) --- */
+.archived-row {
+    opacity: 0.55;
+    background: rgba(0, 0, 0, 0.2);
+    filter: grayscale(0.2);
+}
+
+.archived-row:hover {
+    opacity: 0.85;
+    background: rgba(var(--fg-rgb), 0.02);
+}
+
+.archived-badge {
+    margin-left: 8px;
+    font-size: 7px;
+    padding: 2px 5px;
+    background: rgba(var(--fg-rgb), 0.08);
+    border: 1px solid rgba(var(--fg-rgb), 0.15);
+    border-radius: 4px;
+    color: var(--text-primary);
+    vertical-align: middle;
+    letter-spacing: 0.1em;
+}
+
+.archived-row .period-tag.small {
+    background: rgba(var(--fg-rgb), 0.05);
+    border-color: rgba(var(--fg-rgb), 0.1);
+    color: var(--text-primary);
+    box-shadow: none;
+}
+
+
+
+.ledger-skeleton-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(var(--fg-rgb), 0.1), transparent);
+    animation: ledger-shimmer 1.5s infinite;
+}
+
+@keyframes ledger-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+@media (max-width: 1200px) {
+    .ledger-grid-template {
+        /* On smaller screens, we can either allow scrolling or adjust widths */
+        grid-template-columns: repeat(14, minmax(120px, 1fr));
+    }
+}

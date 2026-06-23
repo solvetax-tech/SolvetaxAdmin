@@ -1,0 +1,1743 @@
+/* --- ITR Filings Module --- */
+
+/*
+ * Income Tax sits inside `.dashboard-container-v2` (padding 24px).
+ * Default `.gst-main-content` also pads 24px — doubling the gap above the toolbar.
+ * Flush inner padding so the tab row aligns with other workspace tabs (single inset).
+ */
+.gst-main-content.itr-income-tax-page {
+    padding: 0;
+    /* View details + filter + edit drawers: anchored right, wider panel */
+    --itr-side-panel-width: var(--app-side-drawer-width, min(50vw, calc(100vw - 24px)));
+}
+
+/* Tabs (left) + Filters / New Record (right) on one row */
+.itr-income-tax-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 8px;
+    width: 100%;
+}
+
+.itr-income-tax-top-row .dashboard-sub-nav-v4 {
+    margin: 0;
+}
+
+.itr-income-tax-top-actions {
+    flex-shrink: 0;
+}
+
+.btn-itr-payments-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: linear-gradient(135deg, rgba(46, 184, 122, 0.22), rgba(46, 184, 122, 0.08));
+    border: 1px solid rgba(46, 184, 122, 0.55);
+    border-radius: 14px;
+    color: #3dd494;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    box-shadow: 0 0 0 1px rgba(46, 184, 122, 0.15), 0 4px 14px rgba(46, 184, 122, 0.18);
+}
+
+.btn-itr-payments-entry:hover {
+    border-color: #2eb87a;
+    color: #52f0b3;
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px rgba(46, 184, 122, 0.35), 0 6px 18px rgba(46, 184, 122, 0.28);
+}
+
+.btn-itr-payments-entry:active {
+    transform: translateY(0);
+}
+
+.gst-action-bar-v2.itr-itrf-filter-chips-row {
+    margin-bottom: 10px;
+    padding-top: 0;
+    padding-bottom: 2px;
+}
+
+/* Table block sits closer to toolbar */
+.gst-main-content.itr-income-tax-page .gst-table-wrapper {
+    gap: 12px;
+}
+
+.itr-ledger-body {
+    --itr-col-1: 88px;   /* ID */
+    --itr-col-2: 168px;  /* Client Name */
+    --itr-col-3: 140px;  /* Mobile */
+    --itr-col-4: 160px;  /* PAN */
+    --itr-col-5: 190px;  /* FY (pills wrap) */
+    --itr-col-6: 140px;  /* State */
+    --itr-col-7: 220px;  /* Source (pills wrap) */
+    --itr-col-8: 130px;  /* Status */
+    --itr-col-9: 108px;  /* Record year */
+    --itr-col-10: 140px; /* RM */
+    --itr-col-11: 140px; /* OP */
+    --itr-col-12: 176px; /* Actions */
+
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: auto;
+    background: var(--bg-surface);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-radius: 16px;
+    width: 100%;
+}
+
+.itr-ledger-header {
+    background: var(--bg-surface);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.08);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    height: 48px;
+}
+
+.itr-ledger-header .itr-ledger-cell {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0 16px !important;
+    height: 100%;
+    background: var(--bg-surface);
+    justify-content: flex-start !important;
+    text-align: left !important;
+}
+
+.itr-ledger-row {
+    display: grid !important;
+    grid-template-columns: 
+        var(--itr-col-1)
+        var(--itr-col-2)
+        var(--itr-col-3)
+        var(--itr-col-4)
+        var(--itr-col-5)
+        var(--itr-col-6)
+        var(--itr-col-7)
+        var(--itr-col-8)
+        var(--itr-col-9)
+        var(--itr-col-10)
+        var(--itr-col-11)
+        var(--itr-col-12) !important;
+    width: fit-content !important;
+    min-width: 100% !important;
+    height: 56px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
+    transition: background 0.2s;
+    gap: 0 !important;
+    align-items: stretch;
+}
+
+.itr-ledger-row.itr-ledger-header {
+    height: 48px;
+}
+
+.itr-ledger-row:hover:not(.itr-ledger-header) {
+    background: rgba(var(--fg-rgb), 0.02);
+}
+
+.itr-ledger-cell {
+    padding: 0 16px !important;
+    height: 100%;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+    font-family: 'Plus Jakarta Sans', var(--font-body, 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: transparent;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.08) !important;
+    width: 100% !important;
+    justify-self: stretch !important;
+    text-transform: none;
+    font-variant: normal;
+}
+
+/* FY & income source columns — pills stay on one row inside compact cell */
+.itr-ledger-cell.itr-ledger-fy-cell,
+.itr-ledger-cell.itr-ledger-source-cell {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    align-items: center !important;
+    padding: 0 16px !important;
+}
+
+.itr-source-pills {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    justify-content: flex-start;
+    align-items: center;
+    max-width: 100%;
+    width: 100%;
+    overflow: hidden;
+}
+
+.itr-source-pill {
+    text-transform: none !important;
+    letter-spacing: 0.02em !important;
+    font-size: 8px !important;
+    font-weight: 700 !important;
+    padding: 2px 7px !important;
+    line-height: 1.3;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.itr-source-pills-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.info-item-v4--sources .info-item-sources-wrap,
+.info-item-v4--fy .info-item-sources-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-start;
+}
+
+.info-item-v4--sources .itr-source-pill,
+.info-item-v4--fy .itr-source-pill {
+    font-size: 9px !important;
+    padding: 3px 10px !important;
+}
+
+.itr-record-year-meta {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(46, 184, 122, 0.9);
+}
+
+/* 409 duplicate_record — info banner (message + guidance from API) */
+.itr-duplicate-notice {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+    border-radius: 14px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.itr-duplicate-notice__icon {
+    flex-shrink: 0;
+    color: #3b82f6;
+    margin-top: 2px;
+}
+
+.itr-duplicate-notice__title {
+    display: block;
+    font-size: 14px;
+    font-weight: 800;
+    color: #3b82f6;
+    margin-bottom: 8px;
+}
+
+.itr-duplicate-notice__message {
+    margin: 0 0 8px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.itr-duplicate-notice__error-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.itr-duplicate-notice__error-list .itr-duplicate-notice__message:last-child {
+    margin-bottom: 0;
+}
+
+.itr-form-alert {
+    margin-bottom: 20px;
+}
+
+.itr-duplicate-notice__guidance {
+    margin: 0 0 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-primary);
+}
+
+.itr-duplicate-notice__fields {
+    margin: 0 0 12px;
+    padding-left: 18px;
+    font-size: 11px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.itr-duplicate-notice__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.itr-duplicate-notice__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 100px;
+    border: none;
+    background: #3b82f6;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.itr-duplicate-notice__cta:hover:not(:disabled) {
+    background: #3b82f6;
+    transform: translateY(-1px);
+}
+
+.itr-duplicate-notice__cta:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.itr-duplicate-notice__dismiss {
+    padding: 10px 14px;
+    border-radius: 100px;
+    border: 1px solid rgba(var(--fg-rgb), 0.2);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.itr-duplicate-notice__dismiss:hover:not(:disabled) {
+    border-color: var(--text-primary);
+    color: var(--text-primary);
+}
+
+.itr-record-year-pill {
+    background: rgba(59, 130, 246, 0.12) !important;
+    color: #3b82f6 !important;
+    border: 1px solid rgba(59, 130, 246, 0.35) !important;
+    text-transform: none !important;
+    font-size: 9px !important;
+    font-weight: 800 !important;
+    padding: 2px 8px !important;
+    letter-spacing: 0.04em;
+}
+
+.itr-ledger-cell.itr-ledger-record-year-cell {
+    white-space: normal !important;
+}
+
+.itr-ledger-body .period-tag {
+    font-family: inherit;
+    font-weight: 700;
+    text-transform: none;
+}
+
+.itr-ledger-cell:last-child { border-right: none !important; }
+
+.itr-ledger-cell:first-child,
+.itr-ledger-sticky-id {
+    position: sticky !important;
+    left: 0 !important;
+    z-index: 20 !important;
+    background-color: var(--bg-surface) !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    box-shadow: 4px 0 10px rgba(0, 0, 0, 0.5);
+    flex: none !important;
+    opacity: 1 !important;
+}
+
+.itr-ledger-header .itr-ledger-cell:first-child,
+.itr-ledger-header .itr-ledger-sticky-id {
+    z-index: 30 !important;
+    background-color: var(--bg-surface) !important;
+}
+
+.itr-ledger-row:hover .itr-ledger-cell:first-child,
+.itr-ledger-row:hover .itr-ledger-sticky-id { 
+    background-color: var(--bg-surface) !important; 
+}
+
+.itr-ledger-sticky-actions {
+    position: sticky !important;
+    right: 0 !important;
+    z-index: 20 !important;
+    background-color: var(--bg-surface) !important;
+    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    box-shadow: -4px 0 10px rgba(0, 0, 0, 0.5);
+    flex: none !important;
+    opacity: 1 !important;
+}
+
+.itr-ledger-header .itr-ledger-sticky-actions {
+    z-index: 30 !important;
+    background-color: var(--bg-surface) !important;
+}
+
+.itr-ledger-row:hover .itr-ledger-sticky-actions {
+    background-color: var(--bg-surface) !important;
+}
+
+
+/* Skeleton Styles */
+.itr-skeleton-row { background: transparent !important; }
+
+.itr-skeleton-bar {
+    height: 12px;
+    width: 80%;
+    background: rgba(var(--fg-rgb), 0.05);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+}
+
+.itr-skeleton-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(var(--fg-rgb), 0.05), transparent);
+    animation: itr-shimmer 1.5s infinite;
+}
+
+@keyframes itr-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* Drawer Tabs */
+.drawer-tabs-v4 {
+    display: flex;
+    padding: 0 32px;
+    background: rgba(var(--fg-rgb), 0.01);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    gap: 24px;
+}
+
+.drawer-tab-btn {
+    padding: 14px 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    position: relative;
+    transition: color 0.2s;
+}
+
+.drawer-tab-btn:hover {
+    color: var(--text-muted);
+}
+
+.drawer-tab-btn.active {
+    color: #2eb87a;
+}
+
+.drawer-tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #2eb87a;
+    box-shadow: 0 0 10px rgba(46, 184, 122, 0.5);
+}
+
+.tab-count {
+    background: rgba(46, 184, 122, 0.15);
+    color: #2eb87a;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 10px;
+    margin-left: 6px;
+}
+
+/* Payments Tab Content */
+.payments-tab-content {
+    animation: fadeIn 0.3s ease-out;
+}
+
+.payments-header-v4 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.btn-record-payment-v4 {
+    background: rgba(46, 184, 122, 0.1);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    color: #2eb87a;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-record-payment-v4:hover {
+    background: rgba(46, 184, 122, 0.2);
+    border-color: #2eb87a;
+}
+
+.payments-list-v4 {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.payment-card-v4 {
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-radius: 16px;
+    padding: 16px;
+    transition: border-color 0.2s;
+}
+
+.payment-card-v4:hover {
+    border-color: rgba(var(--fg-rgb), 0.1);
+}
+
+.payment-card-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.payment-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.payment-status-badge {
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.payment-status-badge.paid { background: rgba(46, 184, 122, 0.1); color: #2eb87a; }
+.payment-status-badge.pending { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+.payment-status-badge.partial_paid { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+
+.payment-card-body {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.payment-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.payment-row label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.payment-row span {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.payment-row .amount {
+    color: #2eb87a;
+    font-weight: 700;
+}
+
+.no-payments-v4 {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 0;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.no-payments-v4 p {
+    margin-top: 12px;
+    font-size: 14px;
+}
+
+.tab-loading-v4 {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    gap: 12px;
+    color: var(--text-muted);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.priority-tag-v4 {
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.priority-tag-v4.low { background: rgba(107, 114, 128, 0.1); color: var(--text-muted); }
+.priority-tag-v4.medium { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+.priority-tag-v4.high { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+.priority-tag-v4.urgent { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+
+.id-cell-v4 {
+    font-family: 'JetBrains Mono', monospace;
+    color: #2eb87a;
+    font-weight: 600;
+}
+
+.itr-action-btns {
+    display: flex;
+    gap: 8px;
+}
+
+.itr-action-btn {
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 55px;
+}
+
+.status-pill-v4 {
+    padding: 3px 8px !important;
+    font-size: 9px !important;
+}
+
+.itr-action-btn.track-btn {
+    background: rgba(46, 184, 122, 0.1);
+    border: 1px solid rgba(46, 184, 122, 0.3);
+    color: #2eb87a;
+}
+
+.itr-action-btn.track-btn:hover {
+    background: rgba(46, 184, 122, 0.2);
+    border-color: #2eb87a;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(46, 184, 122, 0.2);
+}
+
+.btn-reset-green-v4 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: rgba(46, 184, 122, 0.08);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    border-radius: 12px;
+    color: #2eb87a;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    margin-right: 8px;
+}
+
+.btn-reset-green-v4:hover {
+    background: rgba(46, 184, 122, 0.15);
+    border-color: #2eb87a;
+    color: #2eb87a;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(46, 184, 122, 0.2);
+}
+
+.itr-action-btn.edit-btn {
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid rgba(var(--fg-rgb), 0.2);
+    color: var(--text-primary);
+}
+
+.itr-action-btn.edit-btn:hover {
+    background: rgba(var(--fg-rgb), 0.1);
+    border-color: var(--text-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.gst-filings-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.gst-modal-card-v4 {
+    position: relative;
+    color-scheme: dark;
+}
+
+/* Income Tax modal: native <select> lists must stay readable (light popup + white text bug) */
+.modal-form-v4 .form-group-v4 select {
+    color-scheme: dark;
+    accent-color: #2eb87a;
+}
+
+.modal-form-v4 .form-group-v4 select option,
+.modal-form-v4 .form-group-v4 select optgroup {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.modal-form-v4 .form-group-v4 select option:checked {
+    background-color: rgba(46, 184, 122, 0.45);
+    color: var(--text-primary);
+}
+
+/* Drawer variant: two-column field grids + scroll (width via .itr-side-drawer-shell) */
+.gst-filters-drawer.itr-income-tax-form-drawer .flex-drawer-form {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.gst-filters-drawer.itr-income-tax-form-drawer .itr-drawer-form-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-top: 8px;
+}
+
+/* Pair fields side-by-side in the wide edit drawer */
+.gst-filters-drawer.itr-income-tax-form-drawer .form-grid-3,
+.gst-filters-drawer.itr-income-tax-form-drawer .form-grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 20px;
+    align-items: start;
+}
+
+/* Single orphaned field in a 2-col grid (e.g. referral phone): use full row */
+.gst-filters-drawer.itr-income-tax-form-drawer .form-grid-2 .form-group-v4:only-child {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 520px) {
+    .gst-filters-drawer.itr-income-tax-form-drawer .form-grid-3,
+    .gst-filters-drawer.itr-income-tax-form-drawer .form-grid-2 {
+        grid-template-columns: 1fr;
+    }
+
+    .gst-filters-drawer.itr-income-tax-form-drawer .form-grid-2 .form-group-v4:only-child {
+        grid-column: auto;
+    }
+}
+
+.gst-filters-drawer.itr-income-tax-form-drawer .itr-drawer-form-footer {
+    display: flex;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.gst-filters-drawer.itr-income-tax-form-drawer .app-drawer-edit-footer {
+    margin-top: auto;
+}
+
+.itr-form-checkbox-wrap {
+    padding: 8px 0 12px;
+}
+
+.itr-actions-cell {
+    cursor: default;
+}
+
+.gst-action-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.itr-actions-cell,
+.itr-ledger-sticky-actions {
+    justify-content: center !important;
+}
+
+.btn-view-action,
+.btn-edit-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-view-action {
+    color: #4a90e2;
+    background: rgba(74, 144, 226, 0.1);
+}
+
+.btn-view-action:hover {
+    background: #4a90e2;
+    color: var(--text-primary);
+    box-shadow: 0 0 10px rgba(74, 144, 226, 0.3);
+}
+
+.btn-edit-action {
+    color: #2eb87a;
+    background: rgba(46, 184, 122, 0.1);
+}
+
+.btn-edit-action:hover {
+    background: #2eb87a;
+    color: var(--text-primary);
+    box-shadow: 0 0 10px rgba(46, 184, 122, 0.3);
+}
+
+.modal-footer-v4 {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 16px !important;
+    justify-content: flex-end !important;
+    align-items: center !important;
+    padding: 24px 32px 32px !important;
+    width: 100% !important;
+}
+
+.modal-footer-v4 button {
+    width: auto !important;
+}
+
+/* --- ITR Details Drawer High-Fidelity Design --- */
+.gst-details-drawer-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+}
+
+.gst-details-drawer-overlay.open {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ITR view/edit drawer width — AppSideDrawer.css (--app-side-drawer-width) */
+
+.modal-v4 {
+    background: var(--bg-surface);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 20px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    animation: modal-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.form-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+}
+
+.form-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.full-width-v4 {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+}
+
+.form-section-group.no-border {
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+}
+
+.modal-body-v4 {
+    padding: 24px 32px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.drawer-header-v4 {
+    padding: 24px 32px;
+    background: rgba(var(--fg-rgb), 0.02);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: relative;
+}
+
+.header-icon-v4 {
+    width: 44px;
+    height: 44px;
+    background: rgba(46, 184, 122, 0.1);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #2eb87a;
+}
+
+.gst-modal-card-v4.wide-modal {
+    max-width: 680px !important; /* Decreased by 15% from 800px */
+}
+
+.gst-modal-card-v4.compact-modal {
+    max-width: 560px !important; /* Decreased by 30% from 800px */
+}
+
+.header-text-v4 h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+
+.modal-form-v4 textarea {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    display: block !important;
+}
+
+.header-text-v4 p {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.btn-close-drawer-v4 {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.2s;
+    padding: 8px;
+    border-radius: 8px;
+}
+
+.btn-close-drawer-v4:hover {
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+}
+
+.drawer-body-v4 {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px;
+}
+
+.details-section-v4 {
+    margin-bottom: 32px;
+}
+
+.section-title-v4 {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #4b5563;
+    letter-spacing: 0.1em;
+    margin-bottom: 16px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
+    padding-bottom: 8px;
+}
+
+.info-grid-v4 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px 24px;
+}
+
+.info-item-v4 label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+}
+
+.info-item-v4 span {
+    font-size: 14px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.info-item-v4 .mono-v4 {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-primary);
+}
+
+.info-item-v4 .amount-v4 {
+    color: #2eb87a;
+    font-weight: 700;
+}
+
+.details-footer-v4 {
+    margin-top: auto;
+    padding-top: 32px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+}
+
+.status-info-v4 label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.status-display-v4 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.status-display-v4.active { color: #2eb87a; }
+.status-display-v4.inactive { color: #ff4d4f; }
+
+.btn-status-toggle-v4 {
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-status-toggle-v4.activate {
+    background: rgba(46, 184, 122, 0.1);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    color: #2eb87a;
+}
+
+.btn-status-toggle-v4.activate:hover {
+    background: rgba(46, 184, 122, 0.2);
+    border-color: #2eb87a;
+}
+
+.btn-status-toggle-v4.deactivate {
+    background: rgba(255, 77, 79, 0.05);
+    border: 1px solid rgba(255, 77, 79, 0.2);
+    color: #ff4d4f;
+}
+
+.btn-status-toggle-v4.deactivate:hover {
+    background: rgba(255, 77, 79, 0.1);
+    border-color: #ff4d4f;
+}
+
+.drawer-loading-box, .drawer-error-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    text-align: center;
+    gap: 16px;
+    color: var(--text-muted);
+}
+
+.drawer-loading-box p { font-size: 14px; }
+.drawer-error-box p { color: #ff4d4f; }
+.drawer-error-box button {
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    color: var(--text-primary);
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+/* Income tax form — readable validation */
+.income-tax-validation-banner {
+    flex-direction: row;
+    gap: 12px;
+    border-left: 4px solid rgba(239, 68, 68, 0.85);
+}
+
+.income-tax-validation-banner__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.income-tax-validation-banner__title {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    line-height: 1.35;
+    color: rgba(255, 235, 235, 0.98);
+}
+
+.income-tax-validation-banner__list {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-primary);
+}
+
+.income-tax-validation-banner__item {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+}
+
+.income-tax-validation-banner__item:last-child {
+    margin-bottom: 0;
+}
+
+.income-tax-validation-banner__field {
+    display: block;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #fca5a5;
+    margin-bottom: 6px;
+}
+
+.income-tax-validation-banner__detail {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.field-hint-v4 {
+    margin: 8px 0 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.field-hint-v4 code {
+    font-size: 11px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(var(--fg-rgb), 0.06);
+    color: rgba(172, 200, 255, 0.95);
+}
+
+/* ── ITR filter + edit drawers: shared width & scroll clearance above footer ── */
+/* ITR filter drawer stays compact; edit drawer uses gst-reg-details-drawer in AppSideDrawer.css */
+
+/*
+ * Native <select> popups misposition when an ancestor uses transform (gst_filings slideInRight).
+ * Use opacity/margin enter instead; dark color-scheme + option colors for readable lists.
+ */
+.gst-main-content.itr-income-tax-page .gst-filters-drawer.itr-side-drawer-shell,
+.gst-main-content.itr-income-tax-page .gst-filters-drawer.itr-filter-drawer--income-tax,
+.gst-main-content.itr-income-tax-page .gst-filters-drawer.itr-income-tax-form-drawer {
+    animation: itrFilterDrawerEnter 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    transform: none !important;
+}
+
+@keyframes itrFilterDrawerEnter {
+    from {
+        opacity: 0;
+        margin-right: -28px;
+    }
+    to {
+        opacity: 1;
+        margin-right: 0;
+    }
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .drawer-content {
+    overflow-x: visible;
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-section-v4,
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-row-v4 {
+    overflow: visible;
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-group-v4 {
+    position: relative;
+    overflow: visible;
+    min-width: 0;
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-group-v4:focus-within {
+    z-index: 40;
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-group-v4 select {
+    width: 100%;
+    box-sizing: border-box;
+    color-scheme: dark;
+    accent-color: #2eb87a;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 40px;
+    cursor: pointer;
+    background-color: rgba(var(--fg-rgb), 0.02);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px;
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-group-v4 select:hover {
+    background-color: rgba(var(--fg-rgb), 0.04);
+    border-color: rgba(var(--fg-rgb), 0.12);
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-group-v4 select:focus {
+    border-color: #2eb87a;
+    background-color: rgba(46, 184, 122, 0.06);
+    outline: none;
+    box-shadow: 0 0 0 1px rgba(46, 184, 122, 0.25);
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-group-v4 select option,
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-group-v4 select optgroup {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.gst-main-content.itr-income-tax-page .gst-filters-drawer .filter-group-v4 select option:checked {
+    background-color: rgba(46, 184, 122, 0.45);
+    color: var(--text-primary);
+}
+
+.gst-filters-drawer.itr-side-drawer-shell > .drawer-content {
+    padding-left: 20px;
+    padding-right: 20px;
+    padding-bottom: 56px;
+    scroll-padding-bottom: 48px;
+    min-height: 0;
+}
+
+.gst-filters-drawer.itr-side-drawer-shell .itr-drawer-form-scroll {
+    padding-left: 20px;
+    padding-right: 20px;
+    padding-bottom: 56px;
+    scroll-padding-bottom: 48px;
+}
+
+.gst-filters-drawer.itr-side-drawer-shell > .drawer-footer,
+.gst-filters-drawer.itr-side-drawer-shell .itr-drawer-form-footer {
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+/* Income Tax filter only: stack Created date From / To full-width */
+.gst-filters-drawer.itr-filter-drawer--income-tax .itr-created-date-row {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.gst-filters-drawer.itr-filter-drawer--income-tax .itr-created-date-row .filter-group-v4 {
+    width: 100%;
+    min-width: 0;
+}
+
+/* ── ITR filter drawer: created date/time (native picker + visible calendar button) ── */
+.gst-filters-drawer .itr-datetime-filter-wrap {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+}
+
+.gst-filters-drawer .itr-datetime-filter-wrap .itr-datetime-filter-input {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    padding-right: 48px !important;
+    color-scheme: dark;
+}
+
+.gst-filters-drawer .itr-datetime-filter-wrap .itr-datetime-filter-input::-webkit-calendar-picker-indicator {
+    display: none;
+    -webkit-appearance: none;
+}
+
+.gst-filters-drawer .itr-datetime-filter-wrap .itr-datetime-picker-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    margin: 0;
+    border: 1px solid rgba(46, 184, 122, 0.35);
+    border-radius: 10px;
+    background: rgba(46, 184, 122, 0.12);
+    color: #3dd494;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.gst-filters-drawer .itr-datetime-filter-wrap .itr-datetime-picker-btn:hover {
+    background: rgba(46, 184, 122, 0.22);
+    border-color: rgba(46, 184, 122, 0.55);
+    color: #52f0b3;
+}
+
+.gst-filters-drawer .itr-datetime-filter-wrap .itr-datetime-picker-btn:focus-visible {
+    outline: 2px solid rgba(46, 184, 122, 0.6);
+    outline-offset: 2px;
+}
+
+.gst-filters-drawer .filter-divider-v4 {
+    height: 1px;
+    background: rgba(var(--fg-rgb), 0.05);
+    margin: 16px 0;
+}
+
+/* Choice panels: financial year & source of income */
+.itr-choice-panel {
+    margin-top: 20px;
+    padding: 18px 20px;
+    border-radius: 16px;
+    background: linear-gradient(145deg, rgba(var(--fg-rgb), 0.04) 0%, rgba(var(--fg-rgb), 0.015) 100%);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    box-shadow: inset 0 1px 0 rgba(var(--fg-rgb), 0.04);
+}
+
+.itr-choice-panel__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.itr-choice-panel__icon {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #2eb87a;
+    background: rgba(46, 184, 122, 0.12);
+    border: 1px solid rgba(46, 184, 122, 0.25);
+}
+
+.itr-choice-panel__icon--wallet {
+    color: #3b82f6;
+    background: rgba(56, 189, 248, 0.1);
+    border-color: rgba(56, 189, 248, 0.22);
+}
+
+.itr-choice-panel__title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 0.02em;
+    text-transform: none;
+}
+
+.itr-choice-panel__subtitle {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.4;
+}
+
+.itr-choice-panel__hint {
+    margin: 14px 0 0;
+    font-size: 11px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.itr-choice-panel__hint code {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(var(--fg-rgb), 0.06);
+    color: var(--text-primary);
+}
+
+/* Financial year pills */
+.itr-ledger-row.inactive-row {
+    opacity: 0.72;
+    background: rgba(239, 68, 68, 0.04);
+}
+
+.itr-ledger-row.inactive-row:hover {
+    opacity: 0.88;
+    background: rgba(239, 68, 68, 0.07);
+}
+
+.itr-ledger-client-cell {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+
+.itr-ledger-client-cell > span:first-child {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.itr-record-status-pill {
+    display: inline-flex;
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.itr-record-status-pill--inactive {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.itr-filter-multi-hint {
+    margin: 0 0 10px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-primary);
+}
+
+.itr-filter-fy-pills {
+    margin-bottom: 4px;
+}
+
+.itr-filter-source-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 420px) {
+    .itr-filter-source-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.itr-fy-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.itr-fy-pill {
+    min-width: 88px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s, color 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+
+.itr-fy-pill:hover {
+    border-color: rgba(46, 184, 122, 0.45);
+    color: var(--text-primary);
+}
+
+.itr-fy-pill.is-selected {
+    border-color: rgba(46, 184, 122, 0.65);
+    background: linear-gradient(135deg, rgba(46, 184, 122, 0.28) 0%, rgba(46, 184, 122, 0.12) 100%);
+    color: #ecfdf5;
+    box-shadow: 0 0 0 1px rgba(46, 184, 122, 0.2), 0 4px 14px rgba(46, 184, 122, 0.15);
+}
+
+.itr-fy-custom-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    align-items: stretch;
+}
+
+.itr-fy-custom-input {
+    flex: 1;
+    min-width: 0;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    background: rgba(0, 0, 0, 0.2);
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.itr-fy-custom-input:focus {
+    border-color: rgba(46, 184, 122, 0.5);
+    box-shadow: 0 0 0 3px rgba(46, 184, 122, 0.12);
+}
+
+.btn-itr-fy-add {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(46, 184, 122, 0.45);
+    background: rgba(46, 184, 122, 0.15);
+    color: #2eb87a;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn-itr-fy-add:hover {
+    background: rgba(46, 184, 122, 0.28);
+    border-color: rgba(46, 184, 122, 0.65);
+    color: var(--text-primary);
+}
+
+.itr-selected-summary {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px dashed rgba(var(--fg-rgb), 0.08);
+}
+
+.itr-selected-summary__label {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.itr-multi-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.itr-multi-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px 5px 12px;
+    border-radius: 999px;
+    background: rgba(46, 184, 122, 0.14);
+    border: 1px solid rgba(46, 184, 122, 0.35);
+    font-size: 12px;
+    font-weight: 600;
+    color: #bbf7d0;
+}
+
+.itr-multi-tag button {
+    border: none;
+    background: rgba(0, 0, 0, 0.2);
+    color: inherit;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background 0.15s;
+}
+
+.itr-multi-tag button:hover {
+    background: rgba(0, 0, 0, 0.35);
+}
+
+/* Source of income tiles */
+.itr-source-panel {
+    margin-bottom: 20px;
+}
+
+.itr-source-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+@media (max-width: 560px) {
+    .itr-source-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.itr-source-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    background: rgba(0, 0, 0, 0.22);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+.itr-source-tile__label {
+    line-height: 1.25;
+}
+
+.itr-source-tile:hover {
+    border-color: rgba(56, 189, 248, 0.4);
+    color: var(--text-primary);
+}
+
+.itr-source-tile.is-selected {
+    border-color: rgba(56, 189, 248, 0.55);
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.22) 0%, rgba(56, 189, 248, 0.08) 100%);
+    color: #e0f2fe;
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.15);
+}
+
+.itr-filing-row {
+    margin-top: 0;
+}
+
+/* Other Sources — custom service entry */
+.itr-other-source-block {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px dashed rgba(56, 189, 248, 0.2);
+}
+
+.itr-other-source-block__label {
+    display: block;
+    margin: 0 0 10px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-primary);
+}
+
+.btn-itr-other-add {
+    border-color: rgba(56, 189, 248, 0.45);
+    background: rgba(56, 189, 248, 0.12);
+    color: #bae6fd;
+}
+
+.btn-itr-other-add:hover {
+    background: rgba(56, 189, 248, 0.22);
+    border-color: rgba(56, 189, 248, 0.6);
+    color: var(--text-primary);
+}
+
+.itr-other-tag {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.35);
+    color: #bae6fd;
+}
+
+.itr-other-source-hint {
+    margin-top: 10px;
+}
+
+.itr-other-source-tags {
+    margin-top: 10px;
+}
+

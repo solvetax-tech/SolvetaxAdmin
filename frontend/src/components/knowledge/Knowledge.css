@@ -1,0 +1,499 @@
+.knowledge-container {
+    padding: 32px;
+    color: var(--text-primary);
+    position: relative;
+    z-index: 1;
+    font-family: var(--font-body);
+}
+
+.knowledge-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 32px;
+}
+
+.header-icon {
+    width: 48px;
+    height: 48px;
+    background: rgba(0, 191, 166, 0.1);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--green-primary);
+}
+
+.header-text h1 {
+    margin: 0;
+    font-size: 32px;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.04em;
+    font-family: var(--font-accent);
+}
+
+.header-text p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin: 4px 0 0 0;
+    font-weight: 500;
+}
+
+.knowledge-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+}
+
+.pricing-card .knowledge-table {
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.5);
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    table-layout: fixed;
+}
+
+.pricing-card .knowledge-table th,
+.pricing-card .knowledge-table td {
+    padding: 12px 14px;
+    vertical-align: top;
+}
+
+.pricing-card .knowledge-table th:nth-child(1),
+.pricing-card .knowledge-table td:nth-child(1) {
+    width: 36%;
+}
+
+.pricing-card .knowledge-table th:nth-child(2),
+.pricing-card .knowledge-table td:nth-child(2) {
+    width: 16%;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.pricing-card .knowledge-table th:nth-child(3),
+.pricing-card .knowledge-table td:nth-child(3) {
+    width: 48%;
+    line-height: 1.35;
+}
+
+.pricing-card .knowledge-table th:nth-child(3) {
+    text-align: center;
+}
+
+.pricing-card .knowledge-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.services-card .services-table {
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.5);
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    table-layout: auto;
+    min-width: 980px;
+}
+
+.services-card .services-table th,
+.services-card .services-table td {
+    padding: 12px 14px;
+    vertical-align: top;
+}
+
+.services-card .services-table th:nth-child(1),
+.services-card .services-table td:nth-child(1) {
+    width: 8%;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.services-card .services-table th:nth-child(2),
+.services-card .services-table td:nth-child(2) {
+    width: 14%;
+    white-space: nowrap;
+}
+
+.services-card .services-table th:nth-child(3),
+.services-card .services-table td:nth-child(3) {
+    width: 20%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    white-space: nowrap;
+}
+
+.services-card .services-table th:nth-child(4),
+.services-card .services-table td:nth-child(4) {
+    width: 24%;
+}
+
+.services-card .services-table th:nth-child(5),
+.services-card .services-table td:nth-child(5) {
+    width: 34%;
+    line-height: 1.35;
+}
+
+.services-card .services-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.designation-card .doc-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.designation-group-item {
+    gap: 10px !important;
+}
+
+.designation-group-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(16, 185, 129, 0.95);
+}
+
+.designation-group-values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.designation-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    background: rgba(16, 185, 129, 0.14);
+    color: #d1fae5;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    transition: all 0.2s ease;
+}
+
+.designation-chip:hover {
+    border-color: rgba(16, 185, 129, 0.55);
+    background: rgba(16, 185, 129, 0.22);
+}
+
+.designation-card .doc-item strong {
+    font-size: 14px;
+}
+
+.designation-card .doc-item p {
+    font-size: 12px;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.designation-card .dot {
+    background-color: #a855f7;
+}
+
+.designation-card .list-wrapper {
+    min-height: 120px;
+}
+
+.knowledge-section {
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-radius: 16px;
+    padding: 24px;
+    backdrop-filter: blur(10px);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.knowledge-section:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+    border-color: rgba(0, 191, 166, 0.2);
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.section-header h2 {
+    font-family: var(--font-accent);
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: -0.02em;
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.section-header svg {
+    color: var(--green-primary);
+}
+
+/* Pricing Card Table */
+.knowledge-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.knowledge-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.1);
+    letter-spacing: 0.05em;
+}
+
+.knowledge-table td {
+    padding: 12px 0;
+    font-size: 14px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+}
+
+.price-value {
+    color: var(--green-primary);
+    font-weight: 600;
+    text-align: right;
+}
+
+/* States Section */
+.state-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.state-tag {
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    padding: 8px 12px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+    color: var(--text-primary);
+}
+
+.state-tag:hover {
+    background: rgba(0, 191, 166, 0.1);
+    border-color: rgba(0, 191, 166, 0.3);
+}
+
+.state-code {
+    color: var(--green-primary);
+    font-weight: 700;
+    font-family: monospace;
+}
+
+/* Docs Section */
+.doc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 8px;
+}
+
+.doc-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(var(--fg-rgb), 0.02);
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+/* Registration/Turnover Dot Indicators */
+.dot {
+    width: 6px;
+    height: 6px;
+    background-color: var(--green-primary);
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* States card specific - remove span 2 to fit the 12-item grid better */
+.states-card {
+    grid-column: auto;
+}
+
+.full-width-section {
+    grid-column: span 2;
+}
+
+.config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 24px;
+    margin-top: 10px;
+}
+
+.config-category-group h3 {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--green-primary);
+    margin-bottom: 16px;
+    letter-spacing: 0.1em;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(0, 191, 166, 0.2);
+}
+
+.config-doc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.config-doc-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--text-primary);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
+}
+
+.doc-bullet {
+    color: var(--green-primary);
+    font-weight: bold;
+}
+
+.mandatory-tag {
+    margin-left: auto;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.mandatory .doc-name {
+    font-weight: 500;
+}
+
+/* Loading/Error States */
+.knowledge-loading,
+.knowledge-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 400px;
+    gap: 16px;
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px dashed rgba(var(--fg-rgb), 0.1);
+    border-radius: 20px;
+    color: var(--text-secondary);
+}
+
+.no-data-msg {
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-style: italic;
+    padding: 16px;
+    text-align: center;
+    opacity: 0.7;
+}
+
+.spinner {
+    animation: spin 2s linear infinite;
+    color: var(--green-primary);
+}
+
+.btn-retry {
+    padding: 8px 20px;
+    background: var(--green-primary);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (max-width: 900px) {
+    .knowledge-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .states-card {
+        grid-column: span 1;
+    }
+}
+
+.filing-table {
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.5);
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    table-layout: auto;
+    min-width: 900px;
+}
+
+.filing-table th,
+.filing-table td {
+    padding: 12px 14px;
+    vertical-align: top;
+}
+
+.filing-table th {
+    color: var(--green-primary);
+    border-bottom: 1px solid rgba(0, 191, 166, 0.2);
+}
+
+.filing-table th:nth-child(1),
+.filing-table td:nth-child(1) {
+    width: 15%;
+}
+
+.filing-table th:nth-child(2),
+.filing-table td:nth-child(2) {
+    width: 20%;
+}
+
+.filing-table th:nth-child(3),
+.filing-table td:nth-child(3) {
+    width: 35%;
+}
+
+.filing-table th:nth-child(4),
+.filing-table td:nth-child(4) {
+    width: 15%;
+}
+
+.filing-table th:nth-child(5),
+.filing-table td:nth-child(5) {
+    width: 15%;
+}

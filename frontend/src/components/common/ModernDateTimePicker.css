@@ -1,0 +1,298 @@
+.modern-dt-picker {
+    position: relative;
+    width: 100%;
+    user-select: none;
+}
+
+.dt-input {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 12px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+.dt-input:hover {
+    background: rgba(var(--fg-rgb), 0.05);
+    border-color: rgba(var(--fg-rgb), 0.2);
+}
+
+.dt-input.active {
+    border-color: var(--accent-color, #2eb87a);
+    box-shadow: 0 0 0 4px rgba(46, 184, 122, 0.1);
+    background: rgba(var(--fg-rgb), 0.05);
+}
+
+.dt-icon {
+    color: var(--accent-color, #2eb87a);
+    opacity: 0.8;
+}
+
+.dt-value {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    flex: 1;
+}
+
+.dt-value.placeholder {
+    color: var(--text-primary);
+}
+
+.dt-clear {
+    color: var(--text-primary);
+    transition: color 0.2s;
+    padding: 4px;
+    margin: -4px;
+}
+
+.dt-clear:hover {
+    color: #ef4444;
+}
+
+/* POPOVER STYLE (portaled — avoids drawer/modal overflow clipping) */
+.dt-popover--portal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 280px;
+    background: rgba(var(--bg-rgb), 0.98);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 20px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6),
+        inset 0 1px 1px rgba(var(--fg-rgb), 0.05);
+    padding: 20px;
+    z-index: 25000;
+    max-height: min(440px, calc(100vh - 16px));
+    overflow-x: hidden;
+    overflow-y: auto;
+    animation: slideUpIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideUpIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* CALENDAR SECTION */
+.calendar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.calendar-header span {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.nav-btn {
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.nav-btn:hover {
+    background: rgba(46, 184, 122, 0.1);
+    color: var(--accent-color, #2eb87a);
+    border-color: rgba(46, 184, 122, 0.2);
+}
+
+.calendar-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    text-align: center;
+    margin-bottom: 12px;
+}
+
+.calendar-weekdays span {
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+}
+
+.calendar-day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-family: inherit;
+}
+
+.calendar-day.disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+}
+
+.calendar-day:hover:not(.empty):not(.disabled) {
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+}
+
+.calendar-day.today {
+    color: var(--accent-color, #2eb87a);
+    background: rgba(46, 184, 122, 0.15);
+}
+
+.calendar-day.selected {
+    background: var(--accent-color, #2eb87a) !important;
+    color: var(--bg-app) !important;
+    font-weight: 800;
+    box-shadow: 0 4px 12px rgba(46, 184, 122, 0.4);
+}
+
+/* TIME SECTION */
+.time-section {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.time-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent-color, #2eb87a);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.time-selectors {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.time-selectors--12h .custom-select {
+    flex: 1;
+    min-width: 0;
+}
+
+.time-selectors--12h .custom-select:last-child {
+    flex: 0 0 72px;
+}
+
+.time-sep {
+    color: var(--text-primary);
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.today-btn {
+    width: 100%;
+    background: rgba(46, 184, 122, 0.1);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    color: var(--accent-color, #2eb87a);
+    padding: 8px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.today-btn:hover {
+    background: var(--accent-color, #2eb87a);
+    color: var(--bg-app);
+}
+
+.dt-popover-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.08);
+}
+
+.dt-footer-btn {
+    flex: 1;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.dt-footer-btn--clear {
+    background: transparent;
+    color: var(--text-primary);
+}
+
+.dt-footer-btn--clear:hover {
+    color: var(--text-primary);
+    background: rgba(var(--fg-rgb), 0.06);
+}
+
+.dt-footer-btn--today {
+    background: rgba(var(--fg-rgb), 0.06);
+    color: var(--text-primary);
+}
+
+.dt-footer-btn--today:hover {
+    background: rgba(var(--fg-rgb), 0.1);
+    color: var(--text-primary);
+}
+
+.dt-footer-btn--done {
+    background: var(--accent-color, #2eb87a);
+    color: var(--bg-app);
+}
+
+.dt-footer-btn--done:hover {
+    filter: brightness(1.05);
+}
+
+.modern-dt-picker--crm .dt-input {
+    min-height: 42px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 14px;
+}
+
+.modern-dt-picker--error .dt-input {
+    border-color: rgba(248, 113, 113, 0.6);
+}

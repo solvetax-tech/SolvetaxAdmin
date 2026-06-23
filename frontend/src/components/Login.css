@@ -1,0 +1,350 @@
+.login-page {
+  width: 100%;
+  height: 100vh;
+  background-color: #0a0a0c; /* Deep obsidian black */
+  display: flex;
+  flex-direction: column; /* Stack logo and container */
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  gap: 32px; /* Space between logo and container */
+}
+
+.login-logo-external {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 36px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.03em;
+  z-index: 10;
+  animation: fadeInDown 0.8s ease-out;
+}
+
+.login-logo-external span {
+  color: #10b981;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Background Orbs - More vibrant on dark */
+.login-page .bg-orb {
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  filter: blur(120px);
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.15;
+  animation: orb-float 20s infinite alternate ease-in-out;
+}
+
+.login-page .orb-1 {
+  top: -200px;
+  right: -100px;
+  background: radial-gradient(circle, #10b981, transparent 70%); /* Emerald primary */
+}
+
+.login-page .orb-2 {
+  bottom: -100px;
+  left: -100px;
+  background: radial-gradient(circle, #059669, transparent 70%);
+  animation-delay: -10s;
+}
+
+@keyframes orb-float {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(100px, 50px) scale(1.1); }
+}
+
+.login-container {
+  width: 100%;
+  max-width: 420px;
+  padding: 48px 40px;
+  background: rgba(255, 255, 255, 0.03); /* Extremely subtle white */
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-radius: 28px;
+  box-shadow: 
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    0 1px 1px rgba(255, 255, 255, 0.05) inset;
+  border: 1px solid rgba(16, 185, 129, 0.2); /* Emerald-tinted border */
+  font-family: var(--font-accent);
+  position: relative;
+  overflow: hidden;
+  z-index: 10;
+  animation: fadeInUp 0.8s ease-out;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.centerText {
+  text-align: center;
+  margin-bottom: 36px;
+}
+
+.centerText h2 {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+
+.centerText p {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+}
+
+.input-group {
+  margin-bottom: 24px;
+}
+
+.input-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff !important;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  margin-left: 4px;
+  opacity: 1 !important;
+}
+
+.input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.input-icon {
+  position: absolute;
+  left: 16px;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #10b981 !important; /* SolveTax Primary Green */
+  pointer-events: none;
+  z-index: 10;
+  transition: all 0.3s ease;
+  opacity: 1 !important;
+}
+
+.input-icon svg {
+  stroke: #10b981 !important;
+  filter: drop-shadow(0 0 5px rgba(16, 185, 129, 0.4));
+}
+
+.form input {
+  width: 100%;
+  height: 52px;
+  padding: 0 18px 0 48px !important;
+  font-family: inherit;
+  font-size: 15px;
+  color: #fff !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important; /* Premium green border */
+  border-radius: 14px;
+  outline: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  display: block;
+}
+
+.form input::placeholder {
+  color: rgba(255, 255, 255, 0.6) !important; /* Clear off-white */
+}
+
+/* Fix for browser autofill issues */
+.login-page .input-wrapper input:-webkit-autofill,
+.login-page .input-wrapper input:-webkit-autofill:hover,
+.login-page .input-wrapper input:-webkit-autofill:focus,
+.login-page .input-wrapper input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #1a1a1c inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.form input:focus {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1) !important;
+}
+
+.form input:focus ~ .input-icon {
+  color: #10b981;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 16px;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  background: none;
+  border: none;
+  color: #10b981 !important; /* SolveTax Primary Green */
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+  padding: 8px;
+  height: 40px;
+  width: 40px;
+  opacity: 1 !important;
+}
+
+.password-toggle svg {
+  stroke: #10b981 !important;
+}
+
+.password-toggle:hover {
+  color: #34d399 !important;
+  opacity: 1 !important;
+  transform: translateY(-50%) scale(1.1);
+}
+
+.password-toggle:hover svg {
+  stroke: #34d399 !important;
+}
+
+.forgot-password-link {
+  background: none;
+  border: none;
+  color: #10b981;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: all 0.2s ease;
+  border-radius: 6px;
+}
+
+.forgot-password-link:hover {
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+}
+
+.form button[type='submit'] {
+  width: 100%;
+  margin-top: 24px;
+  padding: 16px;
+  font-family: var(--font-accent);
+  font-size: 16px;
+  font-weight: 700;
+  background: #10b981;
+  color: #000;
+  border: none;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 10px 20px rgba(16, 185, 129, 0.2);
+}
+
+.form button[type='submit']:hover:not(:disabled) {
+  background: #34d399;
+  transform: translateY(-2px);
+  box-shadow: 0 15px 30px rgba(16, 185, 129, 0.3);
+}
+
+.form button[type='submit']:active {
+  transform: translateY(0);
+}
+
+.form button[type='submit']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+.back-to-login {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 12px;
+  transition: all 0.2s ease;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.back-to-login:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.forgot-footer {
+  text-align: center;
+  margin-top: 12px;
+}
+
+/* Auth Banners */
+.auth-error-banner {
+  color: #ff4d4d;
+  text-align: center;
+  margin-bottom: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255, 77, 77, 0.1);
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 77, 77, 0.2);
+  animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+.auth-success-banner {
+  color: #10b981;
+  text-align: center;
+  margin-bottom: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+/* Reset Password Modal Specific Adjustments */
+.login-container.reset-password-mode {
+  max-width: 483px; /* 15% increase from 420px */
+  padding: 27px 40px; /* Further 20% reduction from 34px */
+}
+
+.login-container.reset-password-mode .centerText {
+  margin-bottom: 20px; /* Further 20% reduction from 25px */
+}
+
+.login-container.reset-password-mode .input-group {
+  margin-bottom: 13px; /* Further 20% reduction from 16px */
+}
+
+.login-container.reset-password-mode .form button[type='submit'] {
+  margin-top: 13px; /* Further 20% reduction from 16px */
+}
+
+@keyframes shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0); }
+  20%, 80% { transform: translate3d(2px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+  40%, 60% { transform: translate3d(4px, 0, 0); }
+}

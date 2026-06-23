@@ -1,0 +1,633 @@
+:root {
+  /* ============================================================
+   * THEME TOKENS — dark is the default. Light overrides live in
+   * :root[data-theme="light"] below. Component CSS should read
+   * these tokens instead of hardcoding colors.
+   * ============================================================ */
+
+  /* Foreground channel: drives every rgba(var(--fg-rgb), a) used for text,
+   * borders, dividers and subtle washes. White on dark, deep-green on light,
+   * so all alpha variants flip automatically between themes. */
+  --fg-rgb: 255, 255, 255;
+  /* Background channel: drives rgba(var(--bg-rgb), a) translucent surfaces
+   * (top bars, glass panels). Near-black on dark, white on light. */
+  --bg-rgb: 15, 15, 15;
+
+  /* Surfaces */
+  --bg-app: #050505;
+  --bg-app-2: #0a0a0a;
+  --bg-surface: #141414;
+  --bg-surface-2: #1a1a1a;
+  --bg-elevated: #1f1f1f;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: rgba(255, 255, 255, 0.08);
+  --bg-input: rgba(255, 255, 255, 0.04);
+  --bg-overlay: rgba(5, 5, 5, 0.85);
+
+  /* Text — maximum contrast: pure white in dark */
+  --text-primary: #ffffff;
+  --text-secondary: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.85);
+  --text-faint: rgba(255, 255, 255, 0.65);
+  --text-inverse: #0d3d2b;
+
+  /* Borders */
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+
+  /* Brand + semantic (kept consistent across themes) */
+  --accent: #2eb87a;
+  --accent-strong: #1a6644;
+  --accent-deep: #0d3d2b;
+  --accent-soft: rgba(46, 184, 122, 0.15);
+  --success: #2eb87a;
+  --success-soft: rgba(46, 184, 122, 0.15);
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.15);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.15);
+  --info: #3b82f6;
+  --info-soft: rgba(59, 130, 246, 0.15);
+
+  /* Effects */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.6);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+  --scrollbar-track: #050505;
+
+  /* Legacy aliases (kept so existing var() refs still resolve) */
+  --bg-cream: #f7f4ef;
+  --green-deep: #0d3d2b;
+  --green-mid: #1a6644;
+  --green-primary: #2eb87a;
+  --green-soft: #e8f5ef;
+  --text-main: var(--text-primary);
+  --border-light: var(--border);
+  --bg-dark: var(--bg-app);
+
+  /* Font Families */
+  --font-body: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
+  --font-heading: 'Playfair Display', serif;
+  --font-accent: 'Plus Jakarta Sans', 'DM Sans', sans-serif;
+}
+
+/* ============================================================
+ * LIGHT THEME — SolveTax brand: cream/white surfaces,
+ * deep-green text, mint accent. Only surfaces/text/borders/
+ * shadows flip; brand + semantic hues stay the same.
+ * ============================================================ */
+:root[data-theme="light"] {
+  /* Marketing-site light theme: soft mint surfaces + deep navy-teal ink.
+     Foreground ink (deep navy-teal) is dark enough to read like near-black
+     but carries the brand undertone seen on solvetax.in. */
+  --fg-rgb: 11, 42, 51;
+  --bg-rgb: 255, 255, 255;
+
+  --bg-app: #e9f6f0;
+  --bg-app-2: #ddefe7;
+  --bg-surface: #ffffff;
+  --bg-surface-2: #f3faf7;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(11, 42, 51, 0.05);
+  --bg-active: rgba(11, 42, 51, 0.08);
+  --bg-input: #ffffff;
+  --bg-overlay: rgba(11, 42, 51, 0.35);
+
+  --text-primary: #0b2a33;
+  --text-secondary: rgba(11, 42, 51, 0.92);
+  --text-muted: rgba(11, 42, 51, 0.7);
+  --text-faint: rgba(11, 42, 51, 0.52);
+  --text-inverse: #ffffff;
+
+  --border: rgba(11, 42, 51, 0.12);
+  --border-strong: rgba(11, 42, 51, 0.22);
+  --border-subtle: rgba(11, 42, 51, 0.07);
+
+  --accent-soft: rgba(46, 184, 122, 0.12);
+  --success-soft: rgba(46, 184, 122, 0.12);
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --warning-soft: rgba(245, 158, 11, 0.14);
+  --info-soft: rgba(59, 130, 246, 0.12);
+
+  --shadow-sm: 0 2px 8px rgba(11, 42, 51, 0.08);
+  --shadow-md: 0 8px 24px rgba(11, 42, 51, 0.1);
+  --shadow-lg: 0 20px 60px rgba(11, 42, 51, 0.15);
+  --scrollbar-thumb: rgba(11, 42, 51, 0.2);
+  --scrollbar-track: #ddefe7;
+
+  --text-main: var(--text-primary);
+  --border-light: var(--border);
+  --bg-dark: var(--bg-app);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: inherit;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  /* Match dashboard shell — marketing pages override on their root (e.g. .homepage-container) */
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* ── Modern Custom Scrollbar ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 10px;
+  border: 2px solid var(--scrollbar-track);
+  transition: all 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  box-shadow: 0 0 15px var(--accent);
+}
+
+/* Firefox Support */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+#root {
+  width: 100%;
+  min-height: 100%;
+  background-color: inherit;
+}
+
+/* Premium "Line-Drawing" Loading Overlay - The Masterpiece Refined */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-overlay);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+/* Ensure parents are relative for the absolute overlay */
+.dashboard-container-v2,
+.employee-tab-v2,
+.gst-sidebar-layout,
+.login-page {
+  position: relative;
+}
+
+.loading-content-v3 {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  animation: content-float 4s ease-in-out infinite;
+}
+
+@keyframes content-float {
+
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-15px) scale(1.01);
+  }
+}
+
+/* Premium Glassmorphism Status Badges */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  border-radius: 50px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  transition: all 0.3s ease;
+  min-width: 50px;
+  height: 22px;
+}
+
+.status-badge.active {
+  background: rgba(46, 184, 122, 0.15);
+  color: #2eb87a;
+  border-color: rgba(46, 184, 122, 0.3);
+  box-shadow: 0 4px 15px rgba(46, 184, 122, 0.1);
+}
+
+.status-badge.inactive {
+  background: rgba(244, 67, 54, 0.15);
+  color: #f44336;
+  border-color: rgba(244, 67, 54, 0.3);
+  box-shadow: 0 4px 15px rgba(244, 67, 54, 0.1);
+}
+
+.status-badge:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+}
+
+.drawing-container {
+  width: 100px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.drawing-svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 25px rgba(46, 184, 122, 0.4));
+}
+
+.draw-path {
+  fill: none;
+  stroke: var(--green-primary);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+}
+
+/* Individualized Dash Arrays for Smoothness - Speed Up */
+.draw-path.frame {
+  stroke-dasharray: 280;
+  stroke-dashoffset: 280;
+  animation: draw-sequence 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.draw-path.corner {
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: draw-sequence 2s cubic-bezier(0.4, 0, 0.2, 1) infinite 0.2s;
+}
+
+.draw-path.line.l1 {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: draw-sequence 2s cubic-bezier(0.4, 0, 0.2, 1) infinite 0.5s;
+}
+
+.draw-path.line.l2 {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: draw-sequence 2s cubic-bezier(0.4, 0, 0.2, 1) infinite 0.6s;
+}
+
+.draw-path.line.l3 {
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: draw-sequence 2s cubic-bezier(0.4, 0, 0.2, 1) infinite 0.7s;
+}
+
+.draw-path.check {
+  stroke: #ffffff;
+  stroke-width: 3.5;
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: draw-sequence 2s cubic-bezier(0.4, 0, 0.2, 1) infinite 0.9s;
+  filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.7));
+}
+
+@keyframes draw-sequence {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: inherit;
+  }
+
+  5% {
+    opacity: 1;
+    stroke-dashoffset: inherit;
+  }
+
+  50%,
+  80% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+.loading-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--green-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 15px var(--green-primary);
+  animation: status-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+.loading-text-v3 {
+  color: #fff;
+  font-family: var(--font-accent);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.ambient-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.glow-mesh {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, rgba(46, 184, 122, 0.08) 0%, transparent 70%);
+  filter: blur(80px);
+  animation: mesh-breathing 5s ease-in-out infinite alternate;
+}
+
+@keyframes mesh-breathing {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.5;
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(1.4);
+    opacity: 1;
+  }
+}
+
+.loading-text-v2 {
+  color: #fff;
+  font-family: var(--font-accent);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.8;
+  animation: pulse-text 2s ease-in-out infinite;
+}
+
+@keyframes pulse-text {
+
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.98);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.loading-shimmer-bar {
+  width: 120px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--green-primary), transparent);
+  border-radius: 2px;
+  animation: shimmer-load 2s infinite;
+}
+
+@keyframes shimmer-load {
+  0% {
+    transform: translateX(-150%);
+  }
+
+  100% {
+    transform: translateX(150%);
+  }
+}
+
+.loading-background-blobs {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.blob {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(46, 184, 122, 0.08) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(60px);
+}
+
+.blob.b1 {
+  top: -10%;
+  left: -10%;
+  animation: blob-move 15s infinite alternate;
+}
+
+.blob.b2 {
+  bottom: -10%;
+  right: -10%;
+  animation: blob-move 12s infinite alternate-reverse;
+}
+
+@keyframes blob-move {
+  0% {
+    transform: translate(0, 0);
+  }
+
+  100% {
+    transform: translate(100px, 50px);
+  }
+}
+
+/* Responsive adjustments for loading overlay */
+@media (max-width: 600px) {
+  .spinner {
+    width: 40px;
+    height: 40px;
+    border-width: 3px;
+  }
+
+  .loading-text {
+    font-size: 14px;
+  }
+}
+/* ── Tooltip Component ── */
+.warning-tooltip {
+  position: relative;
+  cursor: help;
+}
+
+.warning-tooltip:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 125%;
+  right: 0;
+  width: 220px;
+  background: rgba(10, 10, 10, 0.95);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  border: 1px solid rgba(255, 179, 0, 0.2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  z-index: 1000;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+  animation: tooltip-fade-in 0.2s ease-out;
+  text-transform: none;
+  font-weight: 400;
+}
+
+@keyframes tooltip-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+ * LIGHT THEME on-accent text. Primary/action buttons keep their
+ * solid mint/green backgrounds, so their label must stay white
+ * (not the deep-green --text-primary the codemod applied).
+ * ============================================================ */
+:root[data-theme="light"] .btn-primary,
+:root[data-theme="light"] .btn-primary-v3,
+:root[data-theme="light"] .btn-primary-v4,
+:root[data-theme="light"] .btn-primary-glow,
+:root[data-theme="light"] .btn-action-primary,
+:root[data-theme="light"] .btn-save-v4,
+:root[data-theme="light"] .btn-apply-v4,
+:root[data-theme="light"] .btn-submit-v4,
+:root[data-theme="light"] .btn-confirm-activate,
+:root[data-theme="light"] .btn-confirmation-confirm,
+:root[data-theme="light"] .btn-create-filing,
+:root[data-theme="light"] .btn-create-team,
+:root[data-theme="light"] .gst-btn-primary,
+:root[data-theme="light"] .cp-btn-primary,
+:root[data-theme="light"] .btn-add-employee-minimal,
+:root[data-theme="light"] .pay-btn,
+:root[data-theme="light"] .btn-pay,
+:root[data-theme="light"] .premium-pay-btn {
+  color: #ffffff;
+}
+
+:root[data-theme="light"] .btn-primary svg,
+:root[data-theme="light"] .btn-primary-glow svg,
+:root[data-theme="light"] .btn-action-primary svg,
+:root[data-theme="light"] .btn-save-v4 svg,
+:root[data-theme="light"] .btn-apply-v4 svg,
+:root[data-theme="light"] .btn-submit-v4 svg,
+:root[data-theme="light"] .btn-confirm-activate svg,
+:root[data-theme="light"] .btn-confirmation-confirm svg,
+:root[data-theme="light"] .gst-btn-primary svg,
+:root[data-theme="light"] .cp-btn-primary svg {
+  color: #ffffff;
+}
+
+/* ============================================================
+ * Light-mode surface repaints for sections that still carry a
+ * hardcoded dark background (leftovers from the dark-only build).
+ * Scoped to light only, so dark mode is unchanged. This keeps the
+ * near-black text readable instead of sitting on a dark card.
+ * ============================================================ */
+
+/* Dashboard / follow-up KPI stat cards (were charcoal gradient) */
+:root[data-theme="light"] .stat-card-premium {
+  background: linear-gradient(135deg, #ffffff 0%, #f2efe8 100%);
+  border-color: rgba(17, 17, 17, 0.1);
+  box-shadow: 0 6px 18px rgba(17, 17, 17, 0.06);
+}
+:root[data-theme="light"] .stat-card-premium:hover {
+  background: linear-gradient(135deg, #ffffff 0%, #ecefec 100%);
+  border-color: rgba(17, 17, 17, 0.16);
+}
+
+/* CRM knowledge glass panels (were dark navy) */
+:root[data-theme="light"] {
+  --crm-bg-glass: rgba(255, 255, 255, 0.88);
+}
+
+/* Marketing-style mint -> white gradient backdrop for the app shells
+   (matches the solvetax.in light look). Cards/panels keep white surfaces. */
+:root[data-theme="light"] .dashboard-layout-wrapper,
+:root[data-theme="light"] .dashboard-main,
+:root[data-theme="light"] .crm-layout-wrapper,
+:root[data-theme="light"] .crm-main {
+  background: linear-gradient(135deg, #dff1ea 0%, #e9f6f0 30%, #f4fbf8 65%, #ffffff 100%);
+}

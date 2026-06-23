@@ -1,0 +1,349 @@
+.cs-leads-page {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+}
+
+.cs-leads-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.cs-leads-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.cs-leads-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    background: rgba(var(--fg-rgb), 0.03);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cs-leads-tab:hover {
+    background: rgba(var(--fg-rgb), 0.06);
+    color: var(--text-primary);
+}
+
+.cs-leads-tab.is-active {
+    background: rgba(46, 184, 122, 0.12);
+    border-color: rgba(46, 184, 122, 0.45);
+    color: #2eb87a;
+}
+
+.cs-leads-tab--referral.is-active {
+    border-color: rgba(139, 92, 246, 0.45);
+    color: #8b5cf6;
+    background: rgba(139, 92, 246, 0.1);
+}
+
+.cs-leads-tab-count {
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.cs-leads-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.cs-leads-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cs-leads-filter-field label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-primary);
+}
+
+.cs-leads-filter-field input,
+.cs-leads-filter-field select {
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--text-primary);
+    font-size: 13px;
+    min-width: 130px;
+}
+
+.cs-leads-grid {
+    display: grid !important;
+    grid-template-columns:
+        minmax(50px, 0.35fr)
+        minmax(150px, 0.9fr)
+        minmax(100px, 0.65fr)
+        minmax(190px, 1.15fr)
+        minmax(150px, 0.95fr)
+        minmax(100px, 0.65fr)
+        minmax(80px, 0.45fr)
+        minmax(80px, 0.45fr)
+        minmax(70px, 0.4fr)
+        minmax(64px, 0.3fr);
+    width: 100% !important;
+    min-width: 1240px !important;
+}
+
+.cs-leads-grid--referral {
+    grid-template-columns:
+        minmax(50px, 0.35fr)
+        minmax(150px, 0.9fr)
+        minmax(100px, 0.65fr)
+        minmax(110px, 0.65fr)
+        minmax(190px, 1.1fr)
+        minmax(150px, 0.95fr)
+        minmax(100px, 0.65fr)
+        minmax(80px, 0.45fr)
+        minmax(80px, 0.45fr)
+        minmax(70px, 0.4fr)
+        minmax(64px, 0.3fr);
+    min-width: 1360px !important;
+}
+
+.cs-leads-grid .filings-ledger-cell {
+    min-width: 0;
+}
+
+.cs-leads-grid .filings-ledger-cell:nth-child(2),
+.cs-leads-grid .filings-ledger-cell:nth-child(4) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cs-status-pill {
+    display: inline-flex;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.cs-status-pill.resolved {
+    background: rgba(46, 184, 122, 0.15);
+    color: #2eb87a;
+}
+
+.cs-status-pill.open {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+}
+
+.cs-row-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid rgba(46, 184, 122, 0.25);
+    background: rgba(46, 184, 122, 0.08);
+    color: #2eb87a;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cs-row-action:hover {
+    background: rgba(46, 184, 122, 0.18);
+    border-color: rgba(46, 184, 122, 0.45);
+    color: #2eb87a;
+}
+
+/* Contact/Referral edit opens as a right drawer */
+.cs-leads-page .premium-filter-overlay {
+    align-items: stretch;
+    justify-content: flex-end;
+    padding: 0;
+}
+
+.cs-leads-page .premium-edit-modal-v4 {
+    width: min(640px, 92vw) !important;
+    max-width: 640px !important;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 16px 0 0 16px;
+    animation: none;
+    transform: translateX(100%);
+    transition: transform 0.28s ease;
+}
+
+.cs-leads-page .premium-filter-overlay.show .premium-edit-modal-v4 {
+    transform: translateX(0);
+}
+
+.cs-leads-page .premium-edit-modal-v4 .edit-modal-body-v4 {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 24px 28px 16px;
+}
+
+.cs-leads-page .input-group-v4 textarea {
+    width: 100%;
+    min-height: 96px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    color: var(--text-primary);
+    padding: 12px 14px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.45;
+    outline: none;
+    resize: vertical;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
+}
+
+.cs-leads-page .input-group-v4 textarea::placeholder {
+    color: var(--text-primary);
+}
+
+.cs-leads-page .input-group-v4 textarea:hover {
+    border-color: rgba(var(--fg-rgb), 0.2);
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.cs-leads-page .input-group-v4 textarea:focus {
+    border-color: #2eb87a;
+    background: rgba(0, 0, 0, 0.5);
+    box-shadow:
+        0 0 0 4px rgba(46, 184, 122, 0.1),
+        inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.cs-multi-chip-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.cs-chip-btn {
+    border: 1px solid rgba(var(--fg-rgb), 0.12);
+    background: rgba(var(--fg-rgb), 0.04);
+    color: var(--text-primary);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.cs-chip-btn.is-active {
+    border-color: rgba(46, 184, 122, 0.45);
+    background: rgba(46, 184, 122, 0.16);
+    color: #c6f6de;
+}
+
+.cs-ref-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.cs-ref-input-row .btn-clear-v2 {
+    min-width: 62px;
+}
+
+.cs-chip-list {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.cs-list-view-btn {
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    background: rgba(56, 189, 248, 0.12);
+    color: #bfefff;
+    border-radius: 7px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.cs-list-view-btn.is-open {
+    border-color: rgba(14, 165, 233, 0.6);
+    background: rgba(14, 165, 233, 0.2);
+}
+
+.cs-inline-preview-row {
+    background: rgba(var(--bg-rgb), 0.85);
+}
+
+.cs-inline-preview-cell {
+    grid-column: 1 / -1;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.06);
+    padding: 10px 12px !important;
+}
+
+.cs-inline-preview-title {
+    font-size: 12px;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.cs-inline-preview-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.cs-sticky-drawer-footer {
+    position: sticky;
+    bottom: 0;
+    background: rgba(var(--bg-rgb), 0.96);
+    border-top: 1px solid rgba(var(--fg-rgb), 0.08);
+    margin-top: 8px;
+    padding-top: 12px;
+}
+
+.cs-chip-tag {
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    background: rgba(99, 102, 241, 0.14);
+    color: #d6dcff;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.cs-chip-tag span {
+    opacity: 0.7;
+    margin-left: 6px;
+}
+
+.cs-chip-tag.static {
+    cursor: default;
+}
+
+.cs-chip-empty {
+    color: var(--text-primary);
+    font-size: 12px;
+}

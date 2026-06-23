@@ -1,0 +1,386 @@
+/* --- Payments page layout (aligned with Customer Services) --- */
+.payments-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    background: transparent;
+    overflow: visible;
+    flex: 0 0 auto;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.payments-container .gst-action-bar-v2 {
+    margin-bottom: 8px;
+    padding: 0;
+    gap: 10px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Skeleton Loading (Unified Style) --- */
+.skeleton-pulse-v2 {
+    position: relative;
+    overflow: hidden;
+    background: rgba(var(--fg-rgb), 0.05);
+    border-radius: 4px;
+}
+
+.skeleton-pulse-v2::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(var(--fg-rgb), 0.08),
+        transparent
+    );
+    animation: skeleton-sweep-v2 1.5s infinite;
+}
+
+@keyframes skeleton-sweep-v2 {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.skeleton-item-v2 {
+    height: 12px;
+    background: rgba(var(--fg-rgb), 0.05);
+    border-radius: 4px;
+    width: 100%;
+}
+
+.skeleton-row-v2 {
+    height: 56px;
+}
+
+.skeleton-row-v2 .payments-ledger-cell {
+    padding: 0 16px;
+}
+
+/* --- Status Badge Fixes (Aligned with Global Glassmorphism) --- */
+.status-badge-v4 {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: 50px;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    transition: all 0.3s ease;
+    min-width: 60px;
+    height: 18px;
+}
+
+.status-badge-v4.paid, 
+.status-badge-v4.active {
+    background: rgba(46, 184, 122, 0.15);
+    color: #2eb87a;
+    border-color: rgba(46, 184, 122, 0.3);
+    box-shadow: 0 2px 10px rgba(46, 184, 122, 0.1);
+}
+
+.status-badge-v4.pending {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border-color: rgba(245, 158, 11, 0.3);
+    box-shadow: 0 2px 10px rgba(245, 158, 11, 0.1);
+}
+
+.status-badge-v4.failed,
+.status-badge-v4.inactive {
+    background: rgba(244, 63, 94, 0.15);
+    color: #ef4444;
+    border-color: rgba(244, 63, 94, 0.3);
+    box-shadow: 0 2px 10px rgba(244, 63, 94, 0.1);
+}
+
+.status-badge-v4.partial-paid {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+    border-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 2px 10px rgba(59, 130, 246, 0.1);
+}
+
+/* --- Grid Table Structure for Payments --- */
+.payments-ledger-container {
+    --pay-col-1: 70px;   /* ID */
+    --pay-col-2: 100px;  /* Customer ID */
+    --pay-col-3: 100px;  /* Entity ID */
+    --pay-col-4: 150px;  /* Type */
+    --pay-col-5: 110px;  /* Amount */
+    --pay-col-6: 100px;  /* Discount */
+    --pay-col-7: 110px;  /* Net */
+    --pay-col-8: 110px;  /* Paid */
+    --pay-col-9: 110px;  /* Remaining */
+    --pay-col-10: 160px; /* Date */
+    --pay-col-11: 120px; /* Status */
+    --pay-col-12: 120px; /* Follow-up */
+    --pay-col-13: 90px;  /* Active */
+    --pay-col-14: 88px;  /* Actions (sticky right) */
+    --pay-total-width: calc(
+        var(--pay-col-1) + var(--pay-col-2) + var(--pay-col-3) +
+        var(--pay-col-4) + var(--pay-col-5) + var(--pay-col-6) +
+        var(--pay-col-7) + var(--pay-col-8) + var(--pay-col-9) +
+        var(--pay-col-10) + var(--pay-col-11) + var(--pay-col-12) +
+        var(--pay-col-13) + var(--pay-col-14)
+    );
+
+    overflow-x: auto;
+    overflow-y: visible;
+    background: rgba(var(--bg-rgb), 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 12px;
+    width: 100%;
+    position: relative;
+}
+
+/* Horizontal scroll only — no vertical scrollbar on the table panel */
+.payments-ledger-container::-webkit-scrollbar {
+    width: 0;
+    height: 6px;
+}
+.payments-ledger-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+.payments-ledger-container::-webkit-scrollbar-thumb {
+    background: rgba(var(--fg-rgb), 0.1);
+    border-radius: 10px;
+}
+.payments-ledger-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(46, 184, 122, 0.3);
+}
+
+.payments-ledger-header {
+    background: var(--bg-surface);
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.08);
+    height: 48px;
+}
+
+.payments-ledger-header .payments-ledger-cell {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0 16px;
+    height: 100%;
+    background: var(--bg-surface);
+    justify-content: flex-start;
+}
+
+.payments-ledger-row {
+    display: grid !important;
+    grid-template-columns: 
+        var(--pay-col-1) var(--pay-col-2) var(--pay-col-3)
+        var(--pay-col-4) var(--pay-col-5) var(--pay-col-6)
+        var(--pay-col-7) var(--pay-col-8) var(--pay-col-9)
+        var(--pay-col-10) var(--pay-col-11) var(--pay-col-12)
+        var(--pay-col-13) var(--pay-col-14);
+    width: var(--pay-total-width) !important;
+    min-width: 100% !important;
+    height: 56px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
+    transition: background 0.2s;
+    align-items: stretch;
+}
+
+.payments-ledger-row.payments-ledger-header {
+    height: 48px;
+}
+
+.payments-ledger-row.clickable-row {
+    cursor: pointer;
+}
+
+.payments-ledger-row.active-drawer-row {
+    background: rgba(46, 184, 122, 0.08);
+    border-bottom: 1px solid rgba(46, 184, 122, 0.2);
+}
+
+.payments-ledger-row:hover:not(.payments-ledger-header) {
+    background: rgba(var(--fg-rgb), 0.02);
+}
+
+.payments-ledger-cell {
+    padding: 0 16px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: transparent;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.05);
+}
+
+.payments-ledger-cell:last-child {
+    border-right: none;
+}
+
+.payments-ledger-cell.justify-center,
+.payments-ledger-header .pay-ledger-actions-sticky,
+.payments-ledger-row > .pay-ledger-actions-sticky {
+    justify-content: center;
+}
+
+.payments-ledger-cell.justify-end {
+    justify-content: flex-end;
+}
+
+.pay-col-id { color: var(--text-muted); font-family: monospace; }
+.pay-col-amount { font-weight: 700; color: var(--text-primary); }
+.pay-col-discount { color: var(--text-primary); }
+.pay-col-date { color: var(--text-primary); font-size: 11px; }
+
+/* Entity Type Badges */
+.entity-type-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(var(--fg-rgb), 0.1);
+    color: var(--text-primary);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+}
+
+.entity-type-badge.gst {
+    background: rgba(139, 92, 246, 0.15);
+    color: #8b5cf6;
+    border-color: rgba(139, 92, 246, 0.3);
+}
+
+.entity-type-badge.income-tax {
+    background: rgba(16, 185, 129, 0.15);
+    color: #2eb87a;
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.entity-type-badge.company {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* Sticky first column logic */
+.pay-ledger-sticky-id {
+    position: sticky;
+    z-index: 10;
+    background-color: var(--bg-app) !important;
+    flex: none !important;
+}
+
+.payments-ledger-header .pay-ledger-sticky-id {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+    background-color: var(--bg-surface) !important;
+    flex: none !important;
+}
+
+.payments-ledger-row:hover:not(.payments-ledger-header) .pay-ledger-sticky-id {
+    background-color: var(--bg-app) !important;
+}
+
+.pay-ledger-sticky-col-1 { 
+    left: 0; 
+    width: var(--pay-col-1) !important;
+    min-width: var(--pay-col-1) !important; 
+    max-width: var(--pay-col-1) !important; 
+}
+.pay-ledger-sticky-col-2 { 
+    left: var(--pay-col-1); 
+    width: var(--pay-col-2) !important;
+    min-width: var(--pay-col-2) !important; 
+    max-width: var(--pay-col-2) !important; 
+}
+.pay-ledger-sticky-col-3 { 
+    left: calc(var(--pay-col-1) + var(--pay-col-2)); 
+    width: var(--pay-col-3) !important;
+    min-width: var(--pay-col-3) !important; 
+    max-width: var(--pay-col-3) !important; 
+    border-right: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    box-shadow: 1px 0 0 rgba(var(--fg-rgb), 0.05);
+}
+
+/* Sticky Actions column (right edge) */
+.payments-ledger-row > .pay-ledger-actions-sticky,
+.payments-ledger-header > .pay-ledger-actions-sticky {
+    position: sticky;
+    right: 0;
+    z-index: 10;
+    background-color: var(--bg-app) !important;
+    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    justify-content: center;
+    box-shadow: -4px 0 8px rgba(0, 0, 0, 0.25);
+}
+
+.payments-ledger-header > .pay-ledger-actions-sticky {
+    z-index: 35;
+    background-color: var(--bg-surface) !important;
+}
+
+.payments-ledger-row:hover:not(.payments-ledger-header) > .pay-ledger-actions-sticky,
+.payments-ledger-row.active-drawer-row > .pay-ledger-actions-sticky {
+    background-color: var(--bg-app) !important;
+}
+
+.payments-ledger-row.active-drawer-row > .pay-ledger-actions-sticky {
+    background-color: var(--bg-surface) !important;
+}
+
+.table-actions-combined {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+}
+
+.btn-view-services-mini {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(var(--fg-rgb), 0.12);
+    background: rgba(var(--fg-rgb), 0.04);
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-view-services-mini.btn-view-icon-only {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 8px;
+}
+
+.btn-view-services-mini:hover {
+    background: rgba(var(--fg-rgb), 0.08);
+    border-color: rgba(var(--fg-rgb), 0.2);
+    color: var(--text-primary);
+}

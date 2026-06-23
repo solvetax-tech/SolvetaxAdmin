@@ -1,0 +1,392 @@
+/* GST Filing Documents - Specialized Module Styles */
+
+.identification-cell {
+    text-align: left !important;
+}
+
+.id-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.id-stack .main-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--emerald-success);
+    font-size: 11px;
+}
+
+.id-stack .sub-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* --- Ledger Grid Format Overrides --- */
+.filings-ledger-header-cell, .filings-ledger-cell {
+    padding: 12px 16px !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.04) !important;
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+}
+
+.filings-ledger-header-cell {
+    background: var(--bg-surface-2) !important;
+    color: var(--text-primary) !important;
+    font-size: 10px !important;
+    font-weight: 800 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.filings-ledger-row {
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.04) !important;
+    transition: background 0.2s ease;
+}
+
+.filings-ledger-row:hover {
+    background: rgba(var(--fg-rgb), 0.03) !important;
+}
+
+.filings-ledger-row:hover .filings-ledger-cell {
+    color: var(--text-primary);
+}
+
+/* Remove last column border */
+.filings-ledger-header-cell:last-child, 
+.filings-ledger-cell:last-child {
+    border-right: none !important;
+}
+
+.audit-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+}
+
+.audit-stack .audit-user {
+    font-size: 11px;
+    font-weight: 600;
+    color: #3b82f6;
+}
+
+.audit-stack .audit-date {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* Document Specific Badges */
+.doc-type-badge {
+    background: rgba(99, 102, 241, 0.1);
+    color: #3b82f6;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.doc-external-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #6366f1;
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    padding: 6px 12px;
+    background: rgba(99, 102, 241, 0.05);
+    border-radius: 6px;
+    width: fit-content;
+}
+
+.doc-external-link:hover {
+    background: rgba(99, 102, 241, 0.15);
+    color: #818cf8;
+    transform: translateX(2px);
+}
+
+.field-hint {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    font-style: italic;
+}
+
+.checkbox-label {
+    user-select: none;
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.checkbox-label input {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+/* Custom Select Styling */
+.select-wrapper-v4 {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.custom-select-v4 {
+    appearance: none !important;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 40px !important;
+    cursor: pointer;
+}
+
+.select-chevron-v4 {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--text-primary);
+    transition: color 0.2s ease;
+}
+
+.select-wrapper-v4:focus-within .select-chevron-v4 {
+    color: var(--emerald-success);
+}
+
+@keyframes refresh-spin {
+    from { transform: translateY(-50%) rotate(0deg); }
+    to { transform: translateY(-50%) rotate(360deg); }
+}
+
+.refresh-spin {
+    animation: refresh-spin 1s linear infinite;
+}
+
+/* Remove spin buttons for Filing ID number input */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+/* Validation Error Styles */
+.input-error-v4 {
+    border-color: #f44336 !important;
+    background: rgba(244, 67, 54, 0.05) !important;
+}
+
+.error-text-v4 {
+    color: #f44336;
+    font-size: 11px;
+    font-weight: 700;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    animation: errorSlideIn 0.2s ease-out;
+}
+
+.error-text-v4::before {
+    content: '⚠️';
+    font-size: 10px;
+}
+
+@keyframes errorSlideIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+/* Toggle Switch V4 */
+.toggle-switch-v4 {
+    display: inline-block;
+}
+
+.switch-track-v4 {
+    width: 34px;
+    height: 18px;
+    background: rgba(var(--fg-rgb), 0.1);
+    border-radius: 20px;
+    position: relative;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+}
+
+.switch-track-v4.active {
+    background: var(--emerald-success);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+.switch-thumb-v4 {
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    border-radius: 50%;
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.switch-track-v4.active .switch-thumb-v4 {
+    transform: translateX(16px);
+    background: var(--bg-app);
+}
+/* Real Tick Drawing Animation */
+.checkmark-svg-v4 {
+    width: 48px;
+    height: 48px;
+    display: block;
+}
+
+.checkmark-circle-v4 {
+    stroke-dasharray: 166;
+    stroke-dashoffset: 166;
+    stroke-width: 2;
+    stroke-miterlimit: 10;
+    stroke: var(--bg-app);
+    fill: none;
+    animation: stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+
+.checkmark-check-v4 {
+    transform-origin: 50% 50%;
+    stroke-dasharray: 48;
+    stroke-dashoffset: 48;
+    animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards;
+}
+
+@keyframes stroke {
+    100% {
+        stroke-dashoffset: 0;
+    }
+}
+
+@keyframes scale {
+    0%, 100% {
+        transform: none;
+    }
+    50% {
+        transform: scale3d(1.1, 1.1, 1);
+    }
+}
+
+@keyframes successPop {
+    0% { transform: scale(0.8) translateY(20px); opacity: 0; }
+    50% { transform: scale(1.05) translateY(-5px); }
+    100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* --- Filter Chips (Registration Pattern Alignment) --- */
+.gst-documents-module .active-filters-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 24px;
+    animation: fadeIn 0.3s ease;
+}
+
+.gst-documents-module .filter-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 100px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.gst-documents-module .filter-chip:hover {
+    background: rgba(var(--fg-rgb), 0.06);
+    border-color: rgba(var(--fg-rgb), 0.15);
+    transform: translateY(-1px);
+}
+
+.gst-documents-module .filter-chip-label {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-primary);
+    text-transform: lowercase;
+}
+
+.gst-documents-module .filter-chip-value {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-transform: uppercase;
+}
+
+.gst-documents-module .btn-remove-chip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    padding: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-left: 2px;
+}
+
+.gst-documents-module .btn-remove-chip:hover {
+    color: #f44336;
+    transform: scale(1.2);
+}
+
+@keyframes chipIn {
+    from { opacity: 0; transform: scale(0.9) translateX(-10px); }
+    to { opacity: 1; transform: scale(1) translateX(0); }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* --- Table UI Polish --- */
+.gst-documents-module .gst-table-container {
+    border-top: none !important;
+    border-top-left-radius: 12px !important;
+    border-top-right-radius: 12px !important;
+    margin-top: 12px !important; /* Reduced from 20px */
+    padding-top: 0 !important;
+}
+
+.gst-documents-module .gst-registrations-table {
+    margin-top: 0 !important;
+}
+
+/* Enhanced Sticky Visuals */
+.filings-docs-ledger-sticky-col-1,
+.filings-docs-ledger-sticky-col-2 {
+    background: var(--bg-app) !important;
+    z-index: 5;
+}
+
+.filings-ledger-header .filings-docs-ledger-sticky-col-1,
+.filings-ledger-header .filings-docs-ledger-sticky-col-2 {
+    background: var(--bg-surface-2) !important;
+    z-index: 20;
+}
+
+.filings-docs-ledger-sticky-col-2 {
+    border-right: 1px solid rgba(var(--fg-rgb), 0.08) !important;
+    box-shadow: 4px 0 10px rgba(0, 0, 0, 0.3);
+}

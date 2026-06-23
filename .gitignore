@@ -1,23 +1,29 @@
 # Environment variables
 .env
 
-# Python cache files
+# Python
 __pycache__/
 *.py[cod]
+backend/__pycache__/
+*.pyo
 
 # Virtual environment
 venv/
 
 # Logs
 *.log
+logs/
 
-# Database files
+# Database
 *.sqlite3
 
-# IDE settings
+# IDE / OS
 .vscode/
 .idea/
-
-# OS generated files
 .DS_Store
 Thumbs.db
+
+# Frontend (Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/

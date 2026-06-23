@@ -1,0 +1,444 @@
+/**
+ * Shared right-side drawer for view/edit/create panels across the app.
+ * Add `app-side-drawer-mode` on centered modal overlays, or use gst-details-drawer / gst-filters-drawer.
+ */
+:root {
+    /* Half-screen panel — reaches the middle of the viewport on desktop */
+    --app-side-drawer-width: min(50vw, calc(100vw - 24px));
+}
+
+@media (max-width: 768px) {
+    :root {
+        --app-side-drawer-width: calc(100vw - 16px);
+    }
+}
+
+@keyframes appSideDrawerSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(28px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* ══ Unified width: every view + edit side panel uses the same size ══ */
+.app-drawer-panel,
+.gst-details-drawer,
+.gst-filters-drawer.gst-reg-details-drawer,
+.gst-filters-drawer.itr-side-drawer-shell.itr-income-tax-form-drawer,
+.gst-main-content.itr-income-tax-page .gst-details-drawer.itr-details-drawer {
+    width: var(--app-side-drawer-width) !important;
+    max-width: calc(100vw - 24px) !important;
+}
+
+/* ── Filter / edit drawers (GST reg edit, Income Tax edit, filters) ── */
+.gst-filters-drawer-overlay {
+    z-index: 10000;
+}
+
+.gst-filters-drawer-overlay.app-side-drawer-mode {
+    position: fixed !important;
+    inset: 0 !important;
+    display: flex !important;
+    align-items: stretch !important;
+    justify-content: flex-end !important;
+    padding: 0 !important;
+    background: rgba(0, 0, 0, 0.6) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10000 !important;
+}
+
+/* View + edit GST panels: full width from first paint (no 450px → 50vw jump) */
+.gst-filters-drawer-overlay.app-side-drawer-mode > .gst-filters-drawer,
+.gst-filters-drawer-overlay.app-side-drawer-mode > .app-drawer-panel {
+    width: var(--app-side-drawer-width) !important;
+    min-width: var(--app-side-drawer-width) !important;
+    max-width: calc(100vw - 24px) !important;
+    flex: 0 0 var(--app-side-drawer-width) !important;
+}
+
+/* Filter-only drawers stay compact (not view/edit) */
+.gst-filters-drawer.itr-filter-drawer--income-tax:not(.itr-income-tax-form-drawer),
+.gst-filters-drawer-overlay:not(.app-side-drawer-mode) > .gst-filters-drawer:not(.gst-reg-details-drawer) {
+    width: min(450px, calc(100vw - 24px)) !important;
+}
+
+/* ── Centered modals → right drawer when `app-side-drawer-mode` is on overlay ── */
+.modal-overlay.app-side-drawer-mode,
+.gst-modal-overlay-v4.app-side-drawer-mode {
+    align-items: stretch !important;
+    justify-content: flex-end !important;
+    padding: 0 !important;
+    z-index: 10000;
+}
+
+.modal-overlay.app-side-drawer-mode > .modal-content-glass,
+.modal-overlay.app-side-drawer-mode > .modal-content-v4,
+.modal-overlay.app-side-drawer-mode > .employee-details-modal,
+.modal-overlay.app-side-drawer-mode > .customer-details-modal,
+.modal-overlay.app-side-drawer-mode > .employee-modal,
+.modal-overlay.app-side-drawer-mode > .customer-modal,
+.gst-modal-overlay-v4.app-side-drawer-mode > .gst-modal-card-v4,
+.gst-modal-overlay-v4.app-side-drawer-mode > .gst-modal-card-v4.wide-modal,
+.gst-modal-overlay-v4.app-side-drawer-mode > .gst-modal-card-v4.returns-status-modal {
+    width: var(--app-side-drawer-width) !important;
+    max-width: calc(100vw - 24px) !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    animation: appSideDrawerSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+.modal-overlay.app-side-drawer-mode .card-scroll,
+.modal-overlay.app-side-drawer-mode .modal-form-wrapper,
+.gst-modal-overlay-v4.app-side-drawer-mode .modal-form-v4,
+.gst-modal-overlay-v4.app-side-drawer-mode .form-scroll-container {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.modal-overlay.app-side-drawer-mode .modal-header,
+.modal-overlay.app-side-drawer-mode .modal-footer-v4,
+.gst-modal-overlay-v4.app-side-drawer-mode .modal-header-v4,
+.gst-modal-overlay-v4.app-side-drawer-mode .modal-footer-v4,
+.gst-modal-overlay-v4.app-side-drawer-mode .drawer-footer {
+    flex-shrink: 0;
+}
+
+/* ── Standard edit footer (GST Documents: Delete | Cancel | Save Changes) ── */
+.app-drawer-edit-footer,
+.drawer-footer.gst-reg-details-footer,
+.modal-overlay.app-side-drawer-mode .modal-footer.app-drawer-edit-footer,
+.modal-overlay.app-side-drawer-mode .modal-footer.gst-reg-details-footer,
+.gst-filters-drawer.gst-reg-side-drawer-shell > .drawer-footer.gst-reg-details-footer {
+    flex-shrink: 0;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px 24px 20px !important;
+    gap: 0;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
+    background: rgba(0, 0, 0, 0.2);
+    display: flex;
+}
+
+.app-drawer-edit-footer .footer-actions-v4,
+.drawer-footer.gst-reg-details-footer .footer-actions-v4,
+.modal-overlay.app-side-drawer-mode .modal-footer.app-drawer-edit-footer .footer-actions-v4,
+.modal-overlay.app-side-drawer-mode .modal-footer.gst-reg-details-footer .footer-actions-v4 {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+}
+
+.app-drawer-edit-footer .gst-btn-schedule-payment,
+.gst-reg-details-footer .gst-btn-schedule-payment {
+    margin-right: auto;
+    padding: 8px 18px;
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.28), rgba(255, 152, 0, 0.22));
+    color: #ffca28;
+    border: 1px solid rgba(255, 193, 7, 0.65);
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 0 22px rgba(255, 193, 7, 0.2), inset 0 0 14px rgba(255, 193, 7, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease;
+    font-family: inherit;
+}
+
+.app-drawer-edit-footer .gst-btn-schedule-payment:hover:not(:disabled),
+.gst-reg-details-footer .gst-btn-schedule-payment:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.45), rgba(255, 152, 0, 0.38));
+    color: var(--text-primary);
+    border-color: #ffc107;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 28px rgba(255, 193, 7, 0.4);
+}
+
+.app-drawer-edit-footer .gst-btn-schedule-payment:disabled,
+.gst-reg-details-footer .gst-btn-schedule-payment:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.app-drawer-btn-cancel {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 20px;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: color 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-drawer-btn-cancel:hover:not(:disabled) {
+    color: var(--text-primary);
+}
+
+.app-drawer-btn-cancel:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.app-drawer-btn-delete {
+    color: #f44336 !important;
+}
+
+.app-drawer-btn-delete:hover:not(:disabled) {
+    color: #ff6b6b !important;
+}
+
+.glow-green,
+.app-drawer-btn-save {
+    background: #2eb87a;
+    color: var(--text-primary);
+    border: none;
+    padding: 10px 24px;
+    border-radius: 30px;
+    font-weight: 700;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.glow-green:hover:not(:disabled),
+.app-drawer-btn-save:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(16, 185, 129, 0.4);
+}
+
+.glow-green:disabled,
+.app-drawer-btn-save:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Modal drawers: full-height column + scrollable body */
+.modal-overlay.app-side-drawer-mode > .employee-details-modal.gst-reg-side-drawer-shell,
+.modal-overlay.app-side-drawer-mode > .customer-details-modal.gst-reg-side-drawer-shell {
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+.modal-overlay.app-side-drawer-mode > .customer-details-modal.gst-reg-side-drawer-shell .modal-form-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.modal-overlay.app-side-drawer-mode .card-scroll,
+.modal-overlay.app-side-drawer-mode .form-sections-container {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell,
+.gst-modal-overlay-v4.app-side-drawer-mode > .gst-modal-card-v4.app-drawer-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    animation: appSideDrawerSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .drawer-header,
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .gst-reg-details-header,
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .modal-header-v4 {
+    flex-shrink: 0;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .drawer-content,
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .gst-reg-details-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .drawer-footer,
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .app-drawer-edit-footer {
+    flex-shrink: 0;
+}
+
+/* Drawer form layout — prevent horizontal scroll from modal padding / 3-col grid */
+.gst-filters-drawer.gst-reg-details-drawer .gst-reg-details-header,
+.gst-filters-drawer.gst-reg-details-drawer .drawer-header.gst-reg-details-header {
+    padding: 20px 24px;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer .gst-reg-details-scroll,
+.gst-filters-drawer.gst-reg-details-drawer .drawer-content.gst-reg-details-scroll {
+    padding: 8px 24px 28px;
+    box-sizing: border-box;
+}
+
+/* View panels (read-only) use same scroll region as edit */
+.gst-filters-drawer.gst-reg-details-drawer .drawer-body-v4 {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer .gst-reg-details-form .form-grid-3,
+.gst-filters-drawer.gst-reg-details-drawer .form-grid-3 {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 16px;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer .form-group-v4,
+.gst-filters-drawer.gst-reg-details-drawer .modal-input-v4,
+.gst-filters-drawer.gst-reg-details-drawer .gst-form-value-box {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* Edit drawer sections — same full-width cards as view panel (CORE METADATA, etc.) */
+.gst-filters-drawer.gst-reg-details-drawer .drawer-content.gst-reg-details-scroll,
+.gst-filters-drawer.gst-reg-details-drawer .gst-reg-details-scroll.gst-reg-details-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer .form-section-group {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px solid rgba(var(--fg-rgb), 0.04);
+    border-radius: 16px;
+    padding: 20px;
+    margin-top: 0 !important;
+    gap: 16px;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer .section-title {
+    font-size: 11px !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    color: #2eb87a !important;
+    letter-spacing: 0.1em !important;
+    margin: 0 0 16px !important;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    width: 100%;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer .form-grid-2 {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer .upload-method-selector-v4 {
+    width: 100%;
+    max-width: 100%;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer .submission-zone-v4,
+.gst-filters-drawer.gst-reg-details-drawer .premium-drop-zone-v4,
+.gst-filters-drawer.gst-reg-details-drawer .modal-input-wrapper-v4 {
+    width: 100%;
+    max-width: 100%;
+}
+
+/* View drawers — always half screen (override legacy 480px in gst_registration.css) */
+.gst-details-drawer-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 10000 !important;
+}
+
+.gst-details-drawer-overlay.open {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.gst-details-drawer,
+.gst-details-drawer.itr-details-drawer {
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    height: 100vh !important;
+    transform: none !important;
+    transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.gst-details-drawer:not(.open),
+.gst-details-drawer.itr-details-drawer:not(.open) {
+    right: -100% !important;
+    pointer-events: none;
+}
+
+.gst-details-drawer.open,
+.gst-details-drawer.itr-details-drawer.open {
+    right: 0 !important;
+    pointer-events: auto;
+}
+
+@media (max-width: 640px) {
+    .gst-filters-drawer.gst-reg-details-drawer .form-grid-3 {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .app-drawer-edit-footer .footer-actions-v4,
+    .gst-reg-details-footer .footer-actions-v4 {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .app-drawer-edit-footer .gst-btn-schedule-payment,
+    .gst-reg-details-footer .gst-btn-schedule-payment {
+        margin-right: 0;
+        width: 100%;
+        justify-content: center;
+    }
+
+    .app-drawer-btn-cancel,
+    .app-drawer-btn-save,
+    .glow-green {
+        width: 100%;
+        justify-content: center;
+    }
+}

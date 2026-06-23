@@ -1,0 +1,482 @@
+/* ── Action Buttons (Standardized) ── */
+.btn-primary-action,
+.btn-add-employee-minimal {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: rgba(46, 184, 122, 0.08);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    border-radius: 8px;
+    color: #2eb87a;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.btn-primary-action:hover,
+.btn-add-employee-minimal:hover {
+    background: #2eb87a;
+    color: var(--text-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px rgba(46, 184, 122, 0.2);
+}
+
+/* ── Active Filter Chips ── */
+.active-filters-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-right: 12px;
+    align-items: center;
+    max-width: 60%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.filter-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(46, 184, 122, 0.1);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    color: #2eb87a;
+    white-space: nowrap;
+    animation: fadeIn 0.3s ease;
+}
+
+.filter-chip-label {
+    font-weight: 600;
+    opacity: 0.8;
+}
+
+.filter-chip-value {
+    font-weight: 700;
+}
+
+.btn-remove-chip {
+    background: transparent;
+    border: none;
+    color: #2eb87a;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    padding: 0;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.btn-remove-chip:hover {
+    opacity: 1;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── Premium Filter Modal (Standardized) ── */
+.premium-filter-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: all 0.3s ease;
+}
+
+.premium-filter-overlay.show {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.premium-filter-modal {
+    background: rgba(var(--bg-rgb), 0.95);
+    border: 1px solid #333;
+    border-radius: 16px;
+    width: 90%;
+    max-width: 800px;
+    padding: 24px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    transform: scale(0.9);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.premium-filter-overlay.show .premium-filter-modal {
+    transform: scale(1);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--bg-elevated);
+    padding-bottom: 12px;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #2eb87a;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    font-family: var(--font-accent);
+}
+
+.btn-close-modal {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.btn-close-modal:hover {
+    color: var(--text-primary);
+}
+
+.modal-body-scroll {
+    overflow-y: auto;
+    padding-right: 8px;
+    margin-bottom: 24px;
+}
+
+.modal-body-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+.modal-body-scroll::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 4px;
+}
+
+/* ── Filter Grid ── */
+.premium-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.filter-field label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    font-family: var(--font-accent);
+}
+
+.filter-field input,
+.filter-field select {
+    background: var(--bg-surface);
+    border: 1px solid var(--bg-elevated);
+    color: var(--text-primary);
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.filter-field input:focus,
+.filter-field select:focus {
+    border-color: #2eb87a;
+    background: var(--bg-surface);
+    box-shadow: 0 0 0 2px rgba(46, 184, 122, 0.1);
+}
+
+.filter-field input[type="date"],
+.filter-field input[type="datetime-local"] {
+    position: relative;
+    padding-right: 38px;
+}
+
+.filter-field input[type="date"]::-webkit-calendar-picker-indicator,
+.filter-field input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.85;
+    filter: invert(78%) sepia(18%) saturate(355%) hue-rotate(96deg) brightness(96%) contrast(92%);
+}
+
+/* Date filter with explicit calendar button (GST / Customer / Employee drawers) */
+.filter-date-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+}
+
+.filter-date-input-wrap .filter-date-input {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    padding-right: 48px !important;
+    color-scheme: dark;
+}
+
+.filter-date-input-wrap .filter-date-input::-webkit-calendar-picker-indicator {
+    display: none;
+    -webkit-appearance: none;
+}
+
+.filter-date-picker-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    margin: 0;
+    border: 1px solid rgba(46, 184, 122, 0.35);
+    border-radius: 10px;
+    background: rgba(46, 184, 122, 0.12);
+    color: #3dd494;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.filter-date-picker-btn:hover {
+    background: rgba(46, 184, 122, 0.22);
+    border-color: rgba(46, 184, 122, 0.55);
+    color: #2eb87a;
+}
+
+.filter-date-picker-btn:focus-visible {
+    outline: 2px solid rgba(46, 184, 122, 0.45);
+    outline-offset: 2px;
+}
+
+.filter-date-input-wrap--compact .filter-date-input {
+    padding-right: 40px !important;
+}
+
+.filter-date-input-wrap--compact .filter-date-picker-btn {
+    width: 30px;
+    height: 30px;
+    right: 6px;
+    border-radius: 8px;
+}
+
+/* ── Modal Footer ── */
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    border-top: 1px solid var(--bg-elevated);
+    padding-top: 20px;
+}
+
+.btn-modal-search {
+    background: #2eb87a;
+    color: var(--text-primary);
+    border: none;
+    padding: 10px 28px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: var(--font-accent);
+}
+
+.btn-modal-search:hover {
+    background: #2eb87a;
+    box-shadow: 0 0 20px rgba(46, 184, 122, 0.4);
+}
+
+.btn-modal-clear {
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    border: 1px solid #333;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-modal-clear:hover {
+    background: #333;
+    color: var(--text-primary);
+}
+
+/* ── Trigger Button ── */
+.btn-filter-trigger {
+    background: var(--bg-surface-2);
+    color: var(--text-muted);
+    border: 1px solid #333;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    font-family: var(--font-accent);
+}
+
+.btn-filter-trigger:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+
+.btn-filter-trigger.active {
+    color: #2eb87a;
+    border-color: #2eb87a;
+    background: rgba(46, 184, 122, 0.05);
+}
+/* ── Multi-select Role Styling ── */
+.multi-select-field {
+    grid-column: span 2;
+}
+
+.multi-checkbox-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--bg-elevated);
+    padding: 12px;
+    border-radius: 8px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.checkbox-item:hover {
+    background: rgba(46, 184, 122, 0.05);
+    color: var(--text-primary);
+}
+
+.checkbox-item input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: #2eb87a;
+    cursor: pointer;
+    margin: 0;
+}
+
+.checkbox-item span {
+    font-weight: 500;
+}
+
+@media (max-width: 600px) {
+    .multi-select-field {
+        grid-column: span 1;
+    }
+}
+
+/* ── Loading Animations ── */
+@keyframes gstSkeletonPulse {
+    0% { opacity: 0.3; }
+    50% { opacity: 0.6; }
+    100% { opacity: 0.3; }
+}
+
+@keyframes gstScanning {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+}
+
+.gst-skeleton-pulse {
+    animation: gstSkeletonPulse 1.5s ease-in-out infinite;
+    background: rgba(var(--fg-rgb), 0.05);
+    border-radius: 4px;
+}
+
+/* --- Shared Skeleton Loaders --- */
+.dropdown-skeleton-container {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dropdown-skeleton-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+}
+
+.skeleton-circle {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+}
+
+.skeleton-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.skeleton-line {
+    height: 10px;
+    border-radius: 4px;
+}
+
+.skeleton-line.short {
+    width: 40%;
+}
+
+.skeleton-line.medium {
+    width: 70%;
+}
+
+.skeleton-line.long {
+    width: 90%;
+}

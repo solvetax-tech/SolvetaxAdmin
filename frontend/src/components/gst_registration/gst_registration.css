@@ -1,0 +1,1891 @@
+/* gst_registration.css */
+
+.gst-main-content.gst-portal-page {
+    padding: 0;
+    /* View/edit drawer — uses global --app-side-drawer-width from AppSideDrawer.css */
+    --gst-reg-drawer-width: var(--app-side-drawer-width);
+}
+
+.gst-portal-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 8px;
+    width: 100%;
+}
+
+.gst-portal-top-row .dashboard-sub-nav-v4 {
+    margin: 0;
+}
+
+.gst-portal-top-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.btn-gst-payments-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: linear-gradient(135deg, rgba(46, 184, 122, 0.22), rgba(46, 184, 122, 0.08));
+    border: 1px solid rgba(46, 184, 122, 0.55);
+    border-radius: 14px;
+    color: #3dd494;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    box-shadow: 0 0 0 1px rgba(46, 184, 122, 0.15), 0 4px 14px rgba(46, 184, 122, 0.18);
+    font-family: inherit;
+}
+
+.btn-gst-payments-entry:hover {
+    border-color: #2eb87a;
+    color: #52f0b3;
+    transform: translateY(-1px);
+    box-shadow: 0 0 0 1px rgba(46, 184, 122, 0.35), 0 6px 18px rgba(46, 184, 122, 0.28);
+}
+
+.btn-gst-payments-entry:active {
+    transform: translateY(0);
+}
+
+.gst-portal-filter-chips-row {
+    margin-bottom: 8px;
+}
+
+.gst-main-content.gst-portal-page .gst-table-wrapper--portal {
+    height: auto;
+    gap: 8px;
+    overflow: visible;
+}
+
+.gst-main-content.gst-portal-page .gst-table-container--portal {
+    overflow-x: auto;
+    overflow-y: visible;
+    flex: none;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.gst-portal-people-actions-mount {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.gst-registration-container {
+    width: 100%;
+}
+
+.gst-people-person-id-cell,
+.filings-ledger-row.gst-people-grid-template .filings-ledger-cell.gst-people-person-id-cell {
+    color: #2eb87a !important;
+    font-weight: 700 !important;
+}
+
+.gst-docs-document-id-cell,
+.filings-ledger-row.gst-docs-grid-template .filings-ledger-cell.gst-docs-document-id-cell {
+    color: #2eb87a !important;
+    font-weight: 700 !important;
+}
+
+.filings-ledger-row.gst-docs-grid-template:hover .filings-ledger-cell.gst-docs-document-id-cell {
+    color: #2eb87a !important;
+}
+
+.filings-ledger-row.gst-people-grid-template:hover .filings-ledger-cell.gst-people-person-id-cell {
+    color: #2eb87a !important;
+}
+
+/* GSTIN — highlighted monospace in ledger tables (Registrations, People, Documents) */
+.filings-ledger-header-cell.gst-ledger-gstin-header {
+    color: rgba(110, 231, 183, 0.92) !important;
+    letter-spacing: 0.06em;
+}
+
+.filings-ledger-cell.gst-ledger-gstin-cell {
+    font-family: 'JetBrains Mono', 'SF Mono', 'Consolas', ui-monospace, monospace !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.03em;
+}
+
+.filings-ledger-cell.gst-ledger-gstin-cell .gst-ledger-gstin-value {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 4px 9px;
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.35;
+    text-transform: uppercase;
+    color: #2eb87a;
+    background: linear-gradient(135deg, rgba(46, 184, 122, 0.14) 0%, rgba(16, 185, 129, 0.06) 100%);
+    border: 1px solid rgba(46, 184, 122, 0.24);
+    box-shadow: inset 0 1px 0 rgba(var(--fg-rgb), 0.05);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.filings-ledger-cell.gst-ledger-gstin-cell .gst-ledger-gstin-value.is-empty {
+    text-transform: none;
+    color: var(--text-primary);
+    background: rgba(var(--fg-rgb), 0.03);
+    border-color: rgba(var(--fg-rgb), 0.06);
+    box-shadow: none;
+}
+
+.filings-ledger-row:hover .filings-ledger-cell.gst-ledger-gstin-cell .gst-ledger-gstin-value:not(.is-empty) {
+    color: #2eb87a;
+    border-color: rgba(46, 184, 122, 0.4);
+    background: linear-gradient(135deg, rgba(46, 184, 122, 0.2) 0%, rgba(16, 185, 129, 0.1) 100%);
+}
+
+.gst-main-content.gst-portal-page .gst-table-container--portal::-webkit-scrollbar {
+    width: 0;
+    height: 6px;
+}
+
+.gst-main-content.gst-portal-page .gst-table-container--portal::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.45);
+    border-radius: 4px;
+}
+
+.gst-metrics-title {
+    font-size: 24px;
+    font-family: var(--font-accent);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.gst-header-margin {
+    margin-bottom: 16px;
+}
+
+.gst-table-card-scroll {
+    overflow-x: auto;
+}
+
+/* --- Sub Tabs Navigation --- */
+.gst-sub-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 24px;
+    background: rgba(var(--fg-rgb), 0.04);
+    padding: 6px;
+    border-radius: 14px;
+    width: fit-content;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+}
+
+.sub-tab-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sub-tab-item:hover {
+    color: var(--text-primary);
+    background: rgba(var(--fg-rgb), 0.04);
+}
+
+.sub-tab-item.active {
+    background: rgba(var(--fg-rgb), 1);
+    color: var(--bg-app);
+}
+
+.gst-table-row {
+    cursor: pointer;
+}
+
+.gst-table-row--static {
+    cursor: default;
+}
+
+.filings-ledger-row.gst-reg-grid-template .filings-ledger-cell.gst-reg-id-cell,
+.gst-reg-grid-template .filings-ledger-cell.gst-reg-id-cell {
+    color: #2eb87a !important;
+    font-weight: 700 !important;
+}
+
+.filings-ledger-row.gst-reg-grid-template:hover .filings-ledger-cell.gst-reg-id-cell {
+    color: #2eb87a !important;
+}
+
+.gst-pagination {
+    margin-top: 16px;
+}
+
+.gst-filters-panel {
+    overflow-y: auto;
+    max-height: 100vh;
+    padding-bottom: 40px;
+}
+
+.gst-filter-group-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.gst-filter-label-nomargin {
+    margin-bottom: 0;
+}
+
+.gst-filter-actions {
+    margin-top: 20px;
+    padding-bottom: 10px;
+}
+
+.gst-no-data {
+    color: white;
+    padding: 20px;
+}
+
+.gst-card-shell {
+    max-width: 1000px;
+}
+
+.gst-form-buttons {
+    margin-top: 32px;
+}
+
+.gst-modal-page {
+    position: fixed;
+    inset: 0;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.gst-modal-content.gst-edit-modal {
+    width: 95%;
+    max-width: 1400px;
+    max-height: 90vh;
+    background: rgba(var(--bg-rgb), 0.95);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 28px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.gst-modal-close-btn {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    color: var(--text-muted);
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    z-index: 20;
+}
+
+.gst-modal-close-btn:hover {
+    background: rgba(244, 67, 54, 0.1);
+    color: #f44336;
+    border-color: rgba(244, 67, 54, 0.2);
+}
+
+.gst-modal-form-wrapper {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+}
+
+.gst-modal-header {
+    padding: 20px 32px 12px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+}
+
+.gst-header-accent-line {
+    width: 32px;
+    height: 4px;
+    background: #2eb87a;
+    border-radius: 2px;
+    margin-bottom: 12px;
+}
+
+.gst-modal-header h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+}
+
+.gst-header-suffix {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.gst-modal-header p {
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.gst-edit-scroll {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.gst-edit-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+.gst-edit-scroll::-webkit-scrollbar-thumb {
+    background: rgba(var(--fg-rgb), 0.08);
+    border-radius: 10px;
+}
+
+.gst-message-banner {
+    padding: 14px 16px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: pre-line;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.gst-message-banner-text {
+    white-space: pre-line;
+    line-height: 1.35;
+}
+
+.gst-message-banner.success {
+    background: rgba(46, 184, 122, 0.12);
+    border: 1px solid rgba(46, 184, 122, 0.35);
+    color: #5ee7a9;
+}
+
+.gst-message-banner.error {
+    background: rgba(244, 67, 54, 0.12);
+    border: 1px solid rgba(244, 67, 54, 0.35);
+    color: #f89a92;
+}
+
+.gst-loading-state {
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    background: rgba(var(--fg-rgb), 0.02);
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.gst-form-section h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-primary); /* Changed from #444 */
+    margin: 0 0 12px;
+    opacity: 0.9;
+}
+
+/* --- Sync Notice Banner (v.69) --- */
+.sync-notice-banner-v4 {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: rgba(46, 184, 122, 0.04);
+    border: 1px solid rgba(46, 184, 122, 0.15);
+    border-radius: 18px;
+    margin-bottom: 24px;
+    animation: bannerFadeIn 0.5s ease-out;
+}
+
+.sync-notice-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: rgba(46, 184, 122, 0.1);
+    border-radius: 10px;
+    color: #2eb87a;
+    flex-shrink: 0;
+}
+
+.sync-notice-text {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+
+.sync-notice-text strong {
+    color: #2eb87a;
+    font-weight: 700;
+}
+
+@keyframes bannerFadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+
+.gst-form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.gst-form-grid-compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.gst-form-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-primary); /* Changed from rgba(var(--fg-rgb), 0.45) */
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.9;
+}
+
+.gst-form-grid input,
+.gst-form-grid select,
+.gst-form-value-box {
+    width: 100%;
+    min-height: 38px;
+    padding: 10px 12px;
+    background: rgba(var(--fg-rgb), 0.035);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-size: 12px;
+    outline: none;
+    transition: all 0.2s ease;
+    text-transform: none;
+    letter-spacing: normal;
+    box-sizing: border-box;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.gst-form-grid input:focus,
+.gst-form-grid select:focus {
+    border-color: rgba(46, 184, 122, 0.5);
+    background: rgba(46, 184, 122, 0.06);
+    box-shadow: 0 0 0 2px rgba(46, 184, 122, 0.18);
+}
+
+.gst-form-grid input.error,
+.gst-form-grid select.error,
+.gst-form-grid textarea.error {
+    border-color: rgba(244, 67, 54, 0.45);
+    background: rgba(244, 67, 54, 0.04);
+}
+
+.gst-form-grid .field-error {
+    color: #f44336;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.gst-form-grid input:-webkit-autofill,
+.gst-form-grid input:-webkit-autofill:hover,
+.gst-form-grid input:-webkit-autofill:focus,
+.gst-form-grid input:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--text-primary) !important;
+    transition: background-color 5000s ease-in-out 0s;
+    box-shadow: inset 0 0 20px 20px rgba(var(--bg-rgb), 1) !important;
+}
+
+.gst-form-grid select option {
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+}
+
+.gst-form-value-box {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    color: var(--text-primary);
+    cursor: not-allowed;
+}
+
+.gst-checkbox-group-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    grid-column: 1 / -1;
+    margin-top: 4px;
+}
+
+.gst-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 11px;
+    font-weight: 600;
+    min-height: 32px;
+    padding: 6px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    background: rgba(var(--fg-rgb), 0.02);
+}
+
+.gst-checkbox-label:hover {
+    border-color: rgba(46, 184, 122, 0.35);
+    background: rgba(46, 184, 122, 0.04);
+}
+
+.gst-checkbox-input {
+    width: 14px;
+    height: 14px;
+    accent-color: #2eb87a;
+    min-height: auto;
+    cursor: pointer;
+}
+
+.gst-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 32px 20px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
+    flex-shrink: 0;
+}
+
+.gst-btn-secondary {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.gst-btn-secondary:hover {
+    color: var(--text-primary);
+}
+
+.gst-btn-primary {
+    padding: 6px 14px;
+    background: #2eb87a;
+    color: var(--text-primary);
+    border: none;
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(46, 184, 122, 0.2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.gst-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(46, 184, 122, 0.3);
+}
+
+.gst-btn-primary:disabled,
+.gst-btn-success:disabled,
+.gst-btn-danger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.gst-btn-primary:disabled:hover,
+.gst-btn-success:disabled:hover,
+.gst-btn-danger:disabled:hover {
+    transform: none;
+    box-shadow: 0 4px 20px rgba(46, 184, 122, 0.2);
+}
+
+.gst-btn-danger {
+    background: rgba(244, 67, 54, 0.12);
+    color: #ef4444;
+    border: 1px solid rgba(244, 67, 54, 0.35);
+    padding: 6px 14px;
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.gst-btn-danger:hover {
+    background: #f44336;
+    color: var(--text-primary);
+}
+
+.gst-btn-success {
+    background: rgba(46, 184, 122, 0.12);
+    color: #2eb87a;
+    border: 1px solid rgba(46, 184, 122, 0.35);
+    padding: 6px 14px;
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.gst-btn-success:hover {
+    background: #2eb87a;
+    color: var(--text-primary);
+}
+
+.gst-btn-schedule-payment {
+    margin-right: auto;
+    padding: 8px 18px;
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.28), rgba(255, 152, 0, 0.22));
+    color: #ffca28;
+    border: 1px solid rgba(255, 193, 7, 0.65);
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 0 22px rgba(255, 193, 7, 0.2), inset 0 0 14px rgba(255, 193, 7, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.gst-btn-schedule-payment:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.45), rgba(255, 152, 0, 0.38));
+    color: var(--text-primary);
+    border-color: #ffc107;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 28px rgba(255, 193, 7, 0.4);
+}
+
+.gst-btn-schedule-payment:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.gst-refresh-spin {
+    animation: gst-spin 1s linear infinite;
+}
+
+@keyframes gst-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.gst-confirm-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1100;
+}
+
+.gst-confirm-content {
+    width: min(92%, 420px);
+    border-radius: 20px;
+    padding: 28px 24px;
+    text-align: center;
+    background: rgba(26, 29, 33, 0.82);
+    border: 1px solid rgba(var(--fg-rgb), 0.14);
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+}
+
+.gst-confirm-icon {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 14px;
+}
+
+.gst-confirm-content h2 {
+    margin: 0 0 10px;
+    font-size: 20px;
+    color: var(--text-primary);
+}
+
+.gst-confirm-content p {
+    margin: 0 0 20px;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.gst-confirm-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+}
+
+@media (max-width: 760px) {
+    .gst-modal-page {
+        padding: 0;
+    }
+
+    .gst-modal-content.gst-edit-modal {
+        width: 100%;
+        max-height: 100vh;
+        border-radius: 0;
+    }
+
+    .gst-modal-header,
+    .gst-edit-scroll,
+    .gst-modal-footer {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+
+    .gst-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .gst-form-grid-compact {
+        grid-template-columns: 1fr;
+    }
+
+    .gst-checkbox-group-wrapper {
+        grid-template-columns: 1fr;
+    }
+
+    .gst-modal-footer {
+        flex-direction: column-reverse;
+        align-items: stretch;
+        gap: 12px;
+        padding-top: 16px;
+        padding-bottom: 20px;
+    }
+
+    .gst-btn-primary,
+    .gst-btn-secondary,
+    .gst-btn-danger,
+    .gst-btn-success,
+    .gst-btn-schedule-payment {
+        width: 100%;
+        justify-content: center;
+        margin-right: 0;
+    }
+}
+
+/* --- Enhanced GST Registrations Table Styles --- */
+
+.gst-table-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+    background: transparent;
+    overflow: hidden;
+}
+
+.gst-table-container {
+    flex: 1;
+    overflow: auto;
+    border-radius: 12px;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    background: rgba(var(--bg-rgb), 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    position: relative;
+}
+
+/* Custom Horizontal Scrollbar */
+.gst-table-container::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.gst-table-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.gst-table-container::-webkit-scrollbar-thumb {
+    background: rgba(var(--fg-rgb), 0.1);
+    border-radius: 10px;
+}
+
+.gst-table-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(46, 184, 122, 0.3);
+}
+
+.gst-reg-grid-template {
+    display: grid !important;
+    grid-template-columns: 
+        70px                    /* 1. ID (Sticky) */
+        90px                    /* 2. Customer ID (Sticky) */
+        minmax(120px, 0.8fr)    /* 3. Username */
+        minmax(120px, 0.8fr)    /* 4. Password */
+        minmax(150px, 1fr)      /* 5. GSTIN */
+        minmax(200px, 1.2fr)    /* 6. Business Name */
+        minmax(120px, 0.8fr)    /* 7. Reg Type */
+        minmax(140px, 0.9fr)    /* 8. Ownership */
+        minmax(140px, 0.9fr)    /* 9. Business Type */
+        minmax(140px, 0.9fr)    /* 10. State */
+        minmax(100px, 0.7fr)    /* 11. Filing Pref */
+        minmax(140px, 1fr)      /* 12. RM Name */
+        minmax(140px, 1fr)      /* 13. Assigned OP */
+        minmax(160px, 1.2fr);   /* 14. Actions */
+    gap: 0 !important;
+    grid-column-gap: 0 !important;
+    width: fit-content !important;
+    min-width: 100% !important;
+}
+
+.gst-people-grid-template {
+    display: grid !important;
+    grid-template-columns: 
+        90px                    /* 1. Person ID (Sticky) */
+        120px                   /* 2. Customer ID (Sticky) */
+        135px                   /* 3. Registration ID */
+        minmax(150px, 1fr)      /* 4. GSTIN */
+        minmax(180px, 1.2fr)    /* 5. Full Name */
+        minmax(150px, 1fr)      /* 6. Designation */
+        minmax(180px, 1.2fr)    /* 7. Email Address */
+        minmax(140px, 0.9fr)    /* 8. Mobile Number */
+        minmax(130px, 0.8fr)    /* 9. Primary Member */
+        minmax(120px, 0.8fr)    /* 10. Record Status */
+        minmax(160px, 1fr)      /* 11. Ownership Category */
+        minmax(140px, 1fr);     /* 12. Actions */
+    gap: 0 !important;
+    grid-column-gap: 0 !important;
+    width: fit-content !important;
+    min-width: 100% !important;
+}
+
+.gst-people-grid-template > :nth-child(1) {
+    position: sticky !important;
+    left: 0 !important;
+    z-index: 5 !important;
+    min-width: 90px !important;
+    max-width: 90px !important;
+    background: var(--bg-app) !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.05);
+}
+
+.gst-people-grid-template > :nth-child(2) {
+    position: sticky !important;
+    left: 90px !important;
+    z-index: 5 !important;
+    min-width: 120px !important;
+    max-width: 120px !important;
+    background: var(--bg-app) !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.1);
+}
+
+.gst-people-grid-template > :nth-child(3) {
+    position: sticky !important;
+    left: 210px !important;
+    z-index: 5 !important;
+    min-width: 135px !important;
+    max-width: 135px !important;
+    background: var(--bg-app) !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.1);
+}
+
+.filings-ledger-row.gst-people-grid-template:hover > :nth-child(1),
+.filings-ledger-row.gst-people-grid-template:hover > :nth-child(2),
+.filings-ledger-row.gst-people-grid-template:hover > :nth-child(3) {
+    background: var(--bg-surface) !important;
+}
+
+.filings-ledger-header.gst-people-grid-template > :nth-child(1) { left: 0 !important; }
+.filings-ledger-header.gst-people-grid-template > :nth-child(2) { left: 90px !important; }
+.filings-ledger-header.gst-people-grid-template > :nth-child(3) { left: 210px !important; }
+
+.filings-ledger-header.gst-people-grid-template > :nth-child(1),
+.filings-ledger-header.gst-people-grid-template > :nth-child(2),
+.filings-ledger-header.gst-people-grid-template > :nth-child(3) {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 40 !important;
+    background: var(--bg-surface-2) !important;
+}
+
+.filings-ledger-header.gst-people-grid-template > :nth-child(1),
+.filings-ledger-header.gst-people-grid-template > :nth-child(2),
+.filings-ledger-header.gst-people-grid-template > :nth-child(3) {
+    z-index: 25 !important;
+    background: var(--bg-surface-2) !important; /* Match registrations header sticky */
+}
+
+.gst-table-row:hover .gst-people-grid-template > :nth-child(1),
+.gst-table-row:hover .gst-people-grid-template > :nth-child(2),
+.gst-table-row:hover .gst-people-grid-template > :nth-child(3) {
+    background: var(--bg-surface) !important;
+}
+
+.gst-docs-grid-template {
+    display: grid !important;
+    grid-template-columns: 
+        100px                   /* 1. Document ID (Sticky) */
+        100px                   /* 2. Person ID (Sticky) */
+        minmax(150px, 1fr)      /* 3. GSTIN */
+        minmax(180px, 1.2fr)    /* 4. Document Type */
+        minmax(140px, 0.9fr)    /* 5. Verification Status */
+        minmax(150px, 1fr)      /* 6. Verified By */
+        minmax(150px, 1fr)      /* 7. Verification Date */
+        minmax(120px, 0.8fr)    /* 8. Record Status */
+        minmax(100px, 0.7fr)    /* 9. File Action */
+        minmax(120px, 0.8fr);   /* 10. Actions */
+    gap: 0 !important;
+    grid-column-gap: 0 !important;
+    width: fit-content !important;
+    min-width: 100% !important;
+}
+
+.gst-docs-grid-template > :nth-child(1) {
+    position: sticky !important;
+    left: 0 !important;
+    z-index: 5 !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
+    background: var(--bg-app) !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.05);
+}
+
+.gst-docs-grid-template > :nth-child(2) {
+    position: sticky !important;
+    left: 100px !important;
+    z-index: 5 !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
+    background: var(--bg-app) !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.1);
+}
+
+.filings-ledger-header.gst-docs-grid-template > :nth-child(1),
+.filings-ledger-header.gst-docs-grid-template > :nth-child(2) {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 40 !important;
+    background: var(--bg-surface-2) !important;
+}
+
+.filings-ledger-row.gst-docs-grid-template:hover > :nth-child(1),
+.filings-ledger-row.gst-docs-grid-template:hover > :nth-child(2) {
+    background: var(--bg-surface) !important;
+}
+
+.form-error-banner-v2 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    animation: slideIn 0.3s ease-out;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.form-error-banner-v2.success-banner {
+    background: rgba(16, 185, 129, 0.1) !important;
+    border: 1px solid rgba(16, 185, 129, 0.3) !important;
+    color: #2eb87a !important;
+}
+
+.form-error-banner-v2 svg {
+    flex-shrink: 0;
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.gst-reg-grid-template * {
+    box-sizing: border-box !important;
+}
+
+/* Sticky ID and Customer ID */
+.gst-reg-grid-template > :nth-child(1) {
+    position: sticky !important;
+    left: 0 !important;
+    z-index: 5 !important;
+    min-width: 70px !important;
+    max-width: 70px !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.04) !important;
+    background: var(--bg-app) !important;
+}
+
+.gst-reg-grid-template > :nth-child(2) {
+    position: sticky !important;
+    left: 70px !important;
+    z-index: 5 !important;
+    min-width: 90px !important;
+    max-width: 90px !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.1) !important;
+    box-shadow: 1px 0 0 rgba(var(--fg-rgb), 0.08);
+    background: var(--bg-app) !important;
+}
+
+.filings-ledger-header {
+    position: sticky !important;
+    top: 0 !important;
+    background: var(--bg-surface-2) !important; /* Matched to ITR header background */
+    z-index: 20 !important;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+}
+
+.filings-ledger-header-cell {
+    padding: 16px 16px !important; /* Slightly more breathable like ITR */
+    text-align: left !important;
+    font-weight: 900 !important; /* Ultra-bold for high-fidelity look */
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.1em !important;
+    color: var(--text-muted) !important; /* Matched to ITR header text color */
+    white-space: nowrap !important;
+    display: flex !important;
+    align-items: center !important;
+    background: var(--bg-surface-2) !important;
+}
+
+.filings-ledger-header.gst-reg-grid-template > :nth-child(1),
+.filings-ledger-header.gst-reg-grid-template > :nth-child(2) {
+    z-index: 15 !important;
+    background-color: var(--bg-surface-2) !important;
+}
+
+.filings-ledger-row.gst-reg-grid-template > :nth-child(1),
+.filings-ledger-row.gst-reg-grid-template > :nth-child(2) {
+    background-color: var(--bg-app) !important; /* Solid background for sticky cells */
+}
+
+.filings-ledger-row:hover > :nth-child(1),
+.filings-ledger-row:hover > :nth-child(2) {
+    background-color: var(--bg-surface) !important; /* Solid background for sticky cells on hover */
+}
+
+/* Sticky Actions column (right) — registrations */
+.gst-reg-grid-template .gst-sticky-actions {
+    position: sticky !important;
+    right: 0 !important;
+    z-index: 6 !important;
+    min-width: 160px !important;
+    max-width: 160px !important;
+    background-color: var(--bg-app) !important;
+    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    box-shadow: -4px 0 10px rgba(0, 0, 0, 0.45);
+}
+
+.filings-ledger-header.gst-reg-grid-template .gst-sticky-actions {
+    z-index: 25 !important;
+    background-color: var(--bg-surface-2) !important;
+}
+
+.filings-ledger-row.gst-reg-grid-template:hover .gst-sticky-actions {
+    background-color: var(--bg-surface) !important;
+}
+
+/* Sticky Actions — people */
+.gst-people-grid-template .gst-sticky-actions {
+    position: sticky !important;
+    right: 0 !important;
+    z-index: 6 !important;
+    min-width: 140px !important;
+    max-width: 140px !important;
+    background-color: var(--bg-app) !important;
+    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    box-shadow: -4px 0 10px rgba(0, 0, 0, 0.45);
+}
+
+.filings-ledger-header.gst-people-grid-template .gst-sticky-actions {
+    z-index: 25 !important;
+    background-color: var(--bg-surface-2) !important;
+}
+
+.filings-ledger-row.gst-people-grid-template:hover .gst-sticky-actions {
+    background-color: var(--bg-surface) !important;
+}
+
+/* Sticky Actions — documents */
+.gst-docs-grid-template .gst-sticky-actions {
+    position: sticky !important;
+    right: 0 !important;
+    z-index: 6 !important;
+    min-width: 120px !important;
+    max-width: 120px !important;
+    background-color: var(--bg-app) !important;
+    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    box-shadow: -4px 0 10px rgba(0, 0, 0, 0.45);
+}
+
+.filings-ledger-header.gst-docs-grid-template .gst-sticky-actions {
+    z-index: 25 !important;
+    background-color: var(--bg-surface-2) !important;
+}
+
+.filings-ledger-row.gst-docs-grid-template:hover .gst-sticky-actions {
+    background-color: var(--bg-surface) !important;
+}
+
+.gst-action-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-view-action, .btn-edit-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-view-action {
+    color: #4a90e2;
+    background: rgba(74, 144, 226, 0.1);
+}
+
+.btn-view-action:hover {
+    background: #4a90e2;
+    color: var(--text-primary);
+    box-shadow: 0 0 10px rgba(74, 144, 226, 0.3);
+}
+
+.btn-edit-action {
+    color: #2eb87a;
+    background: rgba(46, 184, 122, 0.1);
+}
+
+.btn-edit-action:hover {
+    background: #2eb87a;
+    color: var(--text-primary);
+    box-shadow: 0 0 10px rgba(46, 184, 122, 0.3);
+}
+
+
+
+/* --- Track Service Action --- */
+.btn-track-service-v2 {
+    padding: 4px 12px;
+    background: rgba(46, 184, 122, 0.1);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    border-radius: 8px;
+    color: #2eb87a;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-track-service-v2:hover {
+    background: #2eb87a;
+    color: var(--text-primary);
+    box-shadow: 0 0 15px rgba(46, 184, 122, 0.3);
+}
+
+/* Adjusting widths for 20 columns */
+.gst-registrations-table th:nth-child(18), /* Track */
+.gst-registrations-table td:nth-child(18) { width: 80px; min-width: 80px; text-align: center; }
+
+.gst-registrations-table th:nth-child(19), /* Assigned OP */
+.gst-registrations-table td:nth-child(19) { width: 140px; min-width: 140px; }
+
+.gst-registrations-table th:nth-child(20), /* Created At */
+.gst-registrations-table td:nth-child(20) { width: 160px; min-width: 160px; }
+
+/* --- Action Drawer (Filter Drawer) --- */
+.gst-filters-drawer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10000;
+    display: flex;
+    justify-content: flex-end;
+    animation: fadeInOverlay 0.3s ease;
+}
+
+.gst-filters-drawer {
+    height: 100vh;
+    background: rgba(var(--bg-rgb), 0.98);
+    border-left: 1px solid rgba(var(--fg-rgb), 0.1);
+    box-shadow: -10px 0 50px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Compact width — filter drawers only (not view/edit detail panels) */
+.gst-filters-drawer-overlay:not(.app-side-drawer-mode) > .gst-filters-drawer {
+    width: min(450px, calc(100vw - 24px));
+}
+
+@keyframes fadeInOverlay {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideInRight {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+}
+
+.drawer-header {
+    padding: 24px 32px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.drawer-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+    letter-spacing: -0.02em;
+}
+
+.btn-drawer-close {
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    color: var(--text-muted);
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-drawer-close:hover {
+    background: rgba(244, 67, 54, 0.1);
+    color: #f44336;
+}
+
+.drawer-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px;
+}
+
+.drawer-footer {
+    padding: 24px 32px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
+    display: flex;
+    gap: 16px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+/* GST registration view/edit — right drawer (same width as Income Tax edit panel) */
+.gst-filters-drawer.gst-reg-details-drawer {
+    width: var(--gst-reg-drawer-width) !important;
+    max-width: calc(100vw - 24px) !important;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+    animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .drawer-content,
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .gst-reg-details-scroll {
+    padding-left: 24px;
+    padding-right: 24px;
+    padding-bottom: 56px;
+    scroll-padding-bottom: 48px;
+    min-height: 0;
+}
+
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .drawer-footer,
+.gst-filters-drawer.gst-reg-details-drawer.gst-reg-side-drawer-shell > .gst-reg-details-footer {
+    padding-left: 24px;
+    padding-right: 24px;
+}
+
+.gst-reg-details-header {
+    flex-shrink: 0;
+    padding: 20px 24px;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.gst-reg-details-header .header-content-v4 {
+    flex: 1;
+    min-width: 0;
+}
+
+.gst-reg-details-header .modal-title-v4 {
+    font-size: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.gst-reg-details-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px 24px 28px;
+    scroll-padding-bottom: 24px;
+}
+
+.gst-reg-details-scroll .gst-message-banner {
+    margin: 0 0 16px !important;
+}
+
+.gst-reg-details-form .form-section-group:last-child {
+    margin-bottom: 0;
+}
+
+.gst-reg-details-footer {
+    flex-shrink: 0;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px 24px 20px;
+    gap: 0;
+}
+
+.gst-reg-details-footer .footer-actions-v4 {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+}
+
+.gst-reg-details-footer .gst-btn-schedule-payment {
+    margin-right: auto;
+}
+
+.gst-reg-details-confirm {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(6px);
+}
+
+.btn-reset-v4 {
+    flex: 1;
+    padding: 12px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    color: var(--text-muted);
+    border-radius: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-reset-v4:hover {
+    background: rgba(var(--fg-rgb), 0.06);
+    color: var(--text-primary);
+}
+
+.btn-apply-v4 {
+    flex: 2;
+    padding: 12px;
+    background: #2eb87a;
+    color: var(--bg-app);
+    border: none;
+    border-radius: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 15px rgba(46, 184, 122, 0.2);
+}
+
+.btn-apply-v4:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(46, 184, 122, 0.3);
+}
+
+/* --- GST Registration Details Side Panel (View Drawer) --- */
+.gst-details-drawer-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.gst-details-drawer-overlay.open {
+    opacity: 1;
+    visibility: visible;
+}
+
+.gst-details-drawer {
+    position: fixed;
+    top: 0;
+    right: -100%;
+    width: var(--gst-reg-drawer-width, var(--app-side-drawer-width));
+    max-width: calc(100vw - 24px);
+    height: 100vh;
+    background: var(--bg-surface);
+    border-left: 1px solid rgba(var(--fg-rgb), 0.08);
+    box-shadow: -15px 0 50px rgba(0, 0, 0, 0.6);
+    z-index: 10001;
+    transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+}
+
+.gst-details-drawer.open {
+    right: 0;
+}
+
+.drawer-header-v4 {
+    padding: 24px 32px;
+    background: rgba(var(--fg-rgb), 0.02);
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 16px !important;
+    position: relative;
+}
+
+.header-icon-v4 {
+    width: 44px;
+    height: 44px;
+    background: rgba(46, 184, 122, 0.1);
+    border: 1px solid rgba(46, 184, 122, 0.2);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #2eb87a;
+}
+
+.header-text-v4 {
+    text-align: left !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 4px;
+    margin-left: 0 !important;
+    margin-right: auto !important;
+}
+
+.header-text-v4 h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.header-chips-v4 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.badge-chip-v4 {
+    padding: 2px 10px;
+    background: rgba(30, 64, 175, 0.1);
+    border: 1px solid rgba(30, 64, 175, 0.4);
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #3b82f6;
+    display: inline-flex;
+    align-items: center;
+}
+
+.id-chip-v4 {
+    border-color: rgba(46, 184, 122, 0.3);
+    background: rgba(46, 184, 122, 0.08);
+    color: #3b82f6; 
+}
+
+.header-text-v4 .id-value-white {
+    color: var(--text-primary) !important;
+    font-weight: 800 !important;
+    margin-left: 4px;
+}
+
+.btn-close-drawer-v4 {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    padding: 8px;
+    border-radius: 8px;
+}
+
+.btn-close-drawer-v4:hover {
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+}
+
+.drawer-body-v4 {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+/* Custom Scrollbar for Drawer Body */
+.drawer-body-v4::-webkit-scrollbar { width: 4px; }
+.drawer-body-v4::-webkit-scrollbar-track { background: transparent; }
+.drawer-body-v4::-webkit-scrollbar-thumb { background: rgba(var(--fg-rgb), 0.1); border-radius: 10px; }
+
+.details-section-v4 {
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px solid rgba(var(--fg-rgb), 0.04);
+    border-radius: 16px;
+    padding: 20px;
+}
+
+.section-title-v4 {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #2eb87a; /* Emerald for better hierarchy */
+    letter-spacing: 0.1em;
+    margin-bottom: 20px;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    padding-bottom: 10px;
+}
+
+.info-grid-v4 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px 24px;
+}
+
+.info-item-v4 label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted) !important; /* Refined Off-white label */
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    font-weight: 700;
+}
+
+.info-item-v4 span {
+    font-size: 14px;
+    color: var(--text-primary);
+    font-weight: 600;
+    display: block;
+}
+
+.info-item-v4 .mono-v4 {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-primary);
+}
+
+.details-footer-v4 {
+    margin-top: auto;
+    padding: 24px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+/* Status Pills */
+.status-pill-v4 {
+    padding: 4px 12px !important;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: fit-content !important;
+}
+
+.status-filed { 
+    background: rgba(16, 185, 129, 0.12); 
+    color: #2eb87a; 
+    border: 1px solid rgba(16, 185, 129, 0.35); 
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+.status-pending { 
+    background: rgba(245, 158, 11, 0.12); 
+    color: #f59e0b; 
+    border: 1px solid rgba(245, 158, 11, 0.35); 
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+}
+.status-error { 
+    background: rgba(244, 63, 94, 0.12); 
+    color: #ef4444; 
+    border: 1px solid rgba(244, 63, 94, 0.35); 
+    box-shadow: 0 0 12px rgba(244, 63, 94, 0.15);
+}
+.status-default { background: rgba(var(--fg-rgb), 0.05); color: var(--text-muted); }
+
+.status-info-v4 label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-primary); /* Changed from rgba(var(--fg-rgb), 0.3) */
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    opacity: 0.8;
+}
+
+.status-display-v4 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+}
+
+.status-display-v4.active { color: #2eb87a; }
+.status-display-v4.inactive { color: #ef4444; }
+
+.drawer-loading-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 300px;
+    gap: 16px;
+    color: var(--text-muted);
+}
+
+.drawer-loading-box p {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+@media (max-width: 500px) {
+    .gst-details-drawer {
+        width: 100%;
+    }
+}
+
+/* --- Table Empty State V4 --- */
+.gst-no-data-v4 {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 40px;
+    text-align: center;
+}
+
+.no-data-icon-box {
+    width: 80px;
+    height: 80px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-radius: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+}
+
+.gst-no-data-v4 h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 8px;
+}
+
+.gst-no-data-v4 p {
+    font-size: 13px;
+    color: var(--text-muted);
+    max-width: 300px;
+    line-height: 1.5;
+    margin: 0;
+}
+
+/* --- Skeleton Loading V4 --- */
+.filings-ledger-skeleton-bar {
+    height: 12px;
+    width: 70%;
+    background: linear-gradient(
+        90deg,
+        rgba(var(--fg-rgb), 0.03) 25%,
+        rgba(var(--fg-rgb), 0.06) 50%,
+        rgba(var(--fg-rgb), 0.03) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-glow 1.5s infinite;
+    border-radius: 6px;
+}
+
+@keyframes skeleton-glow {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* --- Premium Drawer Filter Grid (v.69) --- */
+.drawer-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 16px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.filter-section-v4 {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.section-title {
+    font-size: 10px;
+    color: #2eb87a;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 800;
+}
+
+.filter-divider-v4 {
+    height: 1px;
+    background: rgba(var(--fg-rgb), 0.05);
+    margin: 16px 0;
+}
+
+.filter-group-v4 {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.filter-group-v4 label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    opacity: 0.7;
+}
+
+.filter-group-v4 input, 
+.filter-group-v4 select {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 12px;
+    padding: 12px;
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.filter-group-v4 input:focus, 
+.filter-group-v4 select:focus {
+    border-color: #2eb87a;
+    background: rgba(var(--fg-rgb), 0.04);
+}
+
+.filter-group-v4.full-width {
+    grid-column: span 2;
+}
+
+.drawer-content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.drawer-content::-webkit-scrollbar-thumb {
+    background: rgba(var(--fg-rgb), 0.1);
+    border-radius: 10px;
+}

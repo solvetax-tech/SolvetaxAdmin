@@ -1,0 +1,224 @@
+.notifications-tab-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 20px;
+    animation: fadeInDown 0.4s ease-out;
+}
+
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.nt-header {
+    margin-bottom: 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+}
+
+.nt-header-main {
+    flex: 1;
+}
+
+.nt-clear-btn {
+    background: rgba(244, 67, 54, 0.05);
+    border: 1px solid rgba(244, 67, 54, 0.1);
+    color: #f44336;
+    padding: 10px 18px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    margin-bottom: 4px;
+}
+
+.nt-clear-btn:hover {
+    background: rgba(244, 67, 54, 0.1);
+    border-color: rgba(244, 67, 54, 0.2);
+    transform: translateY(-2px);
+}
+
+.nt-card.clearing {
+    opacity: 0;
+    transform: translateX(50px);
+    pointer-events: none;
+}
+
+.nt-header-title {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.nt-bell {
+    color: var(--accent-color);
+    width: 28px;
+    height: 28px;
+}
+
+.nt-header h1 {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.nt-header p {
+    color: var(--text-muted);
+    font-size: 16px;
+}
+
+.nt-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.nt-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-radius: 20px;
+    padding: 24px;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(8px);
+}
+
+.nt-card:hover {
+    background: rgba(var(--fg-rgb), 0.04);
+    border-color: rgba(255, 184, 122, 0.1);
+    transform: translateX(4px);
+}
+
+.nt-card-icon-wrapper {
+    width: 48px;
+    height: 48px;
+    background: rgba(46, 184, 122, 0.1);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.nt-card-main {
+    flex: 1;
+}
+
+.nt-card-title {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.nt-description {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.nt-card-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+    min-width: 140px;
+}
+
+.nt-timestamp {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.nt-action-btn-v2 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(46, 184, 122, 0.08);
+    border: 1px solid rgba(46, 184, 122, 0.15);
+    color: #2eb87a;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.nt-action-btn-v2.disabled {
+    opacity: 0.4;
+    background: rgba(var(--fg-rgb), 0.05);
+    border-color: rgba(var(--fg-rgb), 0.1);
+    color: var(--text-muted);
+    cursor: not-allowed !important;
+}
+
+.nt-action-btn-v2:hover:not(.disabled) {
+    background: #2eb87a;
+    color: var(--text-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(46, 184, 122, 0.2);
+}
+
+.nt-action-btn-v2 svg {
+    width: 12px;
+    height: 12px;
+    transition: transform 0.2s ease;
+}
+
+.nt-action-btn-v2:hover:not(.disabled) svg {
+    transform: translateX(3px);
+}
+
+.nt-icon.create {
+    color: var(--accent-color);
+}
+
+.nt-icon.update {
+    color: #2196f3;
+}
+
+.nt-icon.system {
+    color: #ff9800;
+}
+
+.nt-icon.info {
+    color: var(--text-muted);
+}
+
+.nt-loading,
+.nt-empty {
+    text-align: center;
+    padding: 80px;
+    color: var(--text-muted);
+    font-size: 16px;
+    border: 1px dashed rgba(var(--fg-rgb), 0.05);
+    border-radius: 24px;
+}

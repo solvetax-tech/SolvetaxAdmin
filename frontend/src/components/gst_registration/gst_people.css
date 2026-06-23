@@ -1,0 +1,221 @@
+/* gst_people.css */
+
+.gst-people-metrics-title {
+    font-size: 18px;
+}
+
+.gst-people-header-margin {
+    margin-bottom: 16px;
+}
+
+.form-value-box {
+    width: 100%;
+    min-height: 38px;
+    padding: 10px 12px;
+    background: rgba(var(--fg-rgb), 0.035);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-size: 12px;
+    text-transform: none;
+    letter-spacing: normal;
+    display: flex;
+    align-items: center;
+    cursor: not-allowed;
+    box-sizing: border-box;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.gst-people-table-card-scroll {
+    overflow-x: auto;
+}
+
+.gst-people-table-row {
+    cursor: pointer;
+}
+
+.gst-people-pagination {
+    margin-top: 16px;
+}
+
+.gst-people-filters-panel {
+    overflow-y: auto;
+    max-height: 100vh;
+    padding-bottom: 40px;
+}
+
+.gst-people-filter-group-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.gst-people-filter-label-nomargin {
+    margin-bottom: 0;
+}
+
+.gst-people-filter-actions {
+    margin-top: 20px;
+    padding-bottom: 10px;
+}
+
+ .gst-people-active-wrapper {
+     display: flex;
+     flex-direction: column;
+     gap: 6px;
+     margin-top: 6px;
+ }
+
+.gst-people-active-status {
+    width: 100%;
+    min-height: 38px;
+    padding: 10px 12px;
+    background: rgba(var(--fg-rgb), 0.035);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    cursor: not-allowed;
+    box-sizing: border-box;
+}
+
+.gst-people-no-data {
+    color: white;
+    padding: 20px;
+}
+
+.gst-people-card-shell {
+    max-width: 1000px;
+}
+
+.gst-people-checkbox-group-wrapper {
+    grid-column: 1 / -1;
+    margin-top: 10px;
+}
+
+.gst-people-checkbox-label {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    color: var(--bg-surface);
+}
+
+.gst-people-checkbox-input {
+    width: auto;
+    min-height: auto;
+}
+
+.gst-people-form-buttons {
+    margin-top: 32px;
+}
+
+.gst-form-grid input.error,
+.gst-form-grid select.error,
+.gst-form-grid textarea.error {
+    border-color: rgba(244, 67, 54, 0.5);
+}
+
+.gst-form-grid .field-error {
+    color: #f44336;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+/* Searchable Select */
+.searchable-select-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.searchable-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--bg-surface-2);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-radius: 12px;
+    z-index: 1000;
+    max-height: 250px;
+    overflow-y: auto;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(12px);
+}
+
+.dropdown-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    transition: all 0.2s ease;
+}
+
+.dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.dropdown-item:hover {
+    background: rgba(var(--fg-rgb), 0.05);
+}
+
+.dropdown-item .item-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.dropdown-item .item-id {
+    color: #3b82f6;
+    font-weight: 700;
+    font-size: 11px;
+    background: rgba(59, 130, 246, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.dropdown-item .item-name {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+    margin-left: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dropdown-item .item-sub {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-family: monospace;
+}
+
+.dropdown-item.loading, .dropdown-item.no-results {
+    color: var(--text-primary);
+    text-align: center;
+    font-style: italic;
+    cursor: default;
+}
+
+.gst-dropdown-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 999;
+}
+
+.input-affix-right {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+    color: var(--text-primary);
+}

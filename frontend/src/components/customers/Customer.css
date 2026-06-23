@@ -1,0 +1,499 @@
+/* Customers tab — full-page table (aligned with Customer Services) */
+.customer-tab-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    background: transparent;
+    overflow: visible;
+    flex: 0 0 auto;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.customer-tab-container .gst-action-bar-v2,
+.customer-tab-container .tab-header-v2 {
+    margin-bottom: 8px;
+    padding: 0;
+    gap: 10px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.customer-grid-template {
+    display: grid !important;
+    grid-template-columns: 
+        minmax(70px, 0.5fr)     /* 1. ID (Sticky) */
+        minmax(180px, 1.2fr)    /* 2. Full Name */
+        minmax(220px, 1.5fr)    /* 3. Email */
+        minmax(130px, 0.8fr)    /* 4. Mobile */
+        minmax(120px, 0.7fr)    /* 5. Referrer mobile */
+        minmax(200px, 1.2fr)    /* 6. Business Name */
+        minmax(160px, 1fr)      /* 7. Business Type */
+        minmax(140px, 0.9fr)    /* 8. State */
+        minmax(130px, 0.8fr)    /* 9. City */
+        minmax(130px, 0.8fr)    /* 10. RM */
+        minmax(130px, 0.8fr)    /* 11. OP */
+        minmax(80px, 0.6fr)     /* 12. Active */
+        minmax(88px, 0.55fr);   /* 13. Actions (sticky right) */
+}
+
+.filings-ledger-header {
+    display: flex;
+    background: var(--bg-surface-2) !important;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 20 !important;
+}
+
+.filings-ledger-header-cell {
+    padding: 16px 16px !important;
+    font-size: 10px !important;
+    font-weight: 900 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.1em !important;
+    color: var(--text-muted) !important;
+    display: flex !important;
+    align-items: center !important;
+    white-space: nowrap !important;
+}
+
+.filings-ledger-body {
+    display: flex;
+    flex-direction: column;
+}
+
+.filings-ledger-row {
+    display: flex;
+    background: transparent;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.filings-ledger-row:hover {
+    background: rgba(var(--fg-rgb), 0.02);
+}
+
+.filings-ledger-cell {
+    padding: 12px 16px;
+    font-size: 11px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.customer-id-green-v4 {
+    color: #2eb87a !important;
+    font-weight: 700;
+}
+
+.customer-tab-container .gst-table-wrapper {
+    overflow-x: auto;
+    overflow-y: visible;
+    display: block;
+    background: rgba(var(--bg-rgb), 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 12px;
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    position: relative;
+    min-height: 0;
+}
+
+/* Horizontal scroll only — no vertical scrollbar on the table panel */
+.customer-tab-container .gst-table-wrapper::-webkit-scrollbar {
+    width: 0;
+    height: 6px;
+}
+.customer-tab-container .gst-table-wrapper::-webkit-scrollbar-track {
+    background: transparent;
+}
+.customer-tab-container .gst-table-wrapper::-webkit-scrollbar-thumb {
+    background: rgba(var(--fg-rgb), 0.1);
+    border-radius: 10px;
+}
+.customer-tab-container .gst-table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: rgba(46, 184, 122, 0.3);
+}
+
+.customer-tab-container .gst-table-container {
+    overflow: visible;
+}
+
+/* Sticky First Column Logic */
+.customer-grid-template > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 10;
+    background: var(--bg-app) !important;
+    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+    justify-content: center;
+}
+
+.filings-ledger-header.customer-grid-template > :first-child {
+    background: var(--bg-surface-2) !important;
+    z-index: 25;
+}
+
+.filings-ledger-row:hover > :first-child {
+    background: var(--bg-surface) !important;
+}
+
+/* Sticky Actions column (right edge, mirrors Cust ID on left) */
+.customer-grid-template > .customer-actions-sticky,
+.filings-ledger-header-cell.customer-actions-sticky {
+    position: sticky;
+    right: 0;
+    z-index: 10;
+    background: var(--bg-app) !important;
+    border-left: 1px solid rgba(var(--fg-rgb), 0.08);
+    justify-content: center;
+}
+
+.filings-ledger-header.customer-grid-template > .customer-actions-sticky {
+    background: var(--bg-surface-2) !important;
+    z-index: 25;
+}
+
+.filings-ledger-row:hover > .customer-actions-sticky {
+    background: var(--bg-surface) !important;
+}
+
+.customer-row-active > .customer-actions-sticky {
+    background: rgba(46, 184, 122, 0.08) !important;
+}
+
+.users-table tr.customer-row-active td {
+    background: rgba(46, 184, 122, 0.08);
+}
+
+/* Skeleton Loading - High Fidelity Ledger Style */
+.filings-ledger-skeleton-bar {
+    height: 12px;
+    width: 80%;
+    background: rgba(var(--fg-rgb), 0.07);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+}
+
+.filings-ledger-skeleton-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(var(--fg-rgb), 0.1), transparent);
+    animation: ledger-shimmer 1.5s infinite;
+}
+
+@keyframes ledger-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* Combined Table Actions */
+.table-actions-combined {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+}
+
+.btn-view-services-mini {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(var(--fg-rgb), 0.12);
+    background: rgba(var(--fg-rgb), 0.04);
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-view-services-mini.btn-view-icon-only {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 8px;
+}
+
+.btn-view-services-mini:hover {
+    background: rgba(46, 184, 122, 0.08);
+    border-color: rgba(46, 184, 122, 0.3);
+    color: #2eb87a;
+    box-shadow: 0 0 15px rgba(46, 184, 122, 0.1);
+}
+
+/* Side Panel Drawer Styles */
+.side-panel-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    z-index: 3000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.side-panel-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* side-panel-drawer and its children are now using standardized tracker-drawer styles from Dashboard.css */
+.side-panel-drawer {
+    z-index: 3001;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+.side-panel-footer {
+    padding: 24px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
+}
+
+.btn-panel-action-full {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    background: linear-gradient(135deg, #2eb87a, #1a9c63);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(46, 184, 122, 0.2);
+}
+
+.btn-panel-action-full:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(46, 184, 122, 0.3);
+    background: linear-gradient(135deg, #2eb87a, #2eb87a);
+}
+
+.pagination-fixed-bottom {
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 20px 0;
+    background: linear-gradient(to top, var(--bg-app-2) 70%, transparent);
+    display: flex;
+    justify-content: center;
+    z-index: 30;
+    margin-top: auto;
+}
+
+/* ── Premium Right Side Drawer Filter ── */
+.premium-drawer-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    z-index: 11000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.premium-drawer-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.premium-drawer-right {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 460px;
+    height: 100%;
+    background: var(--bg-app);
+    border-left: 1px solid rgba(var(--fg-rgb), 0.08);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+    z-index: 11001;
+}
+
+.premium-drawer-overlay.show .premium-drawer-right {
+    transform: translateX(0);
+}
+
+.drawer-header-v4 {
+    padding: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+}
+
+.drawer-header-v4 h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.drawer-content-v4 {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.drawer-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 16px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.drawer-filter-grid *,
+.drawer-filter-grid *::before,
+.drawer-filter-grid *::after {
+    box-sizing: border-box;
+}
+
+.drawer-footer-v4 {
+    padding: 24px;
+    display: flex;
+    gap: 12px;
+    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.filter-group-v4 {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.filter-group-v4 label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    opacity: 0.7;
+}
+
+.filter-group-v4 input, 
+.filter-group-v4 select {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(var(--fg-rgb), 0.02);
+    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: 12px;
+    padding: 12px;
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.filter-group-v4 input:focus, 
+.filter-group-v4 select:focus {
+    border-color: #2eb87a;
+    background: rgba(var(--fg-rgb), 0.04);
+}
+
+.filter-group-v4.full-width {
+    grid-column: span 2;
+}
+
+/* Drawer Buttons */
+.btn-apply-v4 {
+    flex: 1;
+    background: #2eb87a;
+    color: var(--text-primary);
+    border: none;
+    border-radius: 12px;
+    padding: 14px;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 15px rgba(46, 184, 122, 0.2);
+}
+
+.btn-apply-v4:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(46, 184, 122, 0.3);
+}
+
+.btn-reset-v4 {
+    padding: 14px 24px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    color: var(--text-primary);
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-reset-v4:hover {
+    background: rgba(var(--fg-rgb), 0.06);
+    border-color: rgba(var(--fg-rgb), 0.2);
+}
+
+/* ── Customer Data Styling Overrides ── */
+.customer-name-blue-v4 {
+    color: #4facfe !important; /* Premium Cyan-Blue for visibility on dark */
+    font-weight: 600;
+}
+
+.business-type-chip-v4 {
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    color: #8b5cf6; /* Soft Purple/Violet */
+    padding: 3px 12px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: inline-flex;
+    align-items: center;
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.05);
+}
+
+.filings-ledger-row:hover .business-type-chip-v4 {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.4);
+    color: #8b5cf6;
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+}

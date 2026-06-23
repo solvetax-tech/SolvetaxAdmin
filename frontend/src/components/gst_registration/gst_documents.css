@@ -1,0 +1,248 @@
+/* gst_documents.css */
+
+.gst-docs-metrics-title {
+    font-size: 18px;
+}
+
+.gst-docs-header-margin {
+    margin-bottom: 16px;
+}
+
+.gst-documents-container .tab-header-v2 {
+    position: relative;
+    z-index: 5;
+    pointer-events: auto;
+}
+
+.gst-documents-container .tab-header-v2>div {
+    position: relative;
+    z-index: 5;
+    pointer-events: auto;
+}
+
+.gst-documents-container .tab-header-v2 button {
+    pointer-events: auto;
+}
+
+
+.gst-documents-container {
+    position: relative;
+}
+
+.gst-documents-container .premium-filter-overlay {
+    pointer-events: none !important;
+}
+
+.gst-documents-container .premium-filter-overlay.show {
+    pointer-events: auto !important;
+}
+
+.gst-docs-table-card-scroll {
+    overflow-x: auto;
+}
+
+.gst-docs-table-row {
+    cursor: pointer;
+}
+
+.gst-docs-pagination {
+    margin-top: 16px;
+}
+
+.gst-docs-filters-panel {
+    overflow-y: auto;
+    max-height: 100vh;
+    padding-bottom: 40px;
+}
+
+.gst-docs-filter-group-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.gst-docs-filter-label-nomargin {
+    margin-bottom: 0;
+}
+
+.gst-docs-filter-actions {
+    margin-top: 20px;
+    padding-bottom: 10px;
+}
+
+.gst-docs-no-data {
+    color: white;
+    padding: 20px;
+}
+
+.gst-docs-card-shell {
+    max-width: 1000px;
+}
+
+.gst-docs-checkbox-group-wrapper {
+    grid-column: 1 / -1;
+    margin-top: 10px;
+}
+
+.gst-docs-checkbox-label {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    color: var(--bg-surface);
+}
+
+.gst-docs-checkbox-input {
+    width: auto;
+    min-height: auto;
+}
+
+.gst-docs-form-value-box-ellipsis {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Premium Details Grid */
+.gst-details-premium-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    padding: 8px 0;
+}
+
+.detail-item-v4 {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.detail-item-v4.full-width {
+    grid-column: 1 / -1;
+}
+
+.detail-label-v4 {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--text-primary);
+    text-transform: uppercase;
+}
+
+.detail-value-v4 {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    padding: 12px 16px;
+    background: rgba(var(--fg-rgb), 0.03);
+    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-radius: 12px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+}
+
+.detail-value-v4.highlight-blue {
+    color: #3b82f6;
+    border-color: rgba(59, 130, 246, 0.2);
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.detail-value-v4.highlight-green-v4 {
+    color: #2eb87a;
+    border-color: rgba(16, 185, 129, 0.2);
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.status-badge-v4 {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.status-badge-v4.verified,
+.status-badge-v4.active {
+    background: rgba(16, 185, 129, 0.1);
+    color: #2eb87a;
+}
+
+.status-badge-v4.pending,
+.status-badge-v4.inactive {
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+}
+
+.premium-view-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #3b82f6;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.premium-view-link:hover {
+    color: #3b82f6;
+    transform: translateX(4px);
+}
+
+
+.gst-docs-form-buttons {
+    margin-top: 32px;
+}
+
+.link-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: rgba(46, 184, 122, 0.08);
+    border: 1px solid rgba(46, 184, 122, 0.25);
+    color: #bfead7;
+    font-size: 10px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.link-text:hover {
+    background: rgba(46, 184, 122, 0.18);
+    border-color: rgba(46, 184, 122, 0.45);
+    color: #e4fff2;
+}
+
+.gst-text-center {
+    text-align: center !important;
+}
+
+.gst-flex-center {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+.btn-icon-minimal {
+    background: transparent;
+    border: none;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.btn-icon-minimal:hover {
+    background: rgba(46, 184, 122, 0.1);
+}
+
+.btn-icon-minimal svg {
+    display: block;
+    fill: none !important;
+}
