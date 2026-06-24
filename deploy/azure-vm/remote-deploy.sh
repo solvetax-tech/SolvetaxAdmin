@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Called by GitHub Actions over SSH. Usage:
 #   bash deploy/azure-vm/remote-deploy.sh dev ghcr.io/owner/repo
+#   bash deploy/azure-vm/remote-deploy.sh qa ghcr.io/owner/repo
 #   bash deploy/azure-vm/remote-deploy.sh prod ghcr.io/owner/repo
 
 set -euo pipefail
 
-TAG="${1:?Usage: remote-deploy.sh <dev|prod> <ghcr-image-base>}"
-IMAGE_BASE="${2:?Usage: remote-deploy.sh <dev|prod> <ghcr-image-base>}"
+TAG="${1:?Usage: remote-deploy.sh <dev|qa|prod> <ghcr-image-base>}"
+IMAGE_BASE="${2:?Usage: remote-deploy.sh <dev|qa|prod> <ghcr-image-base>}"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -16,8 +17,8 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-if [[ "$TAG" != "dev" && "$TAG" != "prod" ]]; then
-  echo "TAG must be dev or prod"
+if [[ "$TAG" != "dev" && "$TAG" != "qa" && "$TAG" != "prod" ]]; then
+  echo "TAG must be dev, qa, or prod"
   exit 1
 fi
 

@@ -1,12 +1,13 @@
 # Solvetax CI/CD — dev + prod (from scratch)
 
-> **New to DevOps?** Read the full explained guide first: **[GUIDE.md](./GUIDE.md)** (networking, Docker, GitHub Actions, VMs, secrets, step-by-step).
+> **Setting up dev first?** Step-by-step: **[DEV-SETUP.md](./DEV-SETUP.md)** (secrets, VM, networking, deploy).
 
 Monorepo: **FastAPI backend + React (Vite) frontend** → one Docker image → **nginx + HTTPS** on each Azure VM.
 
 | Branch | CI | CD | Image tag | Server |
 |--------|----|----|-----------|--------|
 | `dev` | ✅ | Auto deploy | `:dev` | Dev VM |
+| `qa` | ✅ | Auto deploy | `:qa` | QA VM (staging) |
 | `main` / `prod` | ✅ | Auto deploy* | `:prod`, `:latest` | Prod VM |
 | PR → `dev`/`main` | ✅ build only | — | — | — |
 
@@ -18,6 +19,7 @@ Workflows:
 |------|---------|
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | PR + push (build check) |
 | [`.github/workflows/cd-dev.yml`](../.github/workflows/cd-dev.yml) | Push to `dev` |
+| [`.github/workflows/cd-qa.yml`](../.github/workflows/cd-qa.yml) | Push to `qa` |
 | [`.github/workflows/cd-prod.yml`](../.github/workflows/cd-prod.yml) | Push to `main` or `prod` |
 
 ---

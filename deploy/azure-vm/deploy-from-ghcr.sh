@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Manual deploy from VM (same as CI). Example:
-#   bash deploy/azure-vm/deploy-from-ghcr.sh prod
 #   bash deploy/azure-vm/deploy-from-ghcr.sh dev
+#   bash deploy/azure-vm/deploy-from-ghcr.sh qa
+#   bash deploy/azure-vm/deploy-from-ghcr.sh prod
 
 set -euo pipefail
 
