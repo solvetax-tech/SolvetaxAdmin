@@ -1,5 +1,7 @@
 # Environment variables
 .env
+deploy/azure-appservice/app-settings.dev.env
+deploy/azure-appservice/app-settings.dev.json
 
 # Python
 __pycache__/

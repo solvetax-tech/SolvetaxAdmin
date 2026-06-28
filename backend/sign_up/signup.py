@@ -178,6 +178,20 @@ async def signup(
             )
 
         if verification_row["is_verified"] is not True:
+            expires_at = verification_row["expires_at"]
+            if expires_at is not None and expires_at < datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": {
+                            "type": "validation_error",
+                            "message": "Verification expired",
+                            "fields": {
+                                "email": "OTP expired. Please verify email again."
+                            },
+                        }
+                    },
+                )
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -185,19 +199,6 @@ async def signup(
                         "type":"validation_error",
                         "message":"Email not verified",
                         "fields":{"email":"Please verify email before signup"}
-                    }
-                }
-            )
-
-        expires_at = verification_row["expires_at"]
-        if expires_at is not None and expires_at < datetime.now(timezone.utc):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error":{
-                        "type":"validation_error",
-                        "message":"Verification expired",
-                        "fields":{"email":"Please verify email again verification time expired"}
                     }
                 }
             )

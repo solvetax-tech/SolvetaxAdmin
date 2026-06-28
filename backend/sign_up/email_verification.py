@@ -83,11 +83,7 @@ async def request_email_verification(payload: EmailVerificationRequest = Body(..
         # Already verified check (🔥 FIXED)
         # --------------------------------------------------
 
-        if (
-            last_record
-            and last_record["is_verified"]
-            and last_record["expires_at"] > datetime.now(timezone.utc)
-        ):
+        if last_record and last_record["is_verified"]:
             raise HTTPException(status_code=400, detail="Email already verified and you can proceed with Onboarding")
 
         # --------------------------------------------------
@@ -174,7 +170,7 @@ async def verify_email(payload: EmailVerificationVerify = Body(...)):
             raise HTTPException(status_code=400, detail="OTP not requested")
 
         # 🔥 EXPIRY AWARE CHECK
-        if otp_row["is_verified"] and otp_row["expires_at"] > datetime.now(timezone.utc):
+        if otp_row["is_verified"]:
             raise HTTPException(status_code=400, detail="Email already verified")
 
         if otp_row["is_used"]:

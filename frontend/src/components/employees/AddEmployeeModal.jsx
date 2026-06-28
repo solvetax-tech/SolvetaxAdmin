@@ -11,7 +11,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
         username: '',
         email: '',
         password: '',
-        confirm_password: '', // Kept for frontend validation
+        confirm_password: '', // unused — password confirmed via strength rules only
         first_name: '',
         last_name: '',
         phone_number: '',
@@ -218,7 +218,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
     };
 
     const validateForm = () => {
-        const { username, email, password, confirm_password, phone_number, first_name, last_name, role } = formData;
+        const { username, email, password, phone_number, first_name, last_name, role } = formData;
         let errors = {};
 
         if (!username.trim()) errors.username = 'Username is required';
@@ -228,7 +228,6 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
         } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>])/.test(password)) {
             errors.password = 'Need Upper, Lower, Num & Special';
         }
-        if (password !== confirm_password) errors.confirm_password = 'Passwords do not match';
         if (!first_name.trim()) errors.first_name = 'First Name is required';
         if (!last_name.trim()) errors.last_name = 'Last Name is required';
         if (phone_number && !/^\d{10}$/.test(phone_number)) errors.phone_number = '10 digits required';
@@ -248,7 +247,10 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
             setError('Please verify your email address first.');
             return;
         }
-        if (!validateForm()) return;
+        if (!validateForm()) {
+            setError('Please fix the highlighted fields before submitting.');
+            return;
+        }
 
         setFieldErrors({});
         setError('');
