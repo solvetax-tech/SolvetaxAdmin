@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend.logger import logger
 from backend.payments.payment_cache_invalidation import invalidate_payment_related_caches
+from backend.payments.crm_lead_sync import sync_crm_lead_from_payment_paid
 from backend.payments.schemas import FilingPaymentIn
 from backend.payments.payment_ledger import PaymentLedgerError
 from backend.payments.payment_ledger_db import (
@@ -117,9 +118,14 @@ async def create_income_tax_payment(
                     None,
                 )
 
+                synced_crm_lead_id = await sync_crm_lead_from_payment_paid(
+                    conn, dict(payment_row)
+                )
+
             await invalidate_payment_related_caches(
                 income_tax_id=int(payload.entity_id),
                 crm=True,
+                crm_lead_id=synced_crm_lead_id,
             )
             return {
                 **dict(payment_row),

@@ -22,6 +22,7 @@ from backend.utils import (
 from backend.logger import logger
 from backend.text_search_filters import append_fuzzy_name_or_filter
 from backend.payments.payment_cache_invalidation import invalidate_payment_related_caches
+from backend.payments.crm_lead_sync import sync_crm_lead_from_payment_paid
 from backend.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -148,6 +149,10 @@ async def create_registration_payment(
                     None,
                 )
 
+                synced_crm_lead_id = await sync_crm_lead_from_payment_paid(
+                    conn, dict(payment_row)
+                )
+
             # --------------------------------------------------
             # RESPONSE
             # --------------------------------------------------
@@ -155,6 +160,7 @@ async def create_registration_payment(
             await invalidate_payment_related_caches(
                 gst_registration_id=payload.entity_id,
                 crm=True,
+                crm_lead_id=synced_crm_lead_id,
             )
             return {
                 **dict(payment_row),

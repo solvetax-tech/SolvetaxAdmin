@@ -39,6 +39,8 @@ from backend.utils import (
 )
 from backend.security.rbac import require_permission
 from backend.logger import logger
+from backend.crm.crm_leads_common import _invalidate_crm_cache
+from backend.gst_registration.crm_lead_sync import sync_crm_lead_from_gst_registration
 from backend.text_search_filters import append_fuzzy_name_filter, append_fuzzy_name_or_filter, append_ilike_contains
 from backend.redis_cache import (
     build_cache_key,
@@ -2001,6 +2003,7 @@ async def update_gst_filing(
                 )
 
                 # Keep shared GST registration fields in sync when this filing is linked.
+                synced_crm_lead_id = None
                 if new_reg:
                     filing_to_registration = {
                         "gstin": "gstin",
@@ -2029,15 +2032,20 @@ async def update_gst_filing(
                         reg_values.append(now)
                         reg_idx += 1
                         reg_values.append(new_reg)
-                        await conn.execute(
+                        updated_reg = await conn.fetchrow(
                             f"""
                             UPDATE {DB_SCHEMA}.gst_registration
                             SET {', '.join(reg_fields)}
                             WHERE id=${reg_idx}
                               AND is_active = TRUE
+                            RETURNING *
                             """,
                             *reg_values,
                         )
+                        if updated_reg:
+                            synced_crm_lead_id = await sync_crm_lead_from_gst_registration(
+                                conn, dict(updated_reg)
+                            )
 
                 # =====================================================
                 # 🔥 REBUILD RETURN DETAILS (IF REQUIRED)
@@ -2093,6 +2101,8 @@ async def update_gst_filing(
                 result["password"] = None
 
                 await _invalidate_gst_filing_cache(new.get("gst_registration_id"))
+                if synced_crm_lead_id is not None:
+                    await _invalidate_crm_cache(synced_crm_lead_id)
                 return {
                     "data": result,
                     "message": GstFilingApiMessages.UPDATE_SUCCESS,

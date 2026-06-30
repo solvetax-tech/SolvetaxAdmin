@@ -12,6 +12,7 @@ from backend.crm.crm_leads_common import _invalidate_crm_cache
 from backend.payments.payment_scheduler import sync_settled_payment_entities
 from backend.gst_registration_filing.gst_filing_auto_generation import (
     build_next_row_from_source,
+    chain_filing_frequency,
     gstr9c_sync_category_sql,
 )
 from backend.redis_cache import invalidate_tag as redis_invalidate_tag
@@ -593,12 +594,17 @@ async def background_jobs():
                 if any(pay_sync.values()):
                     await redis_invalidate_tag("registration_payments:filter:index")
                     await redis_invalidate_tag("payments_config:get_amount:index")
+                    if pay_sync.get("synced_crm_lead_ids"):
+                        for crm_lead_id in pay_sync["synced_crm_lead_ids"]:
+                            await _invalidate_crm_cache(crm_lead_id)
                     logging.info(
                         "Payment entity settlement sync: duplicate_paid_demoted=%s "
-                        "latest_promoted_to_paid=%s superseded_pending_closed=%s",
+                        "latest_promoted_to_paid=%s superseded_pending_closed=%s "
+                        "synced_crm_leads=%s",
                         pay_sync["duplicate_paid_demoted"],
                         pay_sync["latest_promoted_to_paid"],
                         pay_sync["superseded_pending_closed"],
+                        len(pay_sync.get("synced_crm_lead_ids") or []),
                     )
 
                 # 13) CRM auto bulk-assign (persistent round-robin rm_id/op_id from saved filter rules)

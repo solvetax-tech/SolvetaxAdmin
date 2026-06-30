@@ -230,10 +230,10 @@ async def create_registration_person(
                 gst_row = await conn.fetchrow(
                     f"""
                     SELECT id,
-                           customer_id,
                            gstin,
                            ownership_category,
-                           is_active
+                           is_active,
+                           customer_id
                     FROM {DB_SCHEMA}.gst_registration
                     WHERE id = $1
                     LIMIT 1
@@ -253,9 +253,9 @@ async def create_registration_person(
                         detail="GST registration is inactive.",
                     )
 
-                derived_customer_id = gst_row["customer_id"]
                 derived_gstin = gst_row["gstin"]
                 derived_ownership = gst_row["ownership_category"]
+                audit_customer_id = gst_row["customer_id"]
 
                 # --------------------------------------------------
                 # 2️⃣ Normalize Inputs
@@ -402,7 +402,6 @@ async def create_registration_person(
                     f"""
                     INSERT INTO {DB_SCHEMA}.gst_registration_persons
                     (
-                        customer_id,
                         gstin,
                         full_name,
                         designation,
@@ -419,11 +418,10 @@ async def create_registration_person(
                     )
                     VALUES
                     (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10,$11,$12,$13
+                        $1,$2,$3,$4,$5,$6,$7,$8,TRUE,$9,$10,$11,$12
                     )
                     RETURNING *
                     """,
-                    derived_customer_id,
                     derived_gstin,
                     payload.full_name,
                     payload.designation,
@@ -465,7 +463,7 @@ async def create_registration_person(
                     emp_id,
                     "REGISTRATION_PERSON",
                     person_row["person_id"],
-                    derived_customer_id,
+                    audit_customer_id,
                     "CREATE",
                     json.dumps(dict(person_row), default=str),
                     None,
@@ -666,7 +664,7 @@ async def list_registration_persons(
             param_index += 1
 
         if customer_id is not None:
-            conditions.append(f"p.customer_id = ${param_index}")
+            conditions.append(f"g.customer_id = ${param_index}")
             values.append(customer_id)
             param_index += 1
 
@@ -793,6 +791,7 @@ async def list_registration_persons(
 
         data_sql = f"""
             SELECT p.*,
+                   g.customer_id,
                    g.rm_id,
                    g.created_by,
                    e_rm.first_name AS rm_name,
@@ -962,6 +961,14 @@ async def edit_registration_person(
                     )
 
                 gst_registration_id = old_row["gst_registration_id"]
+                audit_customer_id = await conn.fetchval(
+                    f"""
+                    SELECT customer_id
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE id = $1
+                    """,
+                    gst_registration_id,
+                )
 
                 # --------------------------------------------------
                 # 2️⃣ Format validation
@@ -1183,7 +1190,7 @@ async def edit_registration_person(
                     emp_id,
                     "REGISTRATION_PERSON",
                     person_id,
-                    old_row["customer_id"],
+                    audit_customer_id,
                     "UPDATE",
                     json.dumps(dict(old_row), default=str),
                     json.dumps(dict(new_row), default=str),
@@ -1354,11 +1361,11 @@ async def soft_delete_registration_person(
                         f"""
                         SELECT COUNT(*)
                           FROM {DB_SCHEMA}.gst_registration_persons
-                         WHERE customer_id = $1
+                         WHERE gst_registration_id = $1
                            AND is_active = TRUE
                            AND person_id <> $2
                         """,
-                        person_row["customer_id"],
+                        person_row["gst_registration_id"],
                         person_id,
                     )
 
@@ -1399,6 +1406,15 @@ async def soft_delete_registration_person(
                     """,
                     person_id,
                 )
+                audit_customer_id = await conn.fetchval(
+                    f"""
+                    SELECT customer_id
+                      FROM {DB_SCHEMA}.gst_registration
+                     WHERE id = $1
+                    """,
+                    person_row["gst_registration_id"],
+                )
+
                 # --------------------------------------------------
                 # 6️⃣ Version Audit for Person
                 # --------------------------------------------------
@@ -1419,7 +1435,7 @@ async def soft_delete_registration_person(
                     emp_id,
                     "REGISTRATION_PERSON",
                     person_id,
-                    person_row["customer_id"],
+                    audit_customer_id,
                     "DELETE",
                     None,
                     None,
@@ -1514,14 +1530,15 @@ async def activate_registration_person(
                 # --------------------------------------------------
                 person_row = await conn.fetchrow(
                     f"""
-                    SELECT rp.*, 
-                           c.is_active AS customer_active, 
-                           gst.is_active AS gst_active
+                    SELECT rp.*,
+                           gst.customer_id,
+                           gst.is_active AS gst_active,
+                           c.is_active AS customer_active
                       FROM {DB_SCHEMA}.gst_registration_persons rp
-                      JOIN {DB_SCHEMA}.customers c
-                        ON rp.customer_id = c.customer_id
                       JOIN {DB_SCHEMA}.gst_registration gst
                         ON rp.gst_registration_id = gst.id
+                      LEFT JOIN {DB_SCHEMA}.customers c
+                        ON gst.customer_id = c.customer_id
                      WHERE rp.person_id = $1
                      FOR UPDATE
                     """,
@@ -1546,14 +1563,14 @@ async def activate_registration_person(
                         detail="Cannot activate person: associated GST is inactive. Activate GST first.",
                     )
 
-                if not person_row["customer_active"]:
+                if person_row["customer_id"] is not None and not person_row["customer_active"]:
                     raise HTTPException(
                         status_code=400,
                         detail="Cannot activate person: associated customer is inactive.",
                     )
 
                 gst_registration_id = person_row["gst_registration_id"]
-                customer_id = person_row["customer_id"]
+                audit_customer_id = person_row["customer_id"]
                 is_primary = person_row["is_primary_customer"]
 
                 # --------------------------------------------------
@@ -1648,7 +1665,7 @@ async def activate_registration_person(
                     emp_id,
                     "REGISTRATION_PERSON",
                     person_id,
-                    customer_id,
+                    audit_customer_id,
                     "ACTIVATE",
                     None,
                     None,

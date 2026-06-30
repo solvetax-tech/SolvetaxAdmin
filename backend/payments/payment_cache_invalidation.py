@@ -3,6 +3,7 @@
 from typing import Optional
 
 from backend.Dashboard.service_done_payment_pending import invalidate_service_done_payment_pending_cache
+from backend.crm.crm_leads_common import _invalidate_crm_cache
 from backend.redis_cache import invalidate_tag as redis_invalidate_tag
 
 _REGISTRATION_PAYMENTS_FILTER_TAG = "registration_payments:filter:index"
@@ -33,12 +34,6 @@ _CUSTOMER_SERVICE_FOLLOWUP_TAGS = (
     "customer_service_followups:alerts:index",
 )
 
-_CRM_TAGS = (
-    "crm:leads:filter:index",
-    "crm:activities:filter:index",
-    "crm:lead:by_entity:index",
-)
-
 
 async def _invalidate_tags(tags: tuple[str, ...]) -> None:
     for tag in tags:
@@ -63,6 +58,7 @@ async def invalidate_payment_related_caches(
     gst_filing: bool = False,
     customer_service: bool = False,
     crm: bool = False,
+    crm_lead_id: Optional[int] = None,
 ) -> None:
     """Invalidate caches commonly stale after any payment write."""
     await redis_invalidate_tag(_REGISTRATION_PAYMENTS_FILTER_TAG)
@@ -86,4 +82,4 @@ async def invalidate_payment_related_caches(
         await redis_invalidate_tag(f"income_tax:detail:index:{income_tax_id}")
 
     if crm:
-        await _invalidate_tags(_CRM_TAGS)
+        await _invalidate_crm_cache(crm_lead_id)

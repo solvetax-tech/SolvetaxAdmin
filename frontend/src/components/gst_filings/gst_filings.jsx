@@ -72,7 +72,7 @@ import GSTFilingsReturns from './GSTFilingsReturns';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromConfig, optionsFromConfigOnly, optionsFromPairs } from '../common/selectOptionUtils';
 import {
-    parseActiveUsernamesFromApi,
+    parseActiveEmployeesFromApi,
     buildRmOpSelectOptions,
 } from '../../utils/activeEmployees';
 
@@ -763,8 +763,8 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
 
             setConfigs({
                 states: statesRes.data || [],
-                activeRMs: parseActiveUsernamesFromApi(rmsRes),
-                activeOps: parseActiveUsernamesFromApi(opsRes),
+                activeRMs: parseActiveEmployeesFromApi(rmsRes),
+                activeOps: parseActiveEmployeesFromApi(opsRes),
                 employees: adminList,
                 businessTypes: btRes.data?.data || btRes.data || [],
                 entityTypes: entityRes.data?.items || entityRes.data?.data || entityRes.data || []
@@ -1124,12 +1124,14 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                 isEditMode: filingFormIsEdit,
                 editingRecord: editingFiling,
                 formRmId: createForm.rm_id,
+                assignmentPool: configs.activeRMs,
             });
             payload.op_id = resolveOpIdForPayload({
                 profileData,
                 isEditMode: filingFormIsEdit,
                 editingRecord: editingFiling,
                 formOpId: createForm.op_id,
+                assignmentPool: configs.activeOps,
             });
 
             if (!editingFiling && payload.filing_period && existingPeriods.includes(normalizePeriod(payload.filing_period))) {

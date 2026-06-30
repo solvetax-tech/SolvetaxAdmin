@@ -16,6 +16,7 @@ from backend.gst_registration.gst_registration_helpers import (
     GST_CRM_ENTITY_TYPE,
 )
 from backend.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
+from backend.gst_registration.crm_lead_sync import sync_crm_lead_from_gst_registration
 from backend.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from backend.security.rbac import require_permission
 from backend.logger import logger
@@ -63,6 +64,18 @@ async def _invalidate_gst_registration_cache(
     await redis_invalidate_tag(_gst_filter_tag())
     if registration_id is not None:
         await redis_invalidate_tag(_gst_detail_tag(registration_id))
+
+
+async def _invalidate_gst_and_crm_caches(
+    gst_row,
+    crm_lead_id: Optional[int] = None,
+) -> None:
+    await _invalidate_gst_registration_cache(
+        gst_row.get("customer_id"),
+        gst_row.get("id"),
+    )
+    if crm_lead_id is not None:
+        await _invalidate_crm_cache(crm_lead_id)
 
 
 async def _customer_exists_and_active(conn: asyncpg.Connection, customer_id: int) -> bool:
@@ -342,10 +355,12 @@ async def create_gst_registration(
                     json.dumps(dict(gst_row), default=str),
                     None,
                 )
-            await _invalidate_gst_registration_cache(
-                gst_row.get("customer_id"),
-                gst_row.get("id"),
-            )
+
+                synced_crm_lead_id = await sync_crm_lead_from_gst_registration(
+                    conn, dict(gst_row)
+                )
+
+            await _invalidate_gst_and_crm_caches(gst_row, synced_crm_lead_id)
 
             return {
                 **dict(gst_row),
@@ -823,9 +838,15 @@ async def create_gst_registration_lead(
                     None,
                 )
 
+                synced_crm_lead_id = await sync_crm_lead_from_gst_registration(
+                    conn, dict(gst_row)
+                )
+
             lead_id = int(lead_row["id"])
-            await _invalidate_gst_registration_cache(None, gst_id)
-            await _invalidate_crm_cache(lead_id)
+            await _invalidate_gst_and_crm_caches(
+                gst_row,
+                synced_crm_lead_id or lead_id,
+            )
 
             msg = (
                 "GST registration linked to CRM lead successfully."
@@ -1351,6 +1372,7 @@ async def get_gst_registration_full(
 
         persons_sql = f"""
             SELECT p.*,
+                   g.customer_id,
                    g.rm_id,
                    g.created_by,
                    e_rm.first_name AS rm_name,
@@ -1773,15 +1795,16 @@ async def edit_gst_registration(
                     json.dumps(dict(new_row), default=str),
                 )
 
+                synced_crm_lead_id = await sync_crm_lead_from_gst_registration(
+                    conn, dict(new_row)
+                )
+
                 log.info(
                     "GST updated successfully | gst_id=%s | fields=%s",
                     gst_id,
                     list(update_data.keys()),
                 )
-                await _invalidate_gst_registration_cache(
-                    new_row.get("customer_id"),
-                    new_row.get("id"),
-                )
+                await _invalidate_gst_and_crm_caches(new_row, synced_crm_lead_id)
 
                 return {
                     **dict(new_row),
@@ -2019,16 +2042,17 @@ async def soft_delete_gst_registration(
                     None,
                 )
 
+                synced_crm_lead_id = await sync_crm_lead_from_gst_registration(
+                    conn, dict(deleted_gst)
+                )
+
             log.info(
                 "GST soft deleted successfully | gst_id=%s | persons_deactivated=%s | documents_deactivated=%s",
                 gst_id,
                 len(deleted_persons),
                 len(deleted_documents),
             )
-            await _invalidate_gst_registration_cache(
-                customer_id=None,
-                registration_id=deleted_gst.get("id"),
-            )
+            await _invalidate_gst_and_crm_caches(deleted_gst, synced_crm_lead_id)
 
             return {
                 **dict(deleted_gst),
@@ -2202,16 +2226,17 @@ async def activate_gst_registration(
                     None,
                 )
 
+                synced_crm_lead_id = await sync_crm_lead_from_gst_registration(
+                    conn, dict(activated_gst)
+                )
+
             log.info(
                 "GST activated successfully | gst_id=%s | persons_activated=%s | documents_activated=%s",
                 gst_id,
                 len(activated_persons),
                 len(activated_documents),
             )
-            await _invalidate_gst_registration_cache(
-                customer_id=None,
-                registration_id=activated_gst.get("id"),
-            )
+            await _invalidate_gst_and_crm_caches(activated_gst, synced_crm_lead_id)
 
             return {
                 **dict(activated_gst),

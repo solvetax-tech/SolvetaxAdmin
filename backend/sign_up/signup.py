@@ -3,7 +3,7 @@ from backend.sign_up.schemas import SignupRequest, SignupResponse, ErrorResponse
 from backend.utils import get_db_pool, hash_password, is_password_strong, DB_SCHEMA, generate_uuid
 from backend.security.rbac import require_permission
 from backend.logger import logger
-from backend.redis_cache import invalidate_tag as redis_invalidate_tag
+from backend.sign_up.employee_cache import invalidate_employee_related_cache
 from dotenv import load_dotenv
 from typing import Optional
 import os
@@ -15,10 +15,6 @@ from datetime import datetime, timezone  # ✅ ADDED
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 router = APIRouter(prefix="/app/v1", tags=["Signup"])
-
-
-async def _invalidate_signup_related_cache() -> None:
-    await redis_invalidate_tag("version:filter:index")
 
 
 # --------------------------------------------------
@@ -468,7 +464,7 @@ async def signup(
             )
 
         log.info("[signup] Employee created successfully id=%s", created_id)
-        await _invalidate_signup_related_cache()
+        await invalidate_employee_related_cache(created_id)
 
         return SignupResponse(
             emp_id=created_id,

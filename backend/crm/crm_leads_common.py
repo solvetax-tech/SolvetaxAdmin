@@ -98,6 +98,8 @@ async def _invalidate_crm_cache(lead_id: Optional[int] = None) -> None:
     await redis_invalidate_tag(_crm_followup_list_tag())
     await redis_invalidate_tag(_crm_activities_filter_tag())
     await redis_invalidate_tag(_crm_lead_by_entity_tag())
+    await redis_invalidate_tag(_crm_stages_tag())
+    await redis_invalidate_tag(_crm_ui_mappings_tag())
     if lead_id is not None:
         await redis_invalidate_tag(_crm_lead_by_id_tag(lead_id))
         await redis_invalidate_tag(_crm_lead_calls_tag(lead_id))

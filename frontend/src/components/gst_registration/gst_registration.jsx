@@ -19,9 +19,10 @@ import {
     canManageRmOpRecords,
 } from '../../utils/rmOpAssignmentFields';
 import {
-    fetchActiveRmUsernames,
-    fetchActiveOpUsernames,
+    fetchActiveRmEmployees,
+    fetchActiveOpEmployees,
     buildRmOpSelectOptions,
+    lookupAssigneeUsername,
     withAssignmentFormFields,
 } from '../../utils/activeEmployees';
 import LoadingOverlay from '../common/LoadingOverlay';
@@ -223,8 +224,8 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
             }));
             try {
                 const [activeRMs, activeOps] = await Promise.all([
-                    fetchActiveRmUsernames(),
-                    fetchActiveOpUsernames(),
+                    fetchActiveRmEmployees(),
+                    fetchActiveOpEmployees(),
                 ]);
                 newConfigs.activeRMs = activeRMs;
                 newConfigs.activeOps = activeOps;
@@ -548,9 +549,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
         if (item?.rm_name) return item.rm_name;
         const rmId = item?.rm_id;
         if (!rmId) return '-';
-        if (typeof rmId === 'string' && Number.isNaN(parseInt(rmId, 10))) return rmId;
-        if (configs.activeRMs.includes(rmId) || configs.activeRMs.includes(String(rmId))) return String(rmId);
-        return `ID: ${rmId}`;
+        return lookupAssigneeUsername(rmId, configs.activeRMs) || `ID: ${rmId}`;
     };
 
     const getOpDisplayName = (item) => {
@@ -559,9 +558,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
         if (item?.op_name) return item.op_name;
         const opId = item?.created_by;
         if (!opId) return '-';
-        if (typeof opId === 'string' && Number.isNaN(parseInt(opId, 10))) return opId;
-        if (configs.activeOps.includes(opId) || configs.activeOps.includes(String(opId))) return String(opId);
-        return `ID: ${opId}`;
+        return lookupAssigneeUsername(opId, configs.activeOps) || `ID: ${opId}`;
     };
 
     const hasActiveRegFilters = Object.entries(appliedFilters).some(([key, value]) => {
@@ -856,7 +853,6 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
 
     const [message, setMessage] = useState({ type: '', text: '' });
     const [isAdmin, setIsAdmin] = useState(Boolean(isAdminProp));
-    const [detailsLoading, setDetailsLoading] = useState(false);
     const [actionLoading, setActionLoading] = useState('');
     const [confirmAction, setConfirmAction] = useState('');
 
@@ -889,8 +885,8 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                     updatedConfigs[source.key] = Array.isArray(data) ? data : [];
                 });
                 const [activeRMs, activeOps] = await Promise.all([
-                    fetchActiveRmUsernames(),
-                    fetchActiveOpUsernames(),
+                    fetchActiveRmEmployees(),
+                    fetchActiveOpEmployees(),
                 ]);
                 updatedConfigs.activeRMs = activeRMs;
                 updatedConfigs.activeOps = activeOps;
@@ -925,34 +921,6 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
     useEffect(() => {
         if (isOpen && initialEditMode) setEditMode(true);
     }, [isOpen, initialEditMode]);
-
-    useEffect(() => {
-        if (!isOpen || !data) return;
-        const targetId = data.id ?? data.gst_registration_id;
-        if (!targetId) return;
-
-        let cancelled = false;
-        const fetchFullDetails = async () => {
-            setDetailsLoading(true);
-            try {
-                const response = await api.get(`/api/v1/gst-registrations/${targetId}/details`);
-                const fullRecord = response.data?.data || response.data?.items?.[0] || response.data;
-                if (!cancelled && fullRecord) {
-                    setItem(fullRecord);
-                    setFormData(withAssignmentFormFields(fullRecord));
-                }
-            } catch (err) {
-                /* Keep row payload fallback silently */
-            } finally {
-                if (!cancelled) setDetailsLoading(false);
-            }
-        };
-
-        fetchFullDetails();
-        return () => {
-            cancelled = true;
-        };
-    }, [isOpen, data?.id, data?.gst_registration_id]);
 
     useEffect(() => {
         if (isAdminProp !== undefined) {
@@ -1097,9 +1065,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
         if (record.rm_name) return record.rm_name;
         const rmId = record.rm_id;
         if (!rmId) return '-';
-        if (typeof rmId === 'string' && Number.isNaN(parseInt(rmId, 10))) return rmId;
-        if (configs.activeRMs.includes(rmId) || configs.activeRMs.includes(String(rmId))) return String(rmId);
-        return `ID: ${rmId}`;
+        return lookupAssigneeUsername(rmId, configs.activeRMs) || `ID: ${rmId}`;
     };
 
     const getOpDisplayName = (record) => {
@@ -1109,9 +1075,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
         if (record.op_name) return record.op_name;
         const opId = record.created_by;
         if (!opId) return '-';
-        if (typeof opId === 'string' && Number.isNaN(parseInt(opId, 10))) return opId;
-        if (configs.activeOps.includes(opId) || configs.activeOps.includes(String(opId))) return String(opId);
-        return `ID: ${opId}`;
+        return lookupAssigneeUsername(opId, configs.activeOps) || `ID: ${opId}`;
     };
 
     const handleChange = (e) => {
@@ -1174,6 +1138,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                     isEditMode: true,
                     editingRecord: item,
                     formRmId: formData.rm_id,
+                    assignmentPool: configs.activeRMs,
                 }),
                 created_by: resolveOpIdForPayload({
                     profileData,
@@ -1181,6 +1146,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                     editingRecord: item,
                     formOpId: formData.created_by,
                     opRecordKey: 'created_by',
+                    assignmentPool: configs.activeOps,
                 }),
                 client_name: formData.client_name?.trim() || null,
                 referral_phone_number: (formData.referral_phone_number || '').replace(/\D/g, '') || null,
@@ -1306,9 +1272,6 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
         });
     };
 
-    const hasRowPreview = Boolean(item?.gstin || item?.id || data?.gstin || data?.id);
-    const showDetailsSkeleton = detailsLoading && !hasRowPreview;
-
     const handleSchedulePayment = async () => {
         const targetId = gstRegistrationId;
         if (!targetId) {
@@ -1371,23 +1334,6 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                     )}
 
                     <div className="gst-reg-details-form">
-                        {showDetailsSkeleton ? (
-                            <div className="gst-skeleton-form-v4">
-                                {[1, 2, 3].map(section => (
-                                    <div key={section} className="form-section-group" style={{ marginBottom: '32px' }}>
-                                        <div className="skeleton-line short gst-skeleton-pulse" style={{ marginBottom: '16px', width: '120px' }} />
-                                        <div className="form-grid-3">
-                                            {[1, 2, 3, 4, 5, 6].map(i => (
-                                                <div key={i} className="form-group-v4">
-                                                    <div className="skeleton-line x-short gst-skeleton-pulse" style={{ marginBottom: '8px' }} />
-                                                    <div className="skeleton-line long gst-skeleton-pulse" style={{ height: '38px', borderRadius: '12px' }} />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
                             <>
                                 {/* SECTION 1: IDENTITY & CORE */}
                                 <div className="form-section-group">
@@ -1742,7 +1688,6 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                     </div>
                                 </div>
                             </>
-                        )}
                     </div>
                 </div>
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from backend.payments.crm_lead_sync import sync_crm_leads_from_promoted_payments
 from backend.utils import DB_SCHEMA
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ async def sync_settled_payment_entities(conn, *, batch_limit: int = 500) -> dict
         "duplicate_paid_demoted": 0,
         "latest_promoted_to_paid": 0,
         "superseded_pending_closed": 0,
+        "synced_crm_lead_ids": [],
     }
 
     # 1) Duplicate active PAID → PENDING (keep newest PAID only)
@@ -57,7 +59,7 @@ async def sync_settled_payment_entities(conn, *, batch_limit: int = 500) -> dict
     stats["duplicate_paid_demoted"] = _parse_update_count(demoted)
 
     # 2) Latest row fully settled but still PENDING → PAID
-    promoted = await conn.execute(
+    promoted_rows = await conn.fetch(
         f"""
         UPDATE {DB_SCHEMA}.payments p
            SET payment_status = 'PAID',
@@ -79,9 +81,13 @@ async def sync_settled_payment_entities(conn, *, batch_limit: int = 500) -> dict
                   AND COALESCE(l.remaining_amount, 0) <= 0
                 LIMIT {batch_limit}
            )
+         RETURNING p.*
         """
     )
-    stats["latest_promoted_to_paid"] = _parse_update_count(promoted)
+    stats["latest_promoted_to_paid"] = len(promoted_rows)
+    if promoted_rows:
+        synced_ids = await sync_crm_leads_from_promoted_payments(conn, promoted_rows)
+        stats["synced_crm_lead_ids"] = sorted(synced_ids)
 
     # 3) Entity already has PAID → soft-close other active PENDING rows (installment history)
     closed = await conn.execute(

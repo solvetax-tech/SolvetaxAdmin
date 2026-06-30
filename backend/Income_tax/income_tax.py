@@ -22,6 +22,7 @@ from backend.Income_tax.income_tax_helpers import (
     normalize_query_str_list,
 )
 from backend.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
+from backend.Income_tax.crm_lead_sync import sync_crm_lead_from_income_tax
 from backend.logger import logger
 from backend.text_search_filters import append_fuzzy_name_filter, append_ilike_contains
 from backend.redis_cache import (
@@ -47,6 +48,15 @@ async def _invalidate_income_tax_cache(income_tax_id: Optional[int] = None) -> N
     await redis_invalidate_tag(_income_tax_filter_tag())
     if income_tax_id is not None:
         await redis_invalidate_tag(_income_tax_detail_tag(income_tax_id))
+
+
+async def _invalidate_income_tax_and_crm_caches(
+    income_tax_row,
+    crm_lead_id: Optional[int] = None,
+) -> None:
+    await _invalidate_income_tax_cache(income_tax_row.get("id"))
+    if crm_lead_id is not None:
+        await _invalidate_crm_cache(crm_lead_id)
 
 
 def _income_tax_returning_sql() -> str:
@@ -363,7 +373,12 @@ async def create_income_tax(
                     json.dumps(income_tax_row_to_dict(row), default=str),
                     None,
                 )
-            await _invalidate_income_tax_cache(row["id"])
+
+                synced_crm_lead_id = await sync_crm_lead_from_income_tax(
+                    conn, income_tax_row_to_dict(row)
+                )
+
+            await _invalidate_income_tax_and_crm_caches(row, synced_crm_lead_id)
             return {
                 "message": "Income tax record created successfully.",
                 "request_id": request_id,
@@ -710,9 +725,15 @@ async def create_income_tax_lead(
                     None,
                 )
 
+                synced_crm_lead_id = await sync_crm_lead_from_income_tax(
+                    conn, income_tax_row_to_dict(itr_row)
+                )
+
             lead_id = int(lead_row["id"])
-            await _invalidate_income_tax_cache(income_tax_id)
-            await _invalidate_crm_cache(lead_id)
+            await _invalidate_income_tax_and_crm_caches(
+                itr_row,
+                synced_crm_lead_id or lead_id,
+            )
 
             msg = (
                 "Income tax record linked to CRM ITR lead successfully."
@@ -1083,12 +1104,15 @@ async def edit_income_tax(
                         new_active,
                         income_tax_id,
                     )
+                    synced_crm_lead_id = await sync_crm_lead_from_income_tax(
+                        conn, income_tax_row_to_dict(new)
+                    )
                     message = (
                         "Income tax record activated successfully."
                         if new_active
                         else "Income tax record deactivated successfully."
                     )
-                    await _invalidate_income_tax_cache(income_tax_id)
+                    await _invalidate_income_tax_and_crm_caches(new, synced_crm_lead_id)
                     return {
                         "message": message,
                         "request_id": request_id,
@@ -1181,7 +1205,12 @@ async def edit_income_tax(
                     json.dumps(income_tax_row_to_dict(old), default=str),
                     json.dumps(income_tax_row_to_dict(new), default=str),
                 )
-        await _invalidate_income_tax_cache(income_tax_id)
+
+                synced_crm_lead_id = await sync_crm_lead_from_income_tax(
+                    conn, income_tax_row_to_dict(new)
+                )
+
+        await _invalidate_income_tax_and_crm_caches(new, synced_crm_lead_id)
         msg = "Income tax record updated successfully."
         if "is_active" in update_data:
             if bool(update_data["is_active"]):

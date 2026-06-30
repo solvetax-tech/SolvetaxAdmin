@@ -5,6 +5,8 @@
  * On edit, each role keeps the assignment field they cannot see unchanged on save.
  */
 
+import { resolveAssignmentEmpId } from './activeEmployees';
+
 export function getRmOpAssignmentVisibility(profileData) {
     const userRole = String(profileData?.role || '').toUpperCase();
     const isRmUser = userRole === 'RM';
@@ -32,12 +34,15 @@ export function canManageRmOpRecords(profileData, isAdmin = false) {
     return role === 'RM' || role === 'OP';
 }
 
-export function coerceAssignmentValue(value) {
-    if (value == null || value === '') return null;
-    const s = String(value).trim();
-    const n = parseInt(s, 10);
-    if (!Number.isNaN(n) && String(n) === s) return n;
-    return s;
+export function coerceAssignmentValue(value, assignmentPool = []) {
+    return resolveAssignmentEmpId(value, assignmentPool);
+}
+
+function profileEmpId(profileData) {
+    const raw = profileData?.emp_id ?? profileData?.sub;
+    if (raw == null || raw === '') return null;
+    const n = parseInt(String(raw).trim(), 10);
+    return Number.isNaN(n) || n <= 0 ? null : n;
 }
 
 export function resolveRmIdForPayload({
@@ -45,19 +50,20 @@ export function resolveRmIdForPayload({
     isEditMode = false,
     editingRecord,
     formRmId,
+    assignmentPool = [],
 }) {
     const { isRmUser, isOpUser } = getRmOpAssignmentVisibility(profileData);
     if (isEditMode && isRmUser && editingRecord) {
         const raw = editingRecord.rm_id ?? editingRecord.rm_username;
-        return coerceAssignmentValue(raw);
+        return resolveAssignmentEmpId(raw, assignmentPool);
     }
-    if (!isEditMode && isRmUser && profileData?.username) {
-        return profileData.username;
+    if (!isEditMode && isRmUser) {
+        return profileEmpId(profileData);
     }
     if (isEditMode && isOpUser) {
-        return coerceAssignmentValue(formRmId);
+        return resolveAssignmentEmpId(formRmId, assignmentPool);
     }
-    return coerceAssignmentValue(formRmId);
+    return resolveAssignmentEmpId(formRmId, assignmentPool);
 }
 
 /**
@@ -69,17 +75,18 @@ export function resolveOpIdForPayload({
     editingRecord,
     formOpId,
     opRecordKey = 'op_id',
+    assignmentPool = [],
 }) {
     const { isOpUser, isRmUser } = getRmOpAssignmentVisibility(profileData);
     if (isEditMode && isOpUser && editingRecord) {
         const raw = editingRecord[opRecordKey] ?? editingRecord.op_id ?? editingRecord.op_username;
-        return coerceAssignmentValue(raw);
+        return resolveAssignmentEmpId(raw, assignmentPool);
     }
-    if (!isEditMode && isOpUser && profileData?.username) {
-        return profileData.username;
+    if (!isEditMode && isOpUser) {
+        return profileEmpId(profileData);
     }
     if (isEditMode && isRmUser) {
-        return coerceAssignmentValue(formOpId);
+        return resolveAssignmentEmpId(formOpId, assignmentPool);
     }
-    return coerceAssignmentValue(formOpId);
+    return resolveAssignmentEmpId(formOpId, assignmentPool);
 }

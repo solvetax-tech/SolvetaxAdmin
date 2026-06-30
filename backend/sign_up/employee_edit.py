@@ -24,42 +24,15 @@ router = APIRouter(
 )
 
 
-def _employee_filter_tag() -> str:
-    return "employee:filter:index"
-
-
-def _employee_by_id_tag(emp_id: int) -> str:
-    return f"employee:get_by_id:index:{emp_id}"
-
-
-def _employee_active_rm_tag() -> str:
-    return "employee:active_rm:index"
-
-
-def _employee_active_op_tag() -> str:
-    return "employee:active_op:index"
-
-
-def _employee_active_managers_tag() -> str:
-    return "employee:active_managers:index"
-
-
-def _roles_list_tag() -> str:
-    return "employee:roles:list:index"
-
-
-async def _invalidate_employee_related_cache(emp_id: Optional[int] = None) -> None:
-    from backend.payments.payment_cache_invalidation import invalidate_followup_caches
-
-    await redis_invalidate_tag(_employee_filter_tag())
-    await redis_invalidate_tag(_employee_active_rm_tag())
-    await redis_invalidate_tag(_employee_active_op_tag())
-    await redis_invalidate_tag(_employee_active_managers_tag())
-    await redis_invalidate_tag("version:filter:index")
-    await invalidate_followup_caches()
-    if emp_id is not None:
-        await redis_invalidate_tag(_employee_by_id_tag(emp_id))
-
+from backend.sign_up.employee_cache import (
+    employee_active_managers_tag as _employee_active_managers_tag,
+    employee_active_op_tag as _employee_active_op_tag,
+    employee_active_rm_tag as _employee_active_rm_tag,
+    employee_by_id_tag as _employee_by_id_tag,
+    employee_filter_tag as _employee_filter_tag,
+    invalidate_employee_related_cache as _invalidate_employee_related_cache,
+    roles_list_tag as _roles_list_tag,
+)
 # -------------------------------------------------------------------
 # EDIT EMPLOYEE (DYNAMIC UPDATE - PRODUCTION SAFE + VERSION AUDIT)
 # -------------------------------------------------------------------

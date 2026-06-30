@@ -602,10 +602,12 @@ async def edit_registration_document(
                 # --------------------------------------------------
                 old_row = await conn.fetchrow(
                     f"""
-                    SELECT d.*, rp.customer_id
+                    SELECT d.*, gr.customer_id
                       FROM {DB_SCHEMA}.gst_registration_documents d
                       JOIN {DB_SCHEMA}.gst_registration_persons rp
                         ON d.person_id = rp.person_id
+                      JOIN {DB_SCHEMA}.gst_registration gr
+                        ON rp.gst_registration_id = gr.id
                      WHERE d.document_id = $1
                        AND d.is_active = TRUE
                      LIMIT 1
@@ -818,10 +820,12 @@ async def soft_delete_registration_document(
                        SET is_active = FALSE,
                            updated_at = NOW()
                       FROM {DB_SCHEMA}.gst_registration_persons rp
+                      JOIN {DB_SCHEMA}.gst_registration gr
+                        ON rp.gst_registration_id = gr.id
                      WHERE d.document_id = $1
                        AND d.person_id = rp.person_id
                        AND d.is_active = TRUE
-                     RETURNING d.*, rp.customer_id
+                     RETURNING d.*, gr.customer_id
                 """
 
                 deleted_row = await conn.fetchrow(delete_sql, document_id)
@@ -1063,10 +1067,12 @@ async def activate_registration_document(
                        SET is_active = TRUE,
                            updated_at = NOW()
                       FROM {DB_SCHEMA}.gst_registration_persons rp
+                      JOIN {DB_SCHEMA}.gst_registration gr
+                        ON rp.gst_registration_id = gr.id
                      WHERE d.document_id = $1
                        AND d.person_id = rp.person_id
                        AND d.is_active = FALSE
-                     RETURNING d.*, rp.customer_id
+                     RETURNING d.*, gr.customer_id
                     """,
                     document_id,
                 )

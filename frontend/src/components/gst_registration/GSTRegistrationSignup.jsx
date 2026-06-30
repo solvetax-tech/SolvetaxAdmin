@@ -13,7 +13,7 @@ import {
     resolveOpIdForPayload,
 } from '../../utils/rmOpAssignmentFields';
 import {
-    fetchActiveRmOpUsernameLists,
+    fetchActiveRmOpEmployeeLists,
     buildRmOpSelectOptions,
 } from '../../utils/activeEmployees';
 import { X, AlertCircle, CheckCircle2, RotateCcw, ChevronDown, User, Plus, Users, FileText } from 'lucide-react';
@@ -130,7 +130,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
             }
 
             try {
-                const { activeRMs, activeOps } = await fetchActiveRmOpUsernameLists();
+                const { activeRMs, activeOps } = await fetchActiveRmOpEmployeeLists();
                 setActiveRMs(activeRMs);
                 setActiveOps(activeOps);
             } catch (err) {
@@ -355,6 +355,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                     profileData,
                     isEditMode: false,
                     formRmId: formData.rm_id,
+                    assignmentPool: activeRMs,
                 }),
                 created_by: (() => {
                     const resolved = resolveOpIdForPayload({
@@ -362,6 +363,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                         isEditMode: false,
                         formOpId: formData.created_by,
                         opRecordKey: 'created_by',
+                        assignmentPool: activeOps,
                     });
                     return resolved != null ? resolved : createdBy;
                 })(),

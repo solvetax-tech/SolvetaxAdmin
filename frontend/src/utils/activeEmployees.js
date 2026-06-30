@@ -54,6 +54,42 @@ export function parseActiveUsernamesFromApi(res) {
     return parseActiveEmployeesFromApi(res).map((row) => row.username);
 }
 
+/**
+ * Form value (emp_id string or username) → numeric emp_id for API payloads.
+ * @param {string|number|null|undefined} value
+ * @param {{ emp_id?: number|null, username?: string }[]} pool
+ */
+export function resolveAssignmentEmpId(value, pool = []) {
+    if (value == null || value === '') return null;
+    const raw = String(value).trim();
+    const parsed = parseInt(raw, 10);
+    if (!Number.isNaN(parsed) && parsed > 0 && String(parsed) === raw) {
+        return parsed;
+    }
+    const match = (pool || []).find(
+        (row) => String(row?.username || '').trim().toLowerCase() === raw.toLowerCase(),
+    );
+    if (match?.emp_id != null && Number(match.emp_id) > 0) {
+        return Number(match.emp_id);
+    }
+    return null;
+}
+
+/** Display helper: emp_id or username → username label from pool. */
+export function lookupAssigneeUsername(value, pool = []) {
+    if (value == null || value === '') return null;
+    const raw = String(value).trim();
+    const parsed = parseInt(raw, 10);
+    if (!Number.isNaN(parsed) && parsed > 0 && String(parsed) === raw) {
+        const byId = (pool || []).find((row) => Number(row?.emp_id) === parsed);
+        return byId?.username || raw;
+    }
+    const byName = (pool || []).find(
+        (row) => String(row?.username || '').trim().toLowerCase() === raw.toLowerCase(),
+    );
+    return byName?.username || raw;
+}
+
 export async function fetchActiveRmEmployees({ force = false } = {}) {
     return cachedGet(
         ACTIVE_RM_CACHE_KEY,
@@ -273,9 +309,9 @@ export function buildRmOpSelectOptions(pool, current = null) {
     return buildRmOpIdSelectOptions(pool, current);
 }
 
-/** Ensure &lt;select value&gt; matches option values (string emp_ids). */
+/** Ensure <select value> matches option values (string emp_ids). */
 export function withAssignmentFormFields(record) {
-    if (!record || typeof record !== 'object') return record || {};
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return {};
     const rm_id =
         record.rm_id != null && record.rm_id !== '' ? String(record.rm_id) : '';
     const created_by =
