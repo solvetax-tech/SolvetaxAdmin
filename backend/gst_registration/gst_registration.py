@@ -397,7 +397,7 @@ async def create_gst_registration(
 
             field, message = CHECK_MAP.get(
                 constraint,
-                ("non_field_error", f"Data violates constraint: {constraint}")
+                ("non_field_error", "Data violates a validation rule.")
             )
 
             raise HTTPException(
@@ -1431,6 +1431,8 @@ async def edit_gst_registration(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -1484,16 +1486,26 @@ async def edit_gst_registration(
 
                 # --------------------------------------------------
                 # 1️⃣ Fetch Existing GST (ACTIVE ONLY + LOCK)
+                #     IDOR guard: RM/OP/managers may only edit GST rows they can
+                #     see; ADMIN unrestricted — matches get-by-id read scope.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["g.id = $1", "g.is_active = TRUE"]
+                fetch_values: List = [gst_id]
+                if visibility_sql:
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_values.extend(visibility_values)
+
                 old_row = await conn.fetchrow(
                     f"""
-                    SELECT *
-                      FROM {DB_SCHEMA}.gst_registration
-                     WHERE id = $1
-                       AND is_active = TRUE
+                    SELECT g.*
+                      FROM {DB_SCHEMA}.gst_registration g
+                     WHERE {' AND '.join(fetch_conditions)}
                      FOR UPDATE
                     """,
-                    gst_id,
+                    *fetch_values,
                 )
 
                 if not old_row:
@@ -1836,7 +1848,7 @@ async def edit_gst_registration(
 
             field, message = CHECK_MAP.get(
                 constraint,
-                ("non_field_error", f"Data violates constraint: {constraint}")
+                ("non_field_error", "Data violates a validation rule.")
             )
 
             raise HTTPException(
@@ -1890,6 +1902,8 @@ async def soft_delete_gst_registration(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -1917,15 +1931,26 @@ async def soft_delete_gst_registration(
 
                 # --------------------------------------------------
                 # 1️⃣ Fetch Existing GST (LOCK)
+                #     IDOR guard: RM/OP/managers may only delete GST rows they
+                #     can see; ADMIN unrestricted.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["g.id = $1"]
+                fetch_values: List = [gst_id]
+                if visibility_sql:
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_values.extend(visibility_values)
+
                 gst_row = await conn.fetchrow(
                     f"""
-                    SELECT *
-                      FROM {DB_SCHEMA}.gst_registration
-                     WHERE id = $1
+                    SELECT g.*
+                      FROM {DB_SCHEMA}.gst_registration g
+                     WHERE {' AND '.join(fetch_conditions)}
                      FOR UPDATE
                     """,
-                    gst_id,
+                    *fetch_values,
                 )
 
                 if not gst_row:
@@ -2045,16 +2070,16 @@ async def soft_delete_gst_registration(
                 detail="Foreign key constraint violation.",
             )
 
-        except asyncpg.exceptions.CheckViolationError as e:
+        except asyncpg.exceptions.CheckViolationError:
             log.exception("CHECK constraint error")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail="Operation violates a data constraint.")
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(status_code=400, detail="Invalid data format.")
 
-        except asyncpg.PostgresError as e:
+        except asyncpg.PostgresError:
             log.exception("Postgres error during GST soft delete")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="A database error occurred.")
 
         except HTTPException:
             raise
@@ -2082,6 +2107,8 @@ async def activate_gst_registration(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -2106,15 +2133,26 @@ async def activate_gst_registration(
 
                 # --------------------------------------------------
                 # 1️⃣ Fetch Existing GST (LOCK)
+                #     IDOR guard: RM/OP/managers may only activate GST rows they
+                #     can see; ADMIN unrestricted.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["g.id = $1"]
+                fetch_values: List = [gst_id]
+                if visibility_sql:
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_values.extend(visibility_values)
+
                 gst_row = await conn.fetchrow(
                     f"""
-                    SELECT *
-                      FROM {DB_SCHEMA}.gst_registration
-                     WHERE id = $1
+                    SELECT g.*
+                      FROM {DB_SCHEMA}.gst_registration g
+                     WHERE {' AND '.join(fetch_conditions)}
                      FOR UPDATE
                     """,
-                    gst_id,
+                    *fetch_values,
                 )
 
                 if not gst_row:
@@ -2225,16 +2263,16 @@ async def activate_gst_registration(
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
 
-        except asyncpg.exceptions.CheckViolationError as e:
+        except asyncpg.exceptions.CheckViolationError:
             log.exception("CHECK ERROR")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail="Operation violates a data constraint.")
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(status_code=400, detail="Invalid data format.")
 
-        except asyncpg.PostgresError as e:
+        except asyncpg.PostgresError:
             log.exception("Database error during GST activation")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="A database error occurred.")
 
         except HTTPException:
             raise

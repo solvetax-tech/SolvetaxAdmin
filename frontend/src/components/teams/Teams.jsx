@@ -201,7 +201,7 @@ const Teams = ({ isAdmin }) => {
                 </div>
                 <div style={{ padding: '20px' }}>
                     {[...Array(6)].map((_, i) => (
-                        <div key={i} style={{ display: 'flex', gap: '20px', padding: '16px 0', borderBottom: '1px solid rgba(var(--fg-rgb),0.03)' }}>
+                        <div key={i} style={{ display: 'flex', gap: '20px', padding: '16px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                             <div className="filings-ledger-skeleton-bar" style={{ width: '20px' }} />
                             <div className="filings-ledger-skeleton-bar" style={{ width: '100px' }} />
                             <div className="filings-ledger-skeleton-bar" style={{ flex: 1 }} />
@@ -405,7 +405,7 @@ const Teams = ({ isAdmin }) => {
                                                                                             <span className="emp-id">ID: {emp.emp_id} • {emp.role || 'Member'}</span>
                                                                                         </div>
                                                                                         {isAdding ? (
-                                                                                            <Loader2 size={14} className="spin" style={{ marginLeft: 'auto', color: '#3b82f6' }} />
+                                                                                            <Loader2 size={14} className="spin" style={{ marginLeft: 'auto', color: 'var(--info)' }} />
                                                                                         ) : (
                                                                                             <Plus size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
                                                                                         )}
@@ -424,7 +424,7 @@ const Teams = ({ isAdmin }) => {
                                                             teamMembers[team.id].map((member, idx) => (
                                                                 <div key={member.emp_id} className="member-list-row interactive">
                                                                     <span className="member-index">{idx + 1}</span>
-                                                                    <div className="member-avatar" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
+                                                                    <div className="member-avatar" style={{ background: 'rgba(var(--info-rgb), 0.15)', color: 'var(--info)' }}>
                                                                         {(member.username || '?').charAt(0).toUpperCase()}
                                                                     </div>
                                                                     <div className="member-list-info" onClick={() => handleViewProfile(member.emp_id)}>

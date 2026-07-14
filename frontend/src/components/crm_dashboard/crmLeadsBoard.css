@@ -1,8 +1,9 @@
 /* History view: CRM lead summary above activity table */
 .crm-history-summary {
-    background: rgba(var(--fg-rgb), 0.03);
-    border: 1px solid rgba(var(--fg-rgb), 0.08);
-    border-radius: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
     padding: 20px 24px;
     margin-bottom: 20px;
 }
@@ -104,7 +105,7 @@
     z-index: 6;
     background-color: var(--bg-app) !important;
     border-left: 1px solid rgba(var(--fg-rgb), 0.1);
-    box-shadow: -6px 0 14px rgba(0, 0, 0, 0.45);
+    box-shadow: -6px 0 14px rgba(var(--shadow-rgb), 0.14);
     min-width: 320px;
     width: 320px;
     max-width: 320px;
@@ -135,10 +136,10 @@
     align-items: center;
     gap: 4px;
     padding: 6px 10px;
-    background: rgba(56, 189, 248, 0.14);
-    border: 1px solid rgba(56, 189, 248, 0.4);
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
-    color: #7dd3fc;
+    color: var(--text-muted);
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
@@ -146,9 +147,8 @@
 }
 
 .crm-leads-table .btn-history-mini:hover {
-    background: rgba(56, 189, 248, 0.32);
+    background: rgba(var(--fg-rgb), 0.09);
     color: var(--text-primary);
-    box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
 }
 
 .crm-leads-table thead th.crm-col-sticky-details {
@@ -164,7 +164,7 @@
 .crm-lead-details-drawer-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--bg-overlay);
     backdrop-filter: blur(4px);
     z-index: 1100;
     display: flex;
@@ -209,9 +209,9 @@
 .crm-view-drawer-hero {
     position: relative;
     padding: 28px 24px 24px;
-    background: linear-gradient(145deg, rgba(46, 184, 122, 0.14) 0%, rgba(var(--bg-rgb), 0) 55%),
+    background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.14) 0%, rgba(var(--bg-rgb), 0) 55%),
         linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-app) 100%);
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.06);
+    border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
 }
 
@@ -235,7 +235,7 @@
 .crm-view-close-btn:hover {
     background: rgba(var(--fg-rgb), 0.1);
     color: var(--text-primary);
-    border-color: rgba(var(--fg-rgb), 0.2);
+    border-color: var(--text-muted);
 }
 
 .crm-view-hero-content {
@@ -255,9 +255,9 @@
     justify-content: center;
     font-size: 22px;
     font-weight: 800;
-    color: var(--bg-app);
-    background: linear-gradient(135deg, #2eb87a 0%, #2eb87a 100%);
-    box-shadow: 0 8px 24px rgba(46, 184, 122, 0.35);
+    color: var(--text-inverse);
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%);
+    box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.22);
 }
 
 .crm-view-hero-text h3 {
@@ -301,12 +301,6 @@
     color: var(--text-primary);
 }
 
-.crm-view-id-pill {
-    color: rgba(168, 85, 247, 0.95);
-    border-color: rgba(168, 85, 247, 0.25);
-    background: rgba(168, 85, 247, 0.1);
-}
-
 .crm-lead-view-body {
     flex: 1;
     overflow-y: auto;
@@ -318,7 +312,7 @@
 
 .crm-view-section {
     padding: 16px 0;
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 .crm-view-section:last-child {
@@ -331,7 +325,7 @@
     align-items: center;
     gap: 8px;
     margin-bottom: 14px;
-    color: rgba(46, 184, 122, 0.9);
+    color: rgba(var(--accent-rgb), 0.9);
 }
 
 .crm-view-section-head h4 {
@@ -358,15 +352,15 @@
     flex-direction: column;
     gap: 6px;
     padding: 12px 14px;
-    background: rgba(var(--fg-rgb), 0.025);
-    border: 1px solid rgba(var(--fg-rgb), 0.06);
-    border-radius: 10px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
     transition: background 0.2s, border-color 0.2s;
 }
 
 .crm-view-field:hover {
-    background: rgba(var(--fg-rgb), 0.04);
-    border-color: rgba(var(--fg-rgb), 0.09);
+    background: var(--bg-hover);
+    border-color: var(--border);
 }
 
 .crm-view-field-label {
@@ -389,8 +383,9 @@
 }
 
 .crm-view-field-accent {
-    color: #5eead4;
+    color: var(--text-primary);
     font-weight: 600;
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
 }
 
@@ -403,7 +398,7 @@
 
 .crm-view-field-empty {
     font-size: 13px;
-    color: rgba(var(--fg-rgb), 0.22);
+    color: var(--text-faint);
     font-style: italic;
 }
 
@@ -424,15 +419,15 @@
 }
 
 .crm-view-active-pill.is-active {
-    background: rgba(46, 184, 122, 0.15);
-    color: #2eb87a;
-    border: 1px solid rgba(46, 184, 122, 0.35);
+    background: rgba(var(--success-rgb), 0.14);
+    color: var(--success);
+    border: 1px solid rgba(var(--success-rgb), 0.32);
 }
 
 .crm-view-active-pill.is-inactive {
-    background: rgba(255, 77, 77, 0.1);
-    color: #ef4444;
-    border: 1px solid rgba(255, 77, 77, 0.25);
+    background: rgba(var(--danger-rgb), 0.14);
+    color: var(--danger);
+    border: 1px solid rgba(var(--danger-rgb), 0.32);
 }
 
 .crm-view-field--wide {
@@ -454,14 +449,14 @@
 }
 
 .crm-view-fetch-state--error {
-    background: rgba(239, 68, 68, 0.08);
-    border-color: rgba(239, 68, 68, 0.25);
-    color: #fca5a5;
+    background: rgba(var(--danger-rgb), 0.08);
+    border-color: rgba(var(--danger-rgb), 0.25);
+    color: var(--danger);
 }
 
 .crm-view-fetch-state--info {
-    background: rgba(46, 184, 122, 0.06);
-    border-color: rgba(46, 184, 122, 0.22);
+    background: rgba(var(--accent-rgb), 0.06);
+    border-color: rgba(var(--accent-rgb), 0.22);
     color: var(--text-primary);
 }
 

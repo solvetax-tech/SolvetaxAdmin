@@ -129,7 +129,7 @@ const Login = ({ onSuccess }) => {
       {successMsg && <div className="auth-success-banner">{successMsg}</div>}
 
       <div className="input-group">
-        <span className="input-label" style={{ color: '#fff' }}>Email Address</span>
+        <span className="input-label" style={{ color: 'var(--text-primary)' }}>Email Address</span>
         <div className="input-wrapper">
           <div className="input-icon">
             <Mail size={18} />
@@ -145,7 +145,7 @@ const Login = ({ onSuccess }) => {
       </div>
 
       <div className="input-group">
-        <span className="input-label" style={{ color: '#fff' }}>Password</span>
+        <span className="input-label" style={{ color: 'var(--text-primary)' }}>Password</span>
         <div className="input-wrapper">
           <div className="input-icon" style={{ zIndex: 10 }}>
             <Lock size={18} />
@@ -196,7 +196,7 @@ const Login = ({ onSuccess }) => {
       {successMsg && <div className="auth-success-banner">{successMsg}</div>}
 
       <div className="input-group">
-        <span className="input-label" style={{ color: '#fff' }}>Email Address</span>
+        <span className="input-label" style={{ color: 'var(--text-primary)' }}>Email Address</span>
         <div className="input-wrapper">
           <div className="input-icon" style={{ zIndex: 10 }}>
             <Mail size={18} />
@@ -238,7 +238,7 @@ const Login = ({ onSuccess }) => {
       {successMsg && <div className="auth-success-banner">{successMsg}</div>}
 
       <div className="input-group">
-        <span className="input-label" style={{ color: '#fff' }}>Email Address</span>
+        <span className="input-label" style={{ color: 'var(--text-primary)' }}>Email Address</span>
         <div className="input-wrapper">
           <div className="input-icon" style={{ zIndex: 10 }}>
             <Mail size={18} />
@@ -252,7 +252,7 @@ const Login = ({ onSuccess }) => {
       </div>
 
       <div className="input-group">
-        <span className="input-label" style={{ color: '#fff' }}>OTP Code</span>
+        <span className="input-label" style={{ color: 'var(--text-primary)' }}>OTP Code</span>
         <div className="input-wrapper">
           <div className="input-icon" style={{ zIndex: 10 }}>
             <Lock size={18} />
@@ -268,7 +268,7 @@ const Login = ({ onSuccess }) => {
       </div>
 
       <div className="input-group">
-        <span className="input-label" style={{ color: '#fff' }}>New Password</span>
+        <span className="input-label" style={{ color: 'var(--text-primary)' }}>New Password</span>
         <div className="input-wrapper">
           <div className="input-icon" style={{ zIndex: 10 }}>
             <Lock size={18} />
@@ -292,7 +292,7 @@ const Login = ({ onSuccess }) => {
       </div>
 
       <div className="input-group">
-        <span className="input-label" style={{ color: '#fff' }}>Confirm Password</span>
+        <span className="input-label" style={{ color: 'var(--text-primary)' }}>Confirm Password</span>
         <div className="input-wrapper">
           <div className="input-icon" style={{ zIndex: 10 }}>
             <Lock size={18} />

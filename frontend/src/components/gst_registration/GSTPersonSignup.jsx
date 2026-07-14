@@ -203,7 +203,7 @@ const GSTPersonSignup = () => {
                     <>
                         <div className="modal-header-v4">
                             <div className="header-content-v4">
-                                <div className="header-icon-box-v4" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#2eb87a' }}>
+                                <div className="header-icon-box-v4" style={{ background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--accent)' }}>
                                     <User size={20} />
                                 </div>
                                 <div className="modal-title-box">

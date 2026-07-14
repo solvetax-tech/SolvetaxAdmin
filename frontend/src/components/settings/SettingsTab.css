@@ -28,9 +28,9 @@
 }
 
 .settings-option-card {
-    background: rgba(var(--fg-rgb), 0.03);
-    border: 1px solid rgba(var(--fg-rgb), 0.06);
-    border-radius: 20px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 24px;
     display: flex;
     align-items: center;
@@ -39,13 +39,14 @@
     transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
     overflow: hidden;
+    box-shadow: var(--shadow-sm);
 }
 
 .settings-option-card:hover {
-    background: rgba(var(--fg-rgb), 0.05);
-    border-color: rgba(46, 184, 122, 0.3);
+    background: var(--bg-hover);
+    border-color: rgba(var(--accent-rgb), 0.3);
     transform: translateY(-4px);
-    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-md);
 }
 
 .settings-option-card:active {
@@ -55,20 +56,20 @@
 .option-icon-wrapper {
     width: 56px;
     height: 56px;
-    background: rgba(46, 184, 122, 0.1);
-    border: 1px solid rgba(46, 184, 122, 0.2);
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
     border-radius: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #2eb87a;
+    color: var(--accent);
     transition: all 0.3s ease;
 }
 
 .settings-option-card:hover .option-icon-wrapper {
-    background: #2eb87a;
-    color: var(--text-primary);
-    box-shadow: 0 0 15px rgba(46, 184, 122, 0.4);
+    background: var(--accent);
+    color: var(--text-inverse);
+    border-color: var(--accent);
 }
 
 .option-content {
@@ -90,12 +91,12 @@
 }
 
 .option-arrow {
-    color: rgba(var(--fg-rgb), 0.2);
+    color: var(--text-faint);
     transition: all 0.2s ease;
 }
 
 .settings-option-card:hover .option-arrow {
-    color: #2eb87a;
+    color: var(--accent);
     transform: translateX(4px);
 }
 
@@ -153,13 +154,13 @@
 }
 
 .breadcrumb-separator {
-    color: rgba(var(--fg-rgb), 0.1);
+    color: var(--text-faint);
 }
 
 .breadcrumb-current {
     font-size: 13px;
     font-weight: 700;
-    color: #2eb87a;
+    color: var(--accent);
 }
 
 @keyframes fadeIn {
@@ -199,7 +200,7 @@
 
 .skeleton-card {
     background: rgba(var(--fg-rgb), 0.02);
-    border: 1px solid rgba(var(--fg-rgb), 0.04);
+    border: 1px solid var(--border-subtle);
     border-radius: 20px;
     padding: 24px;
     display: flex;
@@ -273,12 +274,12 @@
     top: 100%;
     left: 0;
     width: 220px;
-    background: var(--bg-surface);
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
-    border-radius: 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     margin-top: 8px;
     z-index: 1000;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-lg);
     padding: 8px;
 }
 
@@ -295,8 +296,8 @@
 }
 
 .filter-opt-item.selected {
-    color: #2eb87a;
-    background: rgba(46, 184, 122, 0.05);
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.05);
 }
 
 .btn-remove-filter {
@@ -305,14 +306,14 @@
     top: 38px;
     background: none;
     border: none;
-    color: rgba(var(--fg-rgb), 0.2);
+    color: var(--text-faint);
     cursor: pointer;
 }
 
 .cs-bulk-assign-page.bulk-assign-container {
-    background: rgba(var(--fg-rgb), 0.03);
-    border: 1px solid rgba(var(--fg-rgb), 0.06);
-    border-radius: 20px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 0;
     width: 100%;
     max-width: none;

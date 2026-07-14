@@ -10,27 +10,28 @@
 }
 
 .customer-service-details-drawer .code-badge-input {
-    font-family: monospace;
-    color: #3b82f6 !important;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary) !important;
 }
 
 .customer-service-details-drawer .status-text-active {
-    color: #2eb87a !important;
+    color: var(--success) !important;
     font-weight: 600;
 }
 
 .customer-service-details-drawer .status-text-inactive {
-    color: #ef4444 !important;
+    color: var(--danger) !important;
     font-weight: 600;
 }
 
 .customer-service-details-drawer .status-text-success {
-    color: #2eb87a !important;
+    color: var(--success) !important;
     font-weight: 600;
 }
 
 .customer-service-details-drawer .status-text-pending {
-    color: #f59e0b !important;
+    color: var(--warning) !important;
     font-weight: 600;
 }
 

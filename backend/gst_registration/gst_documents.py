@@ -8,7 +8,7 @@ from backend.gst_registration.schemas import (
     RegistrationDocumentIn,
     RegistrationDocumentEditIn,
 )
-from backend.utils import get_db_pool, DB_SCHEMA, generate_uuid, get_blob_service_client, AZURE_STORAGE_CONTAINER, generate_blob_sas_url, extract_blob_path,build_gst_visibility
+from backend.utils import get_db_pool, DB_SCHEMA, generate_uuid, get_blob_service_client, AZURE_STORAGE_CONTAINER, generate_blob_sas_url, extract_blob_path,build_gst_visibility, build_gst_filing_visibility
 from backend.logger import logger
 from backend.text_search_filters import append_fuzzy_name_filter
 from backend.redis_cache import (
@@ -213,11 +213,13 @@ async def create_registration_document(
                 "uq_doc_person_type_active":
                     "This document type already exists for this person (active)."
             }
+            if constraint not in UNIQUE_MAP:
+                log.warning("Unmapped unique violation | constraint=%s", constraint)
             raise HTTPException(
                 status_code=409,
                 detail=UNIQUE_MAP.get(
                     constraint,
-                    f"Duplicate value violates constraint: {constraint}",
+                    "Duplicate value violates a uniqueness rule.",
                 ),
             )
 
@@ -231,9 +233,11 @@ async def create_registration_document(
                 "chk_doc_mobile_format": "Invalid mobile number format.",
                 "chk_doc_verified_logic": "Verification logic invalid.",
             }
+            if constraint not in CHECK_MAP:
+                log.warning("Unmapped check violation | constraint=%s", constraint)
             raise HTTPException(
                 status_code=400,
-                detail=CHECK_MAP.get(constraint, f"Data violates constraint: {constraint}"),
+                detail=CHECK_MAP.get(constraint, "Data violates a validation rule."),
             )
 
         except asyncpg.PostgresError:
@@ -548,6 +552,8 @@ async def edit_registration_document(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
     IST = ZoneInfo("Asia/Kolkata")
     now = datetime.now(IST)
 
@@ -599,18 +605,33 @@ async def edit_registration_document(
 
                 # --------------------------------------------------
                 # 🔥 FIXED QUERY (JOIN to get customer_id)
+                #     IDOR guard: a document is visible only if its person's
+                #     parent GST registration is visible to the caller.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["d.document_id = $1", "d.is_active = TRUE"]
+                fetch_values = [document_id]
+                if visibility_sql:
+                    # g (gst_registration) is joined directly below → scope on it.
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_values.extend(visibility_values)
+
+                # customer_id lives on gst_registration (source of truth), not on
+                # gst_registration_persons; join it (alias g) and select g.customer_id.
                 old_row = await conn.fetchrow(
                     f"""
-                    SELECT d.*, rp.customer_id
+                    SELECT d.*, g.customer_id
                       FROM {DB_SCHEMA}.gst_registration_documents d
                       JOIN {DB_SCHEMA}.gst_registration_persons rp
                         ON d.person_id = rp.person_id
-                     WHERE d.document_id = $1
-                       AND d.is_active = TRUE
+                      JOIN {DB_SCHEMA}.gst_registration g
+                        ON rp.gst_registration_id = g.id
+                     WHERE {' AND '.join(fetch_conditions)}
                      LIMIT 1
                     """,
-                    document_id,
+                    *fetch_values,
                 )
 
                 if not old_row:
@@ -725,7 +746,7 @@ async def edit_registration_document(
                 status_code=400,
                 detail=CHECK_MAP.get(
                     constraint,
-                    f"Data violates constraint: {constraint}",
+                    "Data violates a validation rule.",
                 ),
             )
 
@@ -785,6 +806,8 @@ async def soft_delete_registration_document(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -812,19 +835,47 @@ async def soft_delete_registration_document(
 
                 # --------------------------------------------------
                 # 🔥 FIX: Use JOIN to get customer_id
+                #     IDOR guard: only mutate a document whose person's parent
+                #     GST registration is visible to the caller. Scope BOTH the
+                #     update and the existence fallback so a non-visible doc
+                #     returns 404 rather than leaking its existence.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                del_vis_clause = ""
+                exist_vis_clause = ""
+                extra_values = []
+                if visibility_sql:
+                    # g (gst_registration) is joined directly below, so scope on it.
+                    del_vis_clause = f" AND ({visibility_sql})"
+                    exist_vis_clause = (
+                        f" AND person_id IN "
+                        f"(SELECT p.person_id FROM {DB_SCHEMA}.gst_registration_persons p "
+                        f"WHERE p.gst_registration_id IN "
+                        f"(SELECT g.id FROM {DB_SCHEMA}.gst_registration g WHERE {visibility_sql}))"
+                    )
+                    extra_values = visibility_values
+
+                # gst_registration_persons has no customer_id — the customer is
+                # linked via gst_registration. Join it (alias g) to both scope
+                # visibility and RETURN the correct customer_id (fixes a latent
+                # `rp.customer_id does not exist` crash present before this change).
                 delete_sql = f"""
                     UPDATE {DB_SCHEMA}.gst_registration_documents d
                        SET is_active = FALSE,
                            updated_at = NOW()
                       FROM {DB_SCHEMA}.gst_registration_persons rp
+                           JOIN {DB_SCHEMA}.gst_registration g
+                             ON rp.gst_registration_id = g.id
                      WHERE d.document_id = $1
                        AND d.person_id = rp.person_id
                        AND d.is_active = TRUE
-                     RETURNING d.*, rp.customer_id
+                       {del_vis_clause}
+                     RETURNING d.*, g.customer_id
                 """
 
-                deleted_row = await conn.fetchrow(delete_sql, document_id)
+                deleted_row = await conn.fetchrow(delete_sql, document_id, *extra_values)
 
                 # --------------------------------------------------
                 # If nothing updated → check existence
@@ -835,8 +886,9 @@ async def soft_delete_registration_document(
                         SELECT document_id, is_active
                           FROM {DB_SCHEMA}.gst_registration_documents
                          WHERE document_id = $1
+                         {exist_vis_clause}
                         """,
-                        document_id,
+                        document_id, *extra_values,
                     )
 
                     if not existing_row:
@@ -979,6 +1031,8 @@ async def activate_registration_document(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -1006,15 +1060,31 @@ async def activate_registration_document(
 
                 # --------------------------------------------------
                 # 1️⃣ Fetch Document WITH ROW LOCK
+                #     IDOR guard: document visible only if its person's parent
+                #     GST registration is visible to the caller.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["document_id = $1"]
+                fetch_values = [document_id]
+                if visibility_sql:
+                    fetch_conditions.append(
+                        f"person_id IN "
+                        f"(SELECT p.person_id FROM {DB_SCHEMA}.gst_registration_persons p "
+                        f"WHERE p.gst_registration_id IN "
+                        f"(SELECT g.id FROM {DB_SCHEMA}.gst_registration g WHERE {visibility_sql}))"
+                    )
+                    fetch_values.extend(visibility_values)
+
                 doc_row = await conn.fetchrow(
                     f"""
                     SELECT *
                       FROM {DB_SCHEMA}.gst_registration_documents
-                     WHERE document_id = $1
+                     WHERE {' AND '.join(fetch_conditions)}
                      FOR UPDATE
                     """,
-                    document_id,
+                    *fetch_values,
                 )
 
                 if not doc_row:
@@ -1063,10 +1133,12 @@ async def activate_registration_document(
                        SET is_active = TRUE,
                            updated_at = NOW()
                       FROM {DB_SCHEMA}.gst_registration_persons rp
+                           JOIN {DB_SCHEMA}.gst_registration g
+                             ON rp.gst_registration_id = g.id
                      WHERE d.document_id = $1
                        AND d.person_id = rp.person_id
                        AND d.is_active = FALSE
-                     RETURNING d.*, rp.customer_id
+                     RETURNING d.*, g.customer_id
                     """,
                     document_id,
                 )
@@ -1157,6 +1229,8 @@ async def deactivate_gst_filing_document(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -1181,7 +1255,24 @@ async def deactivate_gst_filing_document(
 
                 # --------------------------------------------------
                 # 🔥 UPDATE WITH JOIN (GET CUSTOMER_ID)
+                #     IDOR guard: only mutate a filing-document whose parent
+                #     filing is visible to the caller. Scope BOTH the update and
+                #     the existence fallback so a non-visible doc returns 404.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                del_vis_clause = ""
+                exist_vis_clause = ""
+                extra_values = []
+                if visibility_sql:
+                    del_vis_clause = f" AND ({visibility_sql})"
+                    exist_vis_clause = (
+                        f" AND gst_filing_id IN "
+                        f"(SELECT f.id FROM {DB_SCHEMA}.gst_filings f WHERE {visibility_sql})"
+                    )
+                    extra_values = visibility_values
+
                 deleted_row = await conn.fetchrow(
                     f"""
                     UPDATE {DB_SCHEMA}.gst_filings_documents d
@@ -1191,9 +1282,10 @@ async def deactivate_gst_filing_document(
                      WHERE d.document_id = $1
                        AND d.gst_filing_id = f.id
                        AND d.is_active = TRUE
+                       {del_vis_clause}
                      RETURNING d.*, f.customer_id
                     """,
-                    document_id,
+                    document_id, *extra_values,
                 )
 
                 # --------------------------------------------------
@@ -1205,8 +1297,9 @@ async def deactivate_gst_filing_document(
                         SELECT document_id, is_active
                         FROM {DB_SCHEMA}.gst_filings_documents
                         WHERE document_id = $1
+                        {exist_vis_clause}
                         """,
-                        document_id,
+                        document_id, *extra_values,
                     )
 
                     if not existing:

@@ -1,7 +1,7 @@
 # SolveTax (monorepo)
 
 ```
-slovetax-1/
+solvetax-1/
 ├── backend/          # FastAPI application (Python)
 ├── frontend/         # React + Vite UI
 ├── Dockerfile        # CI + production image

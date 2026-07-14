@@ -450,7 +450,7 @@ export const GSTDocuments = ({ handleLogout, isAdmin, profileData, onRenderToolb
                         
                         <div className="drawer-content">
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Core Identifiers</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Core Identifiers</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>GSTIN</label>
@@ -463,10 +463,10 @@ export const GSTDocuments = ({ handleLogout, isAdmin, profileData, onRenderToolb
                                 </div>
                             </div>
 
-                            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Document Metadata</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Document Metadata</h4>
                                 <div className="filter-group-v4" style={{ marginBottom: '12px' }}>
                                     <label>Document Type</label>
                                     <FormCustomSelect
@@ -508,10 +508,10 @@ export const GSTDocuments = ({ handleLogout, isAdmin, profileData, onRenderToolb
                                 </div>
                             </div>
 
-                            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>System Context</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>System Context</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Record State</label>
@@ -541,10 +541,10 @@ export const GSTDocuments = ({ handleLogout, isAdmin, profileData, onRenderToolb
                                 </div>
                             </div>
 
-                            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Upload Timeline</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Upload Timeline</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>From Date</label>
@@ -616,7 +616,7 @@ export const GSTDocuments = ({ handleLogout, isAdmin, profileData, onRenderToolb
                                     </span>
                                 </div>
                                 <div className="filings-ledger-cell">{item.verified_by_name || '-'}</div>
-                                <div className="filings-ledger-cell" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatDateTime(item.verified_at)}</div>
+                                <div className="filings-ledger-cell" style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>{formatDateTime(item.verified_at)}</div>
                                 <div className="filings-ledger-cell">
                                     <span className={`status-badge-v4 ${item.is_active ? 'completed' : 'overdue'}`}>
                                         {item.is_active ? 'ACTIVE' : 'INACTIVE'}
@@ -629,14 +629,14 @@ export const GSTDocuments = ({ handleLogout, isAdmin, profileData, onRenderToolb
                                             onClick={(e) => { e.stopPropagation(); handleView(item.document_url); }}
                                             title="View Document"
                                         >
-                                            <ExternalLink size={16} color="#3b82f6" />
+                                            <ExternalLink size={16} color="var(--info)" />
                                         </button>
                                         <button
                                             className="btn-icon-minimal"
                                             onClick={(e) => { e.stopPropagation(); handleDownload(item.document_url, `doc_${item.document_id}`); }}
                                             title="Download Securely"
                                         >
-                                            <FileDown size={16} color="#2eb87a" />
+                                            <FileDown size={16} color="var(--accent)" />
                                         </button>
                                     </div>
                                 </div>
@@ -951,7 +951,7 @@ const GSTDocumentsDetailsModal = ({ isOpen, data, onClose, onUpdated, isAdmin, c
             <div className="gst-filters-drawer gst-reg-details-drawer gst-reg-side-drawer-shell app-drawer-panel" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
                 <div className="drawer-header gst-reg-details-header">
                     <div className="header-content-v4">
-                        <div className="header-icon-box-v4" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}>
+                        <div className="header-icon-box-v4" style={{ background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)' }}>
                             <FileText size={20} />
                         </div>
                         <div className="modal-title-box">
@@ -1246,7 +1246,7 @@ const GSTDocumentsDetailsModal = ({ isOpen, data, onClose, onUpdated, isAdmin, c
                 <div className="gst-confirm-overlay" onClick={() => setConfirmAction('')}>
                     <div className="gst-confirm-content" onClick={e => e.stopPropagation()}>
                         <div className="gst-confirm-icon">
-                            <AlertCircle size={32} color={confirmAction === 'delete' ? '#f44336' : '#2eb87a'} />
+                            <AlertCircle size={32} color={confirmAction === 'delete' ? 'var(--danger)' : 'var(--accent)'} />
                         </div>
                         <h2>{confirmAction === 'delete' ? 'Confirm Delete' : 'Confirm Activation'}</h2>
                         <p>
@@ -1260,7 +1260,7 @@ const GSTDocumentsDetailsModal = ({ isOpen, data, onClose, onUpdated, isAdmin, c
                             </button>
                             <button 
                                 className="glow-green" 
-                                style={confirmAction === 'delete' ? { background: '#f44336', boxShadow: '0 4px 20px rgba(244, 67, 54, 0.3)' } : {}}
+                                style={confirmAction === 'delete' ? { background: 'var(--danger)', boxShadow: '0 2px 8px rgba(var(--danger-rgb), 0.24)' } : {}}
                                 onClick={confirmAction === 'delete' ? handleDelete : handleActivate} 
                                 disabled={actionLoading !== ''}
                             >
@@ -1285,8 +1285,6 @@ export const GSTDocumentDetails = ({ onLogout }) => {
     const navigate = useNavigate();
     const location = useLocation();
     const data = location.state?.data;
-
-    if (!data) return <div className="gst-docs-no-data">No data provided. Please navigate from the dashboard.</div>;
 
     const label = 'GST Document';
     const [item, setItem] = useState(data);
@@ -1316,6 +1314,10 @@ export const GSTDocumentDetails = ({ onLogout }) => {
         };
         checkAdmin();
     }, [location.state?.isAdmin]);
+
+    // All hooks above — safe to early-return now (Rules of Hooks): guarding
+    // before the useState/useEffect calls crashes React on a hook-count mismatch.
+    if (!data) return <div className="gst-docs-no-data">No data provided. Please navigate from the dashboard.</div>;
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -1419,7 +1421,7 @@ export const GSTDocumentDetails = ({ onLogout }) => {
                                     <label>Mobile<div className="form-value-box">{item.mobile || '-'}</div></label>
                                     <label>Doc URL
                                         <div className="form-value-box gst-docs-form-value-box-ellipsis">
-                                            <a href={item.document_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--green-primary)' }}>View Document</a>
+                                            <a href={item.document_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>View Document</a>
                                         </div>
                                     </label>
                                     <label>Verified<div className="form-value-box">{item.verified ? 'Yes' : 'No'}</div></label>

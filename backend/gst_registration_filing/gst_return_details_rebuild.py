@@ -65,6 +65,20 @@ def parse_filing_period_to_base_date(filing_period: str) -> datetime:
     raise HTTPException(400, _ERR_FILING_PERIOD)
 
 
+def annual_base_for_period(base_dt: datetime) -> datetime:
+    """
+    April 1 of the Indian fiscal year that ``base_dt`` falls in.
+
+    Annual returns (GSTR-9/9C, GSTR-4) are due relative to the *financial year*,
+    not the individual month/quarter that spawned the companion row. The FY runs
+    1 Apr – 31 Mar; Jan/Feb/Mar belong to the FY that began the previous April.
+    Anchoring the annual due date here keeps it correct no matter which periodic
+    filing (e.g. APR-2024 vs FEB-2025) created the companion annual row.
+    """
+    fy_year = base_dt.year if base_dt.month >= 4 else base_dt.year - 1
+    return datetime(fy_year, 4, 1)
+
+
 async def count_active_return_details(conn, filing_id: int) -> int:
     return int(
         await conn.fetchval(
@@ -161,6 +175,9 @@ async def rebuild_return_details_for_filing(
     state_u = (state or "").strip().upper() if state else None
 
     base_date = parse_filing_period_to_base_date(filing_period)
+    # Fiscal-year anchor (1 Apr) used for annual returns so their due dates are
+    # correct regardless of which month/quarter spawned the companion row.
+    annual_base = annual_base_for_period(base_date)
 
     def build_due_date_safe(base_dt, month_offset: int, day: int):
         target = base_dt + relativedelta(months=month_offset)
@@ -179,9 +196,9 @@ async def rebuild_return_details_for_filing(
 
     if filing_category == "ANNUAL" and filing_frequency == "YEARLY":
         if taxpayer_type == "REGULAR":
-            gstr9_due = build_due_date_safe(base_date, 9, 31)
+            gstr9_due = build_due_date_safe(annual_base, 20, 31)
             gstr9c_valid = td == "MORE_THAN_5CR"
-            gstr9c_due = build_due_date_safe(base_date, 9, 31) if gstr9c_valid else None
+            gstr9c_due = build_due_date_safe(annual_base, 20, 31) if gstr9c_valid else None
             gstr9_status = _get_status(gstr9_due)
             gstr9c_status = _get_status(gstr9c_due) if gstr9c_valid else None
             next_auto = _compute_next_auto_generate_at(
@@ -217,7 +234,7 @@ async def rebuild_return_details_for_filing(
                 True,
             )
         elif taxpayer_type == "COMPOSITION":
-            gstr4_due = build_due_date_safe(base_date, 9, 30)
+            gstr4_due = build_due_date_safe(annual_base, 14, 30)
             gstr4_status = _get_status(gstr4_due)
             next_auto = _compute_next_auto_generate_at(
                 gstr4_due,
@@ -259,9 +276,9 @@ async def rebuild_return_details_for_filing(
             gstr1_due = build_due_date_safe(base_date, 1, 11)
             gstr3b_due = build_due_date_safe(base_date, 1, 20)
         elif filing_frequency == "QUARTERLY":
-            gstr1_due = build_due_date_safe(base_date, 1, 13)
+            gstr1_due = build_due_date_safe(base_date, 3, 13)
             due_day_3b = 24 if state_u in group_2_states else 22
-            gstr3b_due = build_due_date_safe(base_date, 1, due_day_3b)
+            gstr3b_due = build_due_date_safe(base_date, 3, due_day_3b)
         else:
             raise HTTPException(400, _ERR_REGULAR_FREQUENCY)
 
@@ -301,9 +318,9 @@ async def rebuild_return_details_for_filing(
         )
 
         if not explicit_filing_period:
-            gstr9_due = build_due_date_safe(base_date, 9, 31)
+            gstr9_due = build_due_date_safe(annual_base, 20, 31)
             gstr9c_valid = td == "MORE_THAN_5CR"
-            gstr9c_due = build_due_date_safe(base_date, 9, 31) if gstr9c_valid else None
+            gstr9c_due = build_due_date_safe(annual_base, 20, 31) if gstr9c_valid else None
             gstr9_status = _get_status(gstr9_due)
             gstr9c_status = _get_status(gstr9c_due) if gstr9c_valid else None
             next_auto_annual = _compute_next_auto_generate_at(
@@ -342,7 +359,7 @@ async def rebuild_return_details_for_filing(
 
     if taxpayer_type == "COMPOSITION":
         if (not explicit_filing_period) or filing_frequency != "YEARLY":
-            cmp08_due = build_due_date_safe(base_date, 1, 18)
+            cmp08_due = build_due_date_safe(base_date, 3, 18)
             cmp08_status = _get_status(cmp08_due)
             next_auto_cmp = _compute_next_auto_generate_at(
                 cmp08_due,
@@ -376,7 +393,7 @@ async def rebuild_return_details_for_filing(
                 True,
             )
         if (not explicit_filing_period) or filing_frequency == "YEARLY":
-            gstr4_due = build_due_date_safe(base_date, 9, 30)
+            gstr4_due = build_due_date_safe(annual_base, 14, 30)
             gstr4_status = _get_status(gstr4_due)
             next_auto_g4 = _compute_next_auto_generate_at(
                 gstr4_due,

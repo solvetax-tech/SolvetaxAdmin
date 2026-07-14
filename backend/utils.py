@@ -71,19 +71,41 @@ _db_pool_lock = asyncio.Lock()
 
 
 import hashlib
+import hmac
+import bcrypt
+
+# New password hashes use bcrypt ("$2b$..."). Existing accounts may still hold a
+# legacy unsalted SHA-512 hex digest; verify_password transparently accepts both
+# so no one is locked out, and password_needs_rehash() lets callers upgrade a
+# legacy hash to bcrypt on the next successful login.
+_BCRYPT_PREFIXES = ("$2a$", "$2b$", "$2y$")
+
+
+def _is_bcrypt_hash(stored_hash: str) -> bool:
+    return isinstance(stored_hash, str) and stored_hash.startswith(_BCRYPT_PREFIXES)
+
 
 def hash_password(password: str) -> str:
-    hash_obj = hashlib.sha512()
-    hash_obj.update(password.encode("utf-8"))
-    return hash_obj.hexdigest()
+    # bcrypt operates on at most 72 bytes, well beyond our max password length.
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    hash_obj = hashlib.sha512()
-    hash_obj.update(password.encode("utf-8"))
-    computed_hash = hash_obj.hexdigest()
+    if not stored_hash:
+        return False
+    if _is_bcrypt_hash(stored_hash):
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+        except (ValueError, TypeError):
+            return False
+    # Legacy path: unsalted SHA-512 hex digest, compared in constant time.
+    legacy = hashlib.sha512(password.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(legacy, stored_hash)
 
-    return computed_hash == stored_hash
+
+def password_needs_rehash(stored_hash: str) -> bool:
+    """True when the stored hash is legacy SHA-512 and should be upgraded to bcrypt."""
+    return not _is_bcrypt_hash(stored_hash)
 
 
 def is_password_strong(password: str) -> bool:
@@ -273,8 +295,10 @@ def build_registration_payments_visibility(
     if role == "ADMIN":
         return None, [], idx
 
-    rm_col = "COALESCE(c.rm_id, g.rm_id, i.rm_id, f.rm_id, f_rd.rm_id, cs.rm_id)"
-    op_col = "COALESCE(c.op_id, g.created_by, i.op_id, f.op_id, f_rd.op_id, cs.op_id)"
+    # Entity-first: each entity table is the source of truth for rm/op ownership;
+    # customer (c) is an OPTIONAL fallback only when the entity has no owner set.
+    rm_col = "COALESCE(g.rm_id, i.rm_id, f.rm_id, f_rd.rm_id, cs.rm_id, c.rm_id)"
+    op_col = "COALESCE(g.created_by, i.op_id, f.op_id, f_rd.op_id, cs.op_id, c.op_id)"
 
     if not emp_id:
         return "1=0", [], idx
@@ -315,8 +339,10 @@ def build_payment_followup_visibility(
     if role == "ADMIN":
         return None, [], idx
 
-    rm_col = "COALESCE(c.rm_id, f.rm_id, f_rd.rm_id, cs.rm_id)"
-    op_col = "COALESCE(c.op_id, f.op_id, f_rd.op_id, cs.op_id)"
+    # Entity-first (see build_registration_payments_visibility): the filing /
+    # return-detail / service row owns the follow-up; customer is a fallback.
+    rm_col = "COALESCE(f.rm_id, f_rd.rm_id, cs.rm_id, c.rm_id)"
+    op_col = "COALESCE(f.op_id, f_rd.op_id, cs.op_id, c.op_id)"
 
     if not emp_id:
         return "1=0", [], idx
@@ -545,6 +571,20 @@ def hash_refresh_token(refresh_token: str) -> str:
     hash_obj.update(refresh_token.encode("utf-8"))
     return hash_obj.hexdigest()
 
+
+# --------------------------------------------------
+# Hash Access/Session Token (store only the hash at rest)
+# --------------------------------------------------
+# The session_token table and session_audit_log store a SHA-256 hash of the
+# access JWT rather than the raw token, so a read of those tables cannot be
+# replayed to hijack a live session. The raw JWT is only ever held by the
+# client (login/refresh response body + Authorization header). Lookups hash
+# the incoming bearer token and compare digests.
+def hash_session_token(token: str) -> str:
+    hash_obj = hashlib.sha256()
+    hash_obj.update(token.encode("utf-8"))
+    return hash_obj.hexdigest()
+
 # --------------------------------------------------
 # Azure Blob Storage Configuration
 # --------------------------------------------------
@@ -589,52 +629,6 @@ from backend.logger import logger
 
 load_dotenv()
 
-async def send_email_otp(email: str, otp: str):
-
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT"))
-    smtp_email = os.getenv("SMTP_EMAIL")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-
-    if not all([smtp_server, smtp_port, smtp_email, smtp_password]):
-        raise RuntimeError("SMTP configuration missing")
-
-    subject = "SolveTax Password Reset OTP"
-
-    body = f"""
-Hello,
-
-Your OTP for resetting your SolveTax account password is:
-
-{otp}
-
-This OTP will expire in 10 minutes.
-
-If you did not request this, please ignore this email.
-
-Regards,
-SolveTax Security Team
-"""
-
-    message = MIMEMultipart()
-    message["From"] = smtp_email
-    message["To"] = email
-    message["Subject"] = subject
-    message.attach(MIMEText(body, "plain"))
-
-    try:
-
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_email, smtp_password)
-            server.sendmail(smtp_email, email, message.as_string())
-
-        logger.info("OTP email sent successfully to %s", email)
-
-    except Exception as e:
-        logger.error("Email sending failed for %s | Error: %s", email, str(e))
-        raise
-    
 async def send_email_otp(email: str, otp: str, purpose: str = "password_reset"):
 
     smtp_server = os.getenv("SMTP_SERVER")
@@ -695,13 +689,18 @@ SolveTax Security Team
     message["Subject"] = subject
     message.attach(MIMEText(body, "plain"))
 
-    try:
-
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
+    def _send_sync():
+        # Blocking SMTP I/O (connect, TLS, login, send). The 20s timeout keeps a
+        # hung mail server from tying up the worker thread indefinitely.
+        with smtplib.SMTP(smtp_server, smtp_port, timeout=20) as server:
             server.starttls()
             server.login(smtp_email, smtp_password)
             server.sendmail(smtp_email, email, message.as_string())
 
+    try:
+        # Offload to a thread so a slow/unreachable SMTP server doesn't stall the
+        # event loop (and every other concurrent request) while we wait on it.
+        await asyncio.get_running_loop().run_in_executor(None, _send_sync)
         logger.info("OTP email sent successfully to %s | purpose=%s", email, purpose)
 
     except Exception as e:

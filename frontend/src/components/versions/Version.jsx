@@ -30,11 +30,10 @@ import Pagination from '../common/Pagination';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromPairs } from '../common/selectOptionUtils';
 
-const Version = ({ handleLogout, isAdmin, headerStart = null }) => {
+const Version = ({ handleLogout, headerStart = null }) => {
     const [versions, setVersions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [limit] = useState(50);
     const [showFilterDrawer, setShowFilterDrawer] = useState(false);
@@ -85,7 +84,6 @@ const Version = ({ handleLogout, isAdmin, headerStart = null }) => {
 
             const response = await api.get(`/api/v1/version/dynamic_filter?${params.toString()}`);
             setVersions(response.data.data || []);
-            setTotal(response.data.total_count || 0);
             setHasFetched(true);
         } catch (err) {
             console.error("Failed to fetch version history:", err);
@@ -163,7 +161,7 @@ const Version = ({ handleLogout, isAdmin, headerStart = null }) => {
         };
 
         return Object.entries(appliedFilters)
-            .filter(([_, value]) => value !== '')
+            .filter(([, value]) => value !== '')
             .map(([key, value]) => (
                 <div key={key} className="filter-chip">
                     <span className="filter-chip-label">{labels[key] || key}:</span>
@@ -286,6 +284,19 @@ const Version = ({ handleLogout, isAdmin, headerStart = null }) => {
                     <div className="version-audit-header-start">{headerStart}</div>
                 ) : null}
 
+                <div className="global-quick-search" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 10px', border: '1px solid rgba(var(--fg-rgb),0.12)', borderRadius: '8px' }}>
+                    <Search size={14} style={{ opacity: 0.55, flexShrink: 0 }} />
+                    <input
+                        type="text"
+                        value={globalSearch}
+                        onChange={(e) => setGlobalSearch(e.target.value)}
+                        onKeyDown={handleGlobalSearchKeydown}
+                        placeholder="Entity ID or type… ↵"
+                        aria-label="Quick search audit log"
+                        style={{ border: 'none', outline: 'none', background: 'transparent', color: 'inherit', fontSize: '13px', width: '160px' }}
+                    />
+                </div>
+
                 <div className="active-filters-container">
                     {renderFilterChips()}
                 </div>
@@ -401,7 +412,7 @@ const Version = ({ handleLogout, isAdmin, headerStart = null }) => {
                                 {loading ? (
                                     <AuditLogTableSkeleton />
                                 ) : error ? (
-                                    <div className="table-error-row" style={{ padding: '40px', textAlign: 'center', color: '#f44336' }}>Error: {error}</div>
+                                    <div className="table-error-row" style={{ padding: '40px', textAlign: 'center', color: 'var(--danger)' }}>Error: {error}</div>
                                 ) : (versions.length === 0 && hasFetched) ? (
                                     <div className="table-msg-row" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-primary)' }}>No audit records found.</div>
                                 ) : (

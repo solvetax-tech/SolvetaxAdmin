@@ -109,8 +109,8 @@ const Homepage = () => {
             </div>
             <div className="solutions-image">
               <div style={{ textAlign: 'center' }}>
-                <Globe size={120} color="var(--green-primary)" style={{ opacity: 0.2 }} />
-                <p style={{ marginTop: '20px', color: 'var(--green-mid)', fontWeight: 600 }}>Global Standards. Local Expertise.</p>
+                <Globe size={120} color="var(--accent)" style={{ opacity: 0.2 }} />
+                <p style={{ marginTop: '20px', color: 'var(--text-secondary)', fontWeight: 600 }}>Global Standards. Local Expertise.</p>
               </div>
             </div>
           </div>
@@ -121,8 +121,8 @@ const Homepage = () => {
         <div className="footer-grid">
           <div className="footer-col">
             <div className="logo-section" style={{ marginBottom: '20px' }}>
-              <div className="logo-icon" style={{ background: '#fff', color: 'var(--green-deep)' }}>S</div>
-              <span className="logo-text" style={{ color: '#fff' }}>Slovetax</span>
+              <div className="logo-icon" style={{ background: 'var(--text-inverse)', color: 'var(--accent-deep)' }}>S</div>
+              <span className="logo-text" style={{ color: 'var(--text-inverse)' }}>Slovetax</span>
             </div>
             <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '14px', lineHeight: '1.6' }}>
               Making tax management simple, smart, and accessible for everyone.

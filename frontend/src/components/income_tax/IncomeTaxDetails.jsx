@@ -247,7 +247,7 @@ const IncomeTaxDetails = ({ isOpen, onClose, recordId, configs, onUpdate }) => {
                                     )}
                                 </div>
                                 {details.remarks && (
-                                    <div className="remarks-box-v4" style={{ marginTop: '16px', padding: '12px', background: 'rgba(var(--fg-rgb),0.02)', borderRadius: '12px', border: '1px solid rgba(var(--fg-rgb),0.05)' }}>
+                                    <div className="remarks-box-v4" style={{ marginTop: '16px', padding: '12px', background: 'var(--bg-surface-2)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
                                         <label style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '4px' }}>Internal Remarks</label>
                                         <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>{details.remarks}</p>
                                     </div>

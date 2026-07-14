@@ -1,9 +1,15 @@
 import asyncio
 import logging
 import os
+import secrets
 from typing import Optional, Tuple
 
 from backend.utils import get_db_pool, DB_SCHEMA
+from backend.redis_cache import (
+    acquire_lock,
+    release_lock,
+    is_redis_configured,
+)
 from backend.gst_registration_filing.gst_filing_auto_policy import (
     disable_gst_filings_auto_over_missed_threshold,
 )
@@ -22,6 +28,14 @@ ITR_CRM_ENTITY_TYPE = "INCOME_TAX"
 SCHEDULER_SQL_BATCH_LIMIT = 500
 
 _scheduler_task: Optional[asyncio.Task] = None
+
+# Leader election: with >1 uvicorn worker or >1 container instance, every process
+# starts this loop. A fleet-wide Redis lock ensures exactly one runs the jobs per
+# tick (prevents duplicate CRM auto-assign / double status updates). TTL is a
+# crash-recovery ceiling; the lock is released after each tick.
+_SCHEDULER_LOCK_KEY = "scheduler:leader:lock"
+_SCHEDULER_LOCK_TTL_SEC = 300
+_SCHEDULER_INSTANCE_TOKEN = secrets.token_hex(16)
 
 
 def _parse_cmd_rowcount(tag: str) -> int:
@@ -396,7 +410,18 @@ async def background_jobs():
     pool = await get_db_pool()
 
     while True:
+        lock_held = False
         try:
+            # Leader election: only the lock holder runs this tick. When Redis is
+            # unconfigured (single-instance dev) we run without a lock.
+            if is_redis_configured():
+                lock_held = await acquire_lock(
+                    _SCHEDULER_LOCK_KEY, _SCHEDULER_INSTANCE_TOKEN, _SCHEDULER_LOCK_TTL_SEC
+                )
+                if not lock_held:
+                    logging.info("Scheduler tick skipped — another instance holds the leader lock")
+                    await asyncio.sleep(60)
+                    continue
             async with pool.acquire() as conn:
                 logging.info("Running background scheduler...")
 
@@ -611,6 +636,9 @@ async def background_jobs():
 
         except Exception as e:
             logging.error("Scheduler error: %s", e, exc_info=True)
+        finally:
+            if lock_held:
+                await release_lock(_SCHEDULER_LOCK_KEY, _SCHEDULER_INSTANCE_TOKEN)
 
         await asyncio.sleep(60)
 

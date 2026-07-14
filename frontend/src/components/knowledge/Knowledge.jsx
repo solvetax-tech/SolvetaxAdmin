@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BookOpen, CreditCard, MapPin, FileCheck, Loader2, AlertCircle, TrendingUp, Briefcase } from 'lucide-react';
 import api from '../../utils/api';
 import { STAFF_SERVICE_CONFIG_PATH } from '../../utils/staffServiceConfigApi';
+import StatusPill from '../ui/StatusPill';
 import './Knowledge.css';
 
 const DEFAULT_SERVICE_CONFIGS = [
@@ -279,7 +280,7 @@ const Knowledge = () => {
                 {/* Income Tax Pricing Section */}
                 <section className="knowledge-section pricing-card">
                     <div className="section-header">
-                        <CreditCard size={20} style={{ color: '#3b82f6' }} />
+                        <CreditCard size={20} style={{ color: 'var(--info)' }} />
                         <h2>Income Tax Filing Pricing</h2>
                     </div>
                     <div className="table-wrapper">
@@ -396,13 +397,13 @@ const Knowledge = () => {
                 {/* Business Types Section */}
                 <section className="knowledge-section business-card">
                     <div className="section-header">
-                        <div style={{ color: '#ec4899' }}><FileCheck size={20} /></div>
+                        <div style={{ color: 'var(--accent)' }}><FileCheck size={20} /></div>
                         <h2>Business Categories</h2>
                     </div>
                     <div className="list-wrapper">
                         <div className="state-tags">
                             {businessTypes.length > 0 ? businessTypes.map((b, idx) => (
-                                <div key={idx} className="state-tag" style={{ borderLeft: '3px solid #ec4899' }}>
+                                <div key={idx} className="state-tag" style={{ borderLeft: '3px solid var(--accent)' }}>
                                     <span className="state-name">{b.display_name}</span>
                                 </div>
                             )) : (
@@ -422,7 +423,7 @@ const Knowledge = () => {
                         <ul className="doc-list">
                             {turnoverDetails.length > 0 ? turnoverDetails.map((t, idx) => (
                                 <li key={idx} className="doc-item">
-                                    <span className="dot" style={{ backgroundColor: '#2eb87a' }} />
+                                    <span className="dot" style={{ backgroundColor: 'var(--accent)' }} />
                                     <span>{t.display_name}</span>
                                 </li>
                             )) : (
@@ -441,7 +442,7 @@ const Knowledge = () => {
                     <div className="list-wrapper">
                         <div className="state-tags">
                             {regStatuses.length > 0 ? regStatuses.map((s, idx) => (
-                                <div key={idx} className="state-tag" style={{ borderLeft: '3px solid #f59e0b' }}>
+                                <div key={idx} className="state-tag" style={{ borderLeft: '3px solid var(--warning)' }}>
                                     <span className="state-name">{s.display_name}</span>
                                 </div>
                             )) : (
@@ -454,7 +455,7 @@ const Knowledge = () => {
                 {/* GST Filing Config Section */}
                 <section className="knowledge-section filing-config-card full-width-section">
                     <div className="section-header">
-                        <div style={{ color: '#8b5cf6' }}><FileCheck size={20} /></div>
+                        <div style={{ color: 'var(--accent)' }}><FileCheck size={20} /></div>
                         <h2>GST Filing Configurations</h2>
                     </div>
                     <div className="table-wrapper">
@@ -476,18 +477,7 @@ const Knowledge = () => {
                                         <td style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: '1.4' }}>{f.description || '-'}</td>
                                         <td>{f.filing_category}</td>
                                         <td>
-                                            <span style={{
-                                                fontSize: '11px',
-                                                padding: '4px 8px',
-                                                borderRadius: '6px',
-                                                background: f.is_active ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                                                color: f.is_active ? '#2eb87a' : '#ef4444',
-                                                border: `1px solid ${f.is_active ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
-                                                fontWeight: '700',
-                                                textTransform: 'uppercase'
-                                            }}>
-                                                {f.is_active ? 'Active' : 'Inactive'}
-                                            </span>
+                                            <StatusPill value={f.is_active ? 'ACTIVE' : 'INACTIVE'} />
                                         </td>
                                     </tr>
                                 )) : (
@@ -565,7 +555,7 @@ const Knowledge = () => {
                 {/* GST Filing Standard Rules (from gst_filing_rule_engine.py) */}
                 <section className="knowledge-section filing-rule-card full-width-section">
                     <div className="section-header">
-                        <div style={{ color: '#2eb87a' }}><FileCheck size={20} /></div>
+                        <div style={{ color: 'var(--accent)' }}><FileCheck size={20} /></div>
                         <h2>GST Filing Standard Rules</h2>
                     </div>
                     <div className="table-wrapper">
@@ -599,18 +589,7 @@ const Knowledge = () => {
                                         <td>{r.due_month_offset ?? '-'}</td>
                                         <td>{r.turnover_limits || '-'}</td>
                                         <td>
-                                            <span style={{
-                                                fontSize: '11px',
-                                                padding: '4px 8px',
-                                                borderRadius: '6px',
-                                                background: r.is_active ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                                                color: r.is_active ? '#2eb87a' : '#ef4444',
-                                                border: `1px solid ${r.is_active ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
-                                                fontWeight: '700',
-                                                textTransform: 'uppercase'
-                                            }}>
-                                                {r.is_active ? 'Active' : 'Inactive'}
-                                            </span>
+                                            <StatusPill value={r.is_active ? 'ACTIVE' : 'INACTIVE'} />
                                         </td>
                                     </tr>
                                 )) : (

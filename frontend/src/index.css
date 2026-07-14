@@ -1,121 +1,220 @@
 :root {
   /* ============================================================
-   * THEME TOKENS — dark is the default. Light overrides live in
-   * :root[data-theme="light"] below. Component CSS should read
-   * these tokens instead of hardcoding colors.
+   * SOLVETAX DESIGN TOKENS  —  refined indigo SaaS (Linear/Stripe)
+   * Cool near-black dark + crisp cool-grey light, a premium indigo
+   * accent, Inter typography, and tabular monospace for numbers,
+   * amounts, GSTIN and PAN. Dark is default; light overrides live in
+   * [data-theme="light"]. Component CSS reads tokens, never hardcodes.
    * ============================================================ */
 
-  /* Foreground channel: drives every rgba(var(--fg-rgb), a) used for text,
-   * borders, dividers and subtle washes. White on dark, deep-green on light,
+  /* Foreground / background channels drive every rgba(var(--fg-rgb), a) and
+   * rgba(var(--bg-rgb), a) — soft off-white ink on dark, deep ink on light,
    * so all alpha variants flip automatically between themes. */
-  --fg-rgb: 255, 255, 255;
-  /* Background channel: drives rgba(var(--bg-rgb), a) translucent surfaces
-   * (top bars, glass panels). Near-black on dark, white on light. */
-  --bg-rgb: 15, 15, 15;
+  --fg-rgb: 230, 232, 240;
+  --bg-rgb: 12, 13, 16;
 
-  /* Surfaces */
-  --bg-app: #050505;
-  --bg-app-2: #0a0a0a;
-  --bg-surface: #141414;
-  --bg-surface-2: #1a1a1a;
-  --bg-elevated: #1f1f1f;
-  --bg-hover: rgba(255, 255, 255, 0.05);
-  --bg-active: rgba(255, 255, 255, 0.08);
-  --bg-input: rgba(255, 255, 255, 0.04);
-  --bg-overlay: rgba(5, 5, 5, 0.85);
+  /* Surfaces — a cool, sophisticated near-black (Linear/Stripe dark), with
+     softly layered panels for real depth. */
+  --bg-app: #0c0d10;
+  --bg-app-2: #101116;
+  --bg-surface: #14161c;
+  --bg-surface-2: #191b22;
+  --bg-elevated: #1f222b;
+  --bg-hover: rgba(230, 232, 240, 0.045);
+  --bg-active: rgba(124, 133, 247, 0.13);
+  --bg-input: rgba(230, 232, 240, 0.035);
+  --bg-overlay: rgba(6, 7, 10, 0.72);
 
-  /* Text — maximum contrast: pure white in dark */
-  --text-primary: #ffffff;
-  --text-secondary: #ffffff;
-  --text-muted: rgba(255, 255, 255, 0.85);
-  --text-faint: rgba(255, 255, 255, 0.65);
-  --text-inverse: #0d3d2b;
+  /* Text — a real hierarchy (cool off-white, never pure white on pure black). */
+  --text-primary: #edeff5;
+  --text-secondary: rgba(230, 232, 240, 0.66);
+  --text-muted: rgba(230, 232, 240, 0.45);
+  --text-faint: rgba(230, 232, 240, 0.30);
+  --text-inverse: #ffffff;
 
   /* Borders */
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border: rgba(230, 232, 240, 0.09);
+  --border-strong: rgba(230, 232, 240, 0.16);
+  --border-subtle: rgba(230, 232, 240, 0.05);
 
-  /* Brand + semantic (kept consistent across themes) */
-  --accent: #2eb87a;
-  --accent-strong: #1a6644;
-  --accent-deep: #0d3d2b;
-  --accent-soft: rgba(46, 184, 122, 0.15);
-  --success: #2eb87a;
-  --success-soft: rgba(46, 184, 122, 0.15);
-  --danger: #ef4444;
-  --danger-soft: rgba(239, 68, 68, 0.15);
-  --warning: #f59e0b;
-  --warning-soft: rgba(245, 158, 11, 0.15);
-  --info: #3b82f6;
-  --info-soft: rgba(59, 130, 246, 0.15);
+  /* Brand — Stripe/Mixpanel blurple (the definitive premium-SaaS purple) */
+  --accent: #8b83ff;
+  --accent-rgb: 139, 131, 255;            /* drives rgba(var(--accent-rgb), a) */
+  --accent-hover: #9d96ff;
+  --accent-strong: #635bff;
+  --accent-deep: #3a3499;
+  --accent-soft: rgba(139, 131, 255, 0.15);
+  --accent-color: var(--accent);          /* unify: components use both names */
 
-  /* Effects */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.6);
-  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
-  --scrollbar-track: #050505;
+  /* Semantic (green stays for success/"paid/filed" status) */
+  --success: #37c98b;
+  --success-rgb: 55, 201, 139;
+  --success-soft: rgba(55, 201, 139, 0.14);
+  --danger: #f2555f;
+  --danger-rgb: 242, 85, 95;
+  --danger-soft: rgba(242, 85, 95, 0.15);
+  --warning: #f5b544;
+  --warning-rgb: 245, 181, 68;
+  --warning-soft: rgba(245, 181, 68, 0.15);
+  --info: #4b93f0;
+  --info-rgb: 75, 147, 240;
+  --info-soft: rgba(75, 147, 240, 0.15);
 
-  /* Legacy aliases (kept so existing var() refs still resolve) */
+  /* Role accents (badges) — tuned bright for dark; deepened in light theme */
+  --role-admin: #e0a92e;
+  --role-hr: #b98cfb;
+  --role-manager: #38bdf8;
+  --role-lead: #7c85f7;
+
+  /* Elevation — layered shadows for depth */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --shadow-xl: 0 32px 80px rgba(0, 0, 0, 0.6);
+  /* Theme-aware shadow ink: pure black on dark, cool navy on light — so every
+     rgba(var(--shadow-rgb), a) shadow reads as "designed" not "dirty smudge". */
+  --shadow-rgb: 0, 0, 0;
+  --ring: 0 0 0 3px var(--accent-soft);    /* focus ring */
+  --scrollbar-thumb: rgba(234, 241, 238, 0.10);
+  --scrollbar-track: transparent;
+
+  /* ---- Shared scales (theme-independent) ---- */
+  /* Radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  /* legacy spacing aliases (were stranded in Dashboard.css) */
+  --space-xs: var(--space-1);
+  --space-sm: var(--space-2);
+  --space-md: var(--space-4);
+  --space-lg: var(--space-5);
+  --space-xl: var(--space-6);
+  --space-xxl: var(--space-7);
+
+  /* Type scale (pre-zoom; the app renders at zoom .75) */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 36px;
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  /* legacy type aliases */
+  --font-base: var(--text-base);
+  --font-h1: var(--text-3xl);
+  --font-h2: var(--text-2xl);
+  --font-h3: var(--text-xl);
+  --font-h4: var(--text-lg);
+
+  /* Motion */
+  --transition: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.16, 0.84, 0.44, 1);
+
+  /* Legacy color aliases (kept so existing var() refs still resolve) */
   --bg-cream: #f7f4ef;
-  --green-deep: #0d3d2b;
-  --green-mid: #1a6644;
-  --green-primary: #2eb87a;
-  --green-soft: #e8f5ef;
+  --green-deep: var(--accent-deep);
+  --green-mid: var(--accent-strong);
+  --green-primary: var(--accent);
+  --green-soft: var(--accent-soft);
   --text-main: var(--text-primary);
   --border-light: var(--border);
+  --border-glass: var(--border);
   --bg-dark: var(--bg-app);
 
-  /* Font Families */
-  --font-body: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
-  --font-heading: 'Playfair Display', serif;
-  --font-accent: 'Plus Jakarta Sans', 'DM Sans', sans-serif;
+  /* Font Families — Inter, the modern-SaaS grotesk (Linear/Stripe/Vercel). */
+  --font-body: 'Inter', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-heading: 'Inter', 'Plus Jakarta Sans', sans-serif;
+  --font-accent: 'Inter', 'Plus Jakarta Sans', sans-serif;
+  /* Tabular monospace for numbers, amounts, GSTIN/PAN, IDs — the signature. */
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+  --font-serif: 'Playfair Display', serif; /* available for marketing pages */
 }
 
 /* ============================================================
- * LIGHT THEME — SolveTax brand: cream/white surfaces,
- * deep-green text, mint accent. Only surfaces/text/borders/
- * shadows flip; brand + semantic hues stay the same.
+ * LIGHT THEME — "cockpit by day": a warm-neutral green-grey canvas
+ * with white cards, deep-ink text and soft layered shadows. Only
+ * surfaces/text/borders/shadows/accent-lightness flip.
  * ============================================================ */
 :root[data-theme="light"] {
-  /* Marketing-site light theme: soft mint surfaces + deep navy-teal ink.
-     Foreground ink (deep navy-teal) is dark enough to read like near-black
-     but carries the brand undertone seen on solvetax.in. */
-  --fg-rgb: 11, 42, 51;
+  --fg-rgb: 24, 26, 38;
   --bg-rgb: 255, 255, 255;
 
-  --bg-app: #e9f6f0;
-  --bg-app-2: #ddefe7;
+  --bg-app: #f6f7f9;
+  --bg-app-2: #eef0f4;
   --bg-surface: #ffffff;
-  --bg-surface-2: #f3faf7;
+  --bg-surface-2: #f4f5f8;
   --bg-elevated: #ffffff;
-  --bg-hover: rgba(11, 42, 51, 0.05);
-  --bg-active: rgba(11, 42, 51, 0.08);
+  --bg-hover: rgba(24, 26, 38, 0.035);
+  --bg-active: rgba(91, 88, 235, 0.09);
   --bg-input: #ffffff;
-  --bg-overlay: rgba(11, 42, 51, 0.35);
+  --bg-overlay: rgba(24, 26, 38, 0.42);
 
-  --text-primary: #0b2a33;
-  --text-secondary: rgba(11, 42, 51, 0.92);
-  --text-muted: rgba(11, 42, 51, 0.7);
-  --text-faint: rgba(11, 42, 51, 0.52);
+  /* Near-black ink for light mode — values read crisp and high-contrast,
+     matching the brand wordmark, not a washed-out grey. */
+  --text-primary: #0a0b12;
+  --text-secondary: rgba(17, 19, 30, 0.78);
+  --text-muted: rgba(17, 19, 30, 0.58);
+  --text-faint: rgba(17, 19, 30, 0.40);
   --text-inverse: #ffffff;
 
-  --border: rgba(11, 42, 51, 0.12);
-  --border-strong: rgba(11, 42, 51, 0.22);
-  --border-subtle: rgba(11, 42, 51, 0.07);
+  --border: rgba(24, 26, 38, 0.10);
+  --border-strong: rgba(24, 26, 38, 0.16);
+  --border-subtle: rgba(24, 26, 38, 0.06);
 
-  --accent-soft: rgba(46, 184, 122, 0.12);
-  --success-soft: rgba(46, 184, 122, 0.12);
-  --danger-soft: rgba(239, 68, 68, 0.12);
-  --warning-soft: rgba(245, 158, 11, 0.14);
-  --info-soft: rgba(59, 130, 246, 0.12);
+  /* Stripe blurple — crisp on white surfaces. */
+  --accent: #635bff;
+  --accent-rgb: 99, 91, 255;
+  --accent-hover: #524af0;
+  --accent-strong: #4a42d6;
+  --accent-deep: #2f2a8f;
+  --accent-soft: rgba(99, 91, 255, 0.10);
 
-  --shadow-sm: 0 2px 8px rgba(11, 42, 51, 0.08);
-  --shadow-md: 0 8px 24px rgba(11, 42, 51, 0.1);
-  --shadow-lg: 0 20px 60px rgba(11, 42, 51, 0.15);
-  --scrollbar-thumb: rgba(11, 42, 51, 0.2);
-  --scrollbar-track: #ddefe7;
+  --success: #12a06f;
+  --success-rgb: 18, 160, 111;
+  --success-soft: rgba(18, 160, 111, 0.11);
+  --danger: #dc3b46;
+  --danger-rgb: 220, 59, 70;
+  --danger-soft: rgba(220, 59, 70, 0.10);
+  --warning: #c9871a;
+  --warning-rgb: 201, 135, 26;
+  --warning-soft: rgba(201, 135, 26, 0.14);
+  --info: #2f6fdb;
+  --info-rgb: 47, 111, 219;
+  --info-soft: rgba(47, 111, 219, 0.10);
+
+  /* Role accents deepened for contrast on white */
+  --role-admin: #a9761a;
+  --role-hr: #6d28d9;
+  --role-manager: #0e7ba8;
+  --role-lead: #4f4cd9;
+
+  /* Soft, layered "expensive" light shadows (cool-tinted, not muddy black). */
+  --shadow-sm: 0 1px 2px rgba(24, 26, 38, 0.06), 0 1px 3px rgba(24, 26, 38, 0.04);
+  --shadow-md: 0 4px 12px rgba(24, 26, 38, 0.08), 0 2px 4px rgba(24, 26, 38, 0.04);
+  --shadow-lg: 0 16px 40px rgba(24, 26, 38, 0.12);
+  --shadow-xl: 0 32px 64px rgba(24, 26, 38, 0.16);
+  /* Cool navy shadow ink for light — soft, never the muddy pure-black smudge. */
+  --shadow-rgb: 24, 26, 38;
+  --scrollbar-thumb: rgba(24, 26, 38, 0.18);
+  --scrollbar-track: transparent;
 
   --text-main: var(--text-primary);
   --border-light: var(--border);
@@ -131,6 +230,23 @@
   font-family: inherit;
 }
 
+/* Global default zoom: render the entire app at 75% density (equivalent to a
+   browser zoom of 75%) so it always opens at this size, on every machine and
+   browser. Reset your browser zoom to 100% — this replaces the manual zoom.
+   NOTE: full-viewport shells (e.g. .dashboard-layout-wrapper) must size
+   themselves with calc(100vX / var(--app-zoom)) so they still fill the screen
+   after this zoom — search for var(--app-zoom). */
+:root {
+  /* Keep --app-zoom in sync with the literal `zoom` below. `zoom` is
+     non-standard and doesn't reliably accept var(), so it stays literal;
+     the variable feeds the calc() viewport-fill compensation on shells. */
+  --app-zoom: 0.75;
+}
+
+html {
+  zoom: 0.75;
+}
+
 html,
 body {
   width: 100%;
@@ -144,6 +260,27 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* Headings default to the sans display face — a tight, confident scale.
+   (Replaces the old Playfair serif; a compliance cockpit reads as precise
+   engineering, not editorial.) Components may still override per-context. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.012em;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+/* Data signature: tabular monospace for numbers, amounts, IDs, GSTIN/PAN so
+   figures align and read like a financial instrument. Add .mono / .tabular-nums
+   to any numeric or identifier cell. */
+.mono, .tabular-nums, [data-mono] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
 }
 
 /* ── Modern Custom Scrollbar ── */

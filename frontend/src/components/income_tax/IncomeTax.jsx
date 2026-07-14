@@ -49,7 +49,7 @@ const ITRTableSkeleton = ({ rows = 12 }) => (
     </>
 );
 
-export const IncomeTax = ({ isAdmin, profileData }) => {
+export const IncomeTax = ({ profileData }) => {
     const navigate = useNavigate();
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -471,7 +471,7 @@ export const IncomeTax = ({ isAdmin, profileData }) => {
                                 
                                 <div className="drawer-content">
                                     <div className="filter-section-v4">
-                                        <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Client Identifiers</h4>
+                                        <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Client Identifiers</h4>
                                         <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                             <div className="filter-group-v4">
                                                 <label>Record ID</label>
@@ -537,10 +537,10 @@ export const IncomeTax = ({ isAdmin, profileData }) => {
                                         </div>
                                     </div>
 
-                                    <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                                    <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border)', margin: '16px 0' }} />
 
                                     <div className="filter-section-v4">
-                                        <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Filing Attributes</h4>
+                                        <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Filing Attributes</h4>
                                         <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                             <div className="filter-group-v4">
                                                 <label>Filed Status</label>
@@ -622,10 +622,10 @@ export const IncomeTax = ({ isAdmin, profileData }) => {
                                         </div>
                                     </div>
 
-                                    <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                                    <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border)', margin: '16px 0' }} />
 
                                     <div className="filter-section-v4">
-                                        <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Record status</h4>
+                                        <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Record status</h4>
                                         <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '12px' }}>
                                             <div className="filter-group-v4">
                                                 <label>Active / inactive</label>
@@ -645,10 +645,10 @@ export const IncomeTax = ({ isAdmin, profileData }) => {
                                         </div>
                                     </div>
 
-                                    <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                                    <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border)', margin: '16px 0' }} />
 
                                     <div className="filter-section-v4">
-                                        <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Assignment & Ownership</h4>
+                                        <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Assignment & Ownership</h4>
                                         <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                             <div className="filter-group-v4">
                                                 <label>Assignee (RM)</label>
@@ -675,10 +675,10 @@ export const IncomeTax = ({ isAdmin, profileData }) => {
                                         </div>
                                     </div>
 
-                                    <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                                    <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border)', margin: '16px 0' }} />
 
                                     <div className="filter-section-v4">
-                                        <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Created date</h4>
+                                        <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Created date</h4>
                                         <div className="filter-row-v4 itr-created-date-row">
                                             <div className="filter-group-v4">
                                                 <label>From</label>

@@ -743,7 +743,7 @@ const ContactSupportLeads = () => {
                                 </label>
                             </div>
                             {editError && (
-                                <div className="input-group-v4 full" style={{ color: '#ef4444', fontSize: 13 }}>{editError}</div>
+                                <div className="input-group-v4 full" style={{ color: 'var(--danger)', fontSize: 13 }}>{editError}</div>
                             )}
                             <div className="edit-modal-footer-v4 cs-sticky-drawer-footer" style={{ gridColumn: '1 / -1' }}>
                                 <button type="button" className="btn-cancel-v4" onClick={closeEdit}>Cancel</button>
@@ -836,7 +836,7 @@ const ContactSupportLeads = () => {
                                 <textarea name="your_message" value={createForm.your_message} onChange={handleCreateChange} rows={3} />
                             </div>
                             {createError && (
-                                <div className="input-group-v4 full" style={{ color: '#ef4444', fontSize: 13 }}>{createError}</div>
+                                <div className="input-group-v4 full" style={{ color: 'var(--danger)', fontSize: 13 }}>{createError}</div>
                             )}
                             <div className="edit-modal-footer-v4 cs-sticky-drawer-footer" style={{ gridColumn: '1 / -1' }}>
                                 <button type="button" className="btn-cancel-v4" onClick={closeCreate}>Cancel</button>

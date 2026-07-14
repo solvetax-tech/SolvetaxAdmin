@@ -5,10 +5,10 @@
     align-items: center;
     gap: 6px;
     padding: 4px 12px;
-    background: rgba(46, 184, 122, 0.08);
-    border: 1px solid rgba(46, 184, 122, 0.2);
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
     border-radius: 8px;
-    color: #2eb87a;
+    color: var(--accent);
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
@@ -18,10 +18,10 @@
 
 .btn-primary-action:hover,
 .btn-add-employee-minimal:hover {
-    background: #2eb87a;
-    color: var(--text-primary);
+    background: var(--accent);
+    color: var(--text-inverse);
     transform: translateY(-1px);
-    box-shadow: 0 4px 15px rgba(46, 184, 122, 0.2);
+    box-shadow: 0 4px 15px rgba(var(--accent-rgb), 0.2);
 }
 
 /* ── Active Filter Chips ── */
@@ -40,12 +40,12 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(46, 184, 122, 0.1);
-    border: 1px solid rgba(46, 184, 122, 0.2);
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
     padding: 4px 10px;
     border-radius: 20px;
     font-size: 11px;
-    color: #2eb87a;
+    color: var(--accent);
     white-space: nowrap;
     animation: fadeIn 0.3s ease;
 }
@@ -62,7 +62,7 @@
 .btn-remove-chip {
     background: transparent;
     border: none;
-    color: #2eb87a;
+    color: var(--accent);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -94,8 +94,9 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(8px);
+    background: var(--bg-overlay);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -113,13 +114,13 @@
 }
 
 .premium-filter-modal {
-    background: rgba(var(--bg-rgb), 0.95);
-    border: 1px solid #333;
-    border-radius: 16px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
     width: 90%;
     max-width: 800px;
     padding: 24px;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-xl);
     transform: scale(0.9);
     transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
     max-height: 90vh;
@@ -136,13 +137,13 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
-    border-bottom: 1px solid var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
     padding-bottom: 12px;
 }
 
 .modal-header h3 {
     margin: 0;
-    color: #2eb87a;
+    color: var(--accent);
     font-size: 18px;
     font-weight: 600;
     letter-spacing: 0.5px;
@@ -173,7 +174,7 @@
 }
 
 .modal-body-scroll::-webkit-scrollbar-thumb {
-    background: #333;
+    background: var(--border-strong);
     border-radius: 4px;
 }
 
@@ -201,8 +202,8 @@
 
 .filter-field input,
 .filter-field select {
-    background: var(--bg-surface);
-    border: 1px solid var(--bg-elevated);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
     color: var(--text-primary);
     padding: 10px 12px;
     border-radius: 6px;
@@ -213,9 +214,9 @@
 
 .filter-field input:focus,
 .filter-field select:focus {
-    border-color: #2eb87a;
-    background: var(--bg-surface);
-    box-shadow: 0 0 0 2px rgba(46, 184, 122, 0.1);
+    border-color: var(--accent);
+    background: var(--bg-input);
+    box-shadow: var(--ring);
 }
 
 .filter-field input[type="date"],
@@ -244,7 +245,7 @@
     min-width: 0;
     width: 100%;
     padding-right: 48px !important;
-    color-scheme: dark;
+    color-scheme: light dark;
 }
 
 .filter-date-input-wrap .filter-date-input::-webkit-calendar-picker-indicator {
@@ -265,22 +266,22 @@
     height: 36px;
     padding: 0;
     margin: 0;
-    border: 1px solid rgba(46, 184, 122, 0.35);
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
     border-radius: 10px;
-    background: rgba(46, 184, 122, 0.12);
-    color: #3dd494;
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent);
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .filter-date-picker-btn:hover {
-    background: rgba(46, 184, 122, 0.22);
-    border-color: rgba(46, 184, 122, 0.55);
-    color: #2eb87a;
+    background: rgba(var(--accent-rgb), 0.22);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: var(--accent);
 }
 
 .filter-date-picker-btn:focus-visible {
-    outline: 2px solid rgba(46, 184, 122, 0.45);
+    outline: 2px solid rgba(var(--accent-rgb), 0.45);
     outline-offset: 2px;
 }
 
@@ -300,13 +301,13 @@
     display: flex;
     justify-content: flex-end;
     gap: 12px;
-    border-top: 1px solid var(--bg-elevated);
+    border-top: 1px solid var(--border);
     padding-top: 20px;
 }
 
 .btn-modal-search {
-    background: #2eb87a;
-    color: var(--text-primary);
+    background: var(--accent);
+    color: var(--text-inverse);
     border: none;
     padding: 10px 28px;
     border-radius: 8px;
@@ -317,14 +318,14 @@
 }
 
 .btn-modal-search:hover {
-    background: #2eb87a;
-    box-shadow: 0 0 20px rgba(46, 184, 122, 0.4);
+    background: var(--accent-hover);
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.28);
 }
 
 .btn-modal-clear {
-    background: var(--bg-elevated);
+    background: var(--bg-surface-2);
     color: var(--text-secondary);
-    border: 1px solid #333;
+    border: 1px solid var(--border);
     padding: 10px 24px;
     border-radius: 8px;
     font-weight: 600;
@@ -333,7 +334,7 @@
 }
 
 .btn-modal-clear:hover {
-    background: #333;
+    background: var(--bg-elevated);
     color: var(--text-primary);
 }
 
@@ -341,7 +342,7 @@
 .btn-filter-trigger {
     background: var(--bg-surface-2);
     color: var(--text-muted);
-    border: 1px solid #333;
+    border: 1px solid var(--border);
     padding: 4px 10px;
     border-radius: 8px;
     font-size: 10.5px;
@@ -362,9 +363,9 @@
 }
 
 .btn-filter-trigger.active {
-    color: #2eb87a;
-    border-color: #2eb87a;
-    background: rgba(46, 184, 122, 0.05);
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.05);
 }
 /* ── Multi-select Role Styling ── */
 .multi-select-field {
@@ -375,8 +376,8 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 8px;
-    background: var(--bg-surface);
-    border: 1px solid var(--bg-elevated);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
     padding: 12px;
     border-radius: 8px;
     max-height: 150px;
@@ -396,14 +397,14 @@
 }
 
 .checkbox-item:hover {
-    background: rgba(46, 184, 122, 0.05);
+    background: rgba(var(--accent-rgb), 0.05);
     color: var(--text-primary);
 }
 
 .checkbox-item input[type="checkbox"] {
     width: 14px;
     height: 14px;
-    accent-color: #2eb87a;
+    accent-color: var(--accent);
     cursor: pointer;
     margin: 0;
 }

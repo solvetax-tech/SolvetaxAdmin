@@ -5,10 +5,12 @@ from backend.utils import (
     DB_SCHEMA,
     hash_password,
     verify_password,
+    password_needs_rehash,
     get_user_permissions,
     generate_uuid,
     generate_refresh_token,
-    hash_refresh_token
+    hash_refresh_token,
+    hash_session_token
 )
 from dotenv import load_dotenv
 from backend.sign_up.schemas import LoginRequest
@@ -17,6 +19,8 @@ import jwt
 from datetime import datetime, timedelta, timezone
 import logging
 from backend.security.rbac import require_permission
+from backend.security.public_security import get_client_ip
+from backend.security.rate_limit import enforce_rate_limit
 from backend.logger import logger
 import time
 import secrets
@@ -52,32 +56,22 @@ async def login(
     email = (payload.email or "").strip().lower()
     password = payload.password or ""
 
-    ip_address = request.client.host if request.client else "Unknown"
+    ip_address = get_client_ip(request)  # XFF-aware (correct behind a proxy)
     device_info = request.headers.get("User-Agent", "Unknown Device")
 
     log.info("[login] Attempt email=%s ip=%s", email, ip_address)
 
     # --------------------------------------------------
-    # Rate Limiting
+    # Rate Limiting (shared Redis; fleet-wide, fails open on Redis outage).
+    # Per (ip,email): 5/min to throttle credential-stuffing of one account.
+    # Per ip: 30/min to blunt spraying many accounts from one source.
     # --------------------------------------------------
-    identifier = f"{ip_address}:{email}"
-    now_epoch = int(time.time())
-    window = 60
-    max_requests = 5
-
-    if not hasattr(request.app.state, "rate_limit_store"):
-        request.app.state.rate_limit_store = {}
-
-    store = request.app.state.rate_limit_store
-    attempts = store.get(identifier, [])
-    attempts = [t for t in attempts if t > now_epoch - window]
-
-    if len(attempts) >= max_requests:
-        log.warning("[login] Rate limit exceeded")
-        raise HTTPException(status_code=429, detail="Too many login attempts.")
-
-    attempts.append(now_epoch)
-    store[identifier] = attempts
+    await enforce_rate_limit(
+        f"{ip_address}:{email}", bucket="login", max_requests=5, window_seconds=60
+    )
+    await enforce_rate_limit(
+        ip_address, bucket="login-ip", max_requests=30, window_seconds=60
+    )
 
     # --------------------------------------------------
     # DB Connection
@@ -116,6 +110,19 @@ async def login(
             if not verify_password(password, employee["password_hash"]):
                 log.warning("[login] Invalid password")
                 raise HTTPException(status_code=401, detail="Invalid credentials")
+
+            # Transparently upgrade a legacy SHA-512 hash to bcrypt on successful
+            # login. Best-effort: a failure here must never block sign-in.
+            if password_needs_rehash(employee["password_hash"]):
+                try:
+                    await conn.execute(
+                        f"UPDATE {DB_SCHEMA}.employees "
+                        f"SET password_hash = $1, updated_at = NOW() WHERE emp_id = $2",
+                        hash_password(password),
+                        emp_id,
+                    )
+                except Exception:
+                    log.warning("[login] password rehash failed for emp_id=%s", emp_id, exc_info=True)
 
             if not JWT_SECRET or not JWT_ALGORITHM:
                 log.error("[login] JWT configuration missing")
@@ -162,7 +169,7 @@ async def login(
                 VALUES ($1,$2,$3,true,NOW(),$4,$5,$6,$7)
                 """,
                 emp_id,
-                access_token,
+                hash_session_token(access_token),
                 refresh_hash,
                 access_expiry,
                 refresh_expiry,
@@ -214,8 +221,11 @@ async def refresh_token_endpoint(
     log = logging.LoggerAdapter(logger, {"request_id": request_id, "emp_id": "-"})
 
     raw_refresh_token = request.cookies.get("refresh_token")
-    ip_address = request.client.host if request.client else "Unknown"
+    ip_address = get_client_ip(request)
     device_info = request.headers.get("User-Agent", "Unknown Device")
+
+    # Throttle refresh spraying / stolen-token replay by source IP.
+    await enforce_rate_limit(ip_address, bucket="refresh-ip", max_requests=60, window_seconds=60)
 
     if not raw_refresh_token:
         raise HTTPException(status_code=401, detail="Invalid refresh token.")
@@ -313,7 +323,7 @@ async def refresh_token_endpoint(
                     device_info=$6
                 WHERE id=$7
                 """,
-                new_access_token,
+                hash_session_token(new_access_token),
                 new_refresh_hash,
                 access_expiry,
                 refresh_expiry_new,

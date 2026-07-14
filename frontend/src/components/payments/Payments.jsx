@@ -21,6 +21,8 @@ import '../customers/CustomerServices.css';
 import '../employees/employee.css';
 import '../common/Filters.css';
 import FilterDateInput from '../common/FilterDateInput';
+import Button from '../ui/Button';
+import StatusPill from '../ui/StatusPill';
 import api from '../../utils/api';
 import { fetchIncomeTaxPaymentsFilter } from '../../utils/incomeTaxApi';
 import LoadingOverlay from '../common/LoadingOverlay';
@@ -76,7 +78,6 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
     const [payments, setPayments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [limit] = useState(20);
     const [showFilterModal, setShowFilterModal] = useState(false);
@@ -140,9 +141,8 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                 response = await api.get(`/api/v1/payments/dynamic_filter?${params.toString()}`);
             }
 
-            const { rows, total: t } = normalizePaymentsPayload(response.data);
+            const { rows } = normalizePaymentsPayload(response.data);
             setPayments(rows);
-            setTotal(t);
             setHasFetched(true);
         } catch (err) {
             console.error("Failed to fetch payments:", err);
@@ -240,7 +240,7 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
         };
 
         return Object.entries(appliedFilters)
-            .filter(([_, value]) => value !== '')
+            .filter(([, value]) => value !== '')
             .map(([key, value]) => (
                 <div key={key} className="filter-chip">
                     <span className="filter-chip-label">{labels[key] || key}:</span>
@@ -275,26 +275,34 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
     return (
         <div className="payments-container">
             <div className="gst-action-bar-v2">
+                <div className="global-quick-search" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 10px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--bg-input)' }}>
+                    <Search size={14} style={{ opacity: 0.55, flexShrink: 0 }} />
+                    <input
+                        type="text"
+                        value={globalSearch}
+                        onChange={(e) => setGlobalSearch(e.target.value)}
+                        onKeyDown={handleGlobalSearchKeydown}
+                        placeholder="Payment ID… ↵"
+                        aria-label="Quick search payments by ID"
+                        style={{ border: 'none', outline: 'none', background: 'transparent', color: 'inherit', fontSize: '13px', width: '140px' }}
+                    />
+                </div>
                 <div className="active-filters-container" style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {renderFilterChips()}
                 </div>
 
                 <div className="gst-action-buttons">
                     {(Object.values(appliedFilters).some(v => v !== '')) && (
-                        <button className="btn-reset-green-v4" onClick={clearFilters}>
-                            <RotateCcw size={14} /> Reset Filters
-                        </button>
+                        <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={clearFilters}>
+                            Reset Filters
+                        </Button>
                     )}
-                    <button 
-                        className="btn-filter-trigger"
-                        onClick={() => setShowFilterModal(true)}
-                    >
-                        <Filter size={13} /> Filters
-                    </button>
-                    <button className="btn-primary-action" onClick={onNewPayment}>
-                        <Plus size={13} />
-                        <span>New Payment</span>
-                    </button>
+                    <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={() => setShowFilterModal(true)}>
+                        Filters
+                    </Button>
+                    <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={onNewPayment}>
+                        New Payment
+                    </Button>
                 </div>
             </div>
 
@@ -309,7 +317,7 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                         
                         <div className="drawer-content">
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Identifier Details</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Identifier Details</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Payment ID</label>
@@ -344,10 +352,10 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                 </div>
                             </div>
 
-                            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Filing Attributes</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Filing Attributes</h4>
                                 <div className="filter-row-v4">
                                     <div className="filter-group-v4">
                                         <label>Payment Status</label>
@@ -369,10 +377,10 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                 </div>
                             </div>
 
-                            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Timeline Context</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Timeline Context</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>From Date</label>
@@ -433,7 +441,7 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                             ))
                         ) : error ? (
                             <div className="payments-ledger-row" style={{ gridTemplateColumns: '1fr', width: '100%' }}>
-                                <div className="payments-ledger-cell justify-center" style={{ color: '#ef4444' }}>Error: {error}</div>
+                                <div className="payments-ledger-cell justify-center" style={{ color: 'var(--danger)' }}>Error: {error}</div>
                             </div>
                         ) : (payments.length === 0 && hasFetched) ? (
                             <div className="payments-ledger-row" style={{ gridTemplateColumns: '1fr', width: '100%' }}>
@@ -445,26 +453,25 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                     key={p.id}
                                     className={`payments-ledger-row${selectedPaymentId === p.id || activeFollowupId === p.id ? ' active-drawer-row' : ''}`}
                                 >
-                                    <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-1 pay-col-id" style={{ color: '#2eb87a', fontWeight: '700' }}>{p.id}</div>
-                                    <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-2 pay-col-id" style={{ color: 'var(--text-primary)' }}>{p.customer_id}</div>
-                                    <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-3 pay-col-id" style={{ color: 'var(--text-primary)' }}>{p.entity_id}</div>
+                                    <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-1 pay-col-id"><span className="ui-num" style={{ fontWeight: 600 }}>{p.id}</span></div>
+                                    <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-2 pay-col-id"><span className="ui-num">{p.customer_id}</span></div>
+                                    <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-3 pay-col-id"><span className="ui-num">{p.entity_id}</span></div>
                                     <div className="payments-ledger-cell">{getEntityTypeBadge(p.entity_type)}</div>
-                                    <div className="payments-ledger-cell pay-col-amount justify-end">₹{formatCurrency(p.amount)}</div>
-                                    <div className="payments-ledger-cell pay-col-discount justify-end">₹{formatCurrency(p.discount)}</div>
-                                    <div className="payments-ledger-cell pay-col-amount justify-end">₹{formatCurrency(p.net_amount)}</div>
-                                    <div className="payments-ledger-cell pay-col-amount justify-end" style={{ color: '#2eb87a' }}>₹{formatCurrency(p.paid_amount)}</div>
-                                    <div className="payments-ledger-cell pay-col-amount justify-end" style={{ color: p.remaining_amount > 0 ? '#ef4444' : '#2eb87a' }}>₹{formatCurrency(p.remaining_amount)}</div>
-                                    <div className="payments-ledger-cell pay-col-date">{p.payment_date ? new Date(p.payment_date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '-'}</div>
+                                    <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num">₹{formatCurrency(p.amount)}</span></div>
+                                    <div className="payments-ledger-cell pay-col-discount justify-end"><span className="ui-num">₹{formatCurrency(p.discount)}</span></div>
+                                    <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num">₹{formatCurrency(p.net_amount)}</span></div>
+                                    <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num">₹{formatCurrency(p.paid_amount)}</span></div>
+                                    <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num" style={{ color: p.remaining_amount > 0 ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: p.remaining_amount > 0 ? 600 : 400 }}>₹{formatCurrency(p.remaining_amount)}</span></div>
+                                    <div className="payments-ledger-cell pay-col-date"><span className="ui-num" style={{ color: 'var(--text-primary)' }}>{p.payment_date ? new Date(p.payment_date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '-'}</span></div>
                                     <div className="payments-ledger-cell justify-center">
-                                        <span className={`status-badge-v4 ${(p.payment_status || '').toLowerCase().replace('_', '-')}`}>
-                                            {p.payment_status || 'Unknown'}
-                                        </span>
+                                        <StatusPill value={p.payment_status} />
                                     </div>
                                     <div className="payments-ledger-cell justify-center">
                                         {canSchedulePaymentFollowup(p) ? (
-                                            <button
-                                                type="button"
-                                                className={`btn-followup-toggle ${activeFollowupId === p.id ? 'active' : ''}`}
+                                            <Button
+                                                variant={activeFollowupId === p.id ? 'primary' : 'secondary'}
+                                                size="sm"
+                                                icon={<Plus size={14} />}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setSelectedPaymentId(null);
@@ -472,32 +479,42 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                                     setFollowupPaymentData(p);
                                                 }}
                                             >
-                                                <Plus size={14} />
-                                                <span>Create</span>
-                                            </button>
+                                                Create
+                                            </Button>
                                         ) : (
                                             <span className="cs-followup-na">—</span>
                                         )}
                                     </div>
                                     <div className="payments-ledger-cell justify-center">
-                                        <span className={`status-badge-v4 ${p.is_active ? 'active' : 'inactive'}`} style={{ minWidth: '40px' }}>
-                                            {p.is_active ? 'Yes' : 'No'}
-                                        </span>
+                                        <StatusPill tone={p.is_active ? 'success' : 'neutral'}>
+                                            {p.is_active ? 'Active' : 'Inactive'}
+                                        </StatusPill>
                                     </div>
                                     <div className="payments-ledger-cell pay-ledger-actions-sticky">
                                         <div className="table-actions-combined">
-                                            <button
-                                                type="button"
-                                                className="btn-view-services-mini btn-view-icon-only"
+                                            <Button
+                                                variant="ghost"
+                                                icon={<Eye size={16} />}
                                                 title="View payment"
                                                 aria-label="View payment"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setSelectedPaymentId(p.id);
                                                 }}
-                                            >
-                                                <Eye size={16} />
-                                            </button>
+                                            />
+                                            {isAdmin && (
+                                                <Button
+                                                    variant="ghost"
+                                                    icon={<Trash2 size={16} />}
+                                                    title="Delete payment"
+                                                    aria-label="Delete payment"
+                                                    style={{ color: 'var(--danger)' }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDelete(p.id);
+                                                    }}
+                                                />
+                                            )}
                                         </div>
                                     </div>
                                 </div>

@@ -7,6 +7,7 @@ from backend.payments.payment_cache_invalidation import invalidate_payment_relat
 from backend.payments.schemas import FilingPaymentIn
 from backend.payments.payment_ledger import PaymentLedgerError
 from backend.payments.payment_ledger_db import (
+    assert_payment_visible,
     fetch_entity_payment_totals,
     has_completed_payment,
     insert_payment_from_ledger,
@@ -53,37 +54,49 @@ async def create_income_tax_payment(
             if not entity_row["is_active"]:
                 raise HTTPException(400, "Income tax record is inactive.")
 
-            # income_tax has no customer_id column; optional on payment payload only.
-            customer_id = payload.customer_id
+            # income_tax has no customer_id column and no validated customer link,
+            # so a client-supplied customer_id would let the same ITR be billed
+            # twice under different ids (each id forms its own ledger). Scope the
+            # entire ledger by the ITR id only (customer_id = None) so an ITR can
+            # be fully paid exactly once. This flows through has_completed_payment,
+            # lock, totals and insert consistently.
+            customer_id = None
 
-            if await has_completed_payment(
-                conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
-            ):
-                raise HTTPException(409, "Payment already completed.")
-
-            await lock_entity_payment_rows(
-                conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
-            )
-
-            totals = await fetch_entity_payment_totals(
-                conn,
-                DB_SCHEMA,
-                customer_id,
-                payload.entity_id,
-                entity_type,
-                first_payment_amount=float(payload.amount),
-            )
-
-            try:
-                ledger = resolve_ledger_for_create(
-                    totals,
-                    new_discount=float(payload.discount or 0),
-                    paid_amount=float(payload.paid_amount or 0),
-                )
-            except PaymentLedgerError as exc:
-                raise ledger_error_to_http(exc) from exc
-
+            # Open the transaction BEFORE taking the FOR UPDATE lock so the lock
+            # is held through the insert. asyncpg runs statements outside an
+            # explicit transaction in autocommit mode, which would release the
+            # lock immediately and let two concurrent submits both pass the
+            # balance check and double-insert against the same entity.
             async with conn.transaction():
+                await lock_entity_payment_rows(
+                    conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
+                )
+
+                # Re-check completion under the lock: a concurrent request may
+                # have completed payment between our first check and this insert.
+                if await has_completed_payment(
+                    conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
+                ):
+                    raise HTTPException(409, "Payment already completed.")
+
+                totals = await fetch_entity_payment_totals(
+                    conn,
+                    DB_SCHEMA,
+                    customer_id,
+                    payload.entity_id,
+                    entity_type,
+                    first_payment_amount=float(payload.amount),
+                )
+
+                try:
+                    ledger = resolve_ledger_for_create(
+                        totals,
+                        new_discount=float(payload.discount or 0),
+                        paid_amount=float(payload.paid_amount or 0),
+                    )
+                except PaymentLedgerError as exc:
+                    raise ledger_error_to_http(exc) from exc
+
                 payment_row = await insert_payment_from_ledger(
                     conn,
                     DB_SCHEMA,
@@ -147,6 +160,8 @@ async def soft_delete_income_tax_payment(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
@@ -163,6 +178,10 @@ async def soft_delete_income_tax_payment(
                 )
                 if not row:
                     raise HTTPException(404, "Income tax payment not found.")
+                # IDOR guard: only mutate a payment the caller can see.
+                await assert_payment_visible(
+                    conn, role_norm, emp_id, payment_id, "Income tax payment not found.",
+                )
                 if row["entity_type"] != "INCOME_TAX":
                     raise HTTPException(400, "This payment does not belong to income tax.")
                 if not row["is_active"]:
@@ -238,6 +257,8 @@ async def activate_income_tax_payment(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
@@ -254,6 +275,10 @@ async def activate_income_tax_payment(
                 )
                 if not payment_row:
                     raise HTTPException(404, "Income tax payment not found.")
+                # IDOR guard: only mutate a payment the caller can see.
+                await assert_payment_visible(
+                    conn, role_norm, emp_id, payment_id, "Income tax payment not found.",
+                )
                 if payment_row["entity_type"] != "INCOME_TAX":
                     raise HTTPException(400, "This payment does not belong to income tax.")
                 if payment_row["is_active"]:

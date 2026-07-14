@@ -629,11 +629,34 @@ async def run_auto_assign_scheduler(scheduler_id: int, *, force: bool = False) -
 
     rule = _row_to_rule(row)
     now = datetime.now(timezone.utc)
-    last_run_at = row["last_run_at"]
     interval = int(row["interval_minutes"] or 5)
-    if not force and last_run_at:
-        lr = last_run_at.replace(tzinfo=timezone.utc) if last_run_at.tzinfo is None else last_run_at
-        if now - lr < timedelta(minutes=interval):
+
+    # Atomically CLAIM this run. Two overlapping scheduler ticks (a slow run
+    # overlapping the next tick, or the scheduler active on more than one
+    # worker) must not both pass the interval gate and double-assign the same
+    # leads. This conditional UPDATE — which advances last_run_at only if the
+    # interval has elapsed — succeeds for exactly one runner; everyone else
+    # gets no row back and bails. `force` skips the claim for manual runs.
+    if not force:
+        async with pool.acquire() as conn:
+            claimed = await conn.fetchval(
+                f"""
+                UPDATE {DB_SCHEMA}.crm_bulk_assign_schedulers
+                SET last_run_at = $2,
+                    updated_at = NOW()
+                WHERE id = $1
+                  AND enabled = TRUE
+                  AND (
+                        last_run_at IS NULL
+                        OR last_run_at <= $2 - ($3 * INTERVAL '1 minute')
+                      )
+                RETURNING id
+                """,
+                scheduler_id,
+                now,
+                interval,
+            )
+        if not claimed:
             return None
 
     leads = await _fetch_matching_leads(rule)

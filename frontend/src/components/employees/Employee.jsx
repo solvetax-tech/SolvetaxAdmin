@@ -15,8 +15,18 @@ import FilterDateInput from '../common/FilterDateInput';
 import { Search, Filter, RefreshCcw, ChevronLeft, ChevronRight, UserPlus, Settings, RotateCcw, Plus, X, Eye, Pencil, AlertCircle } from 'lucide-react';
 import { getRoleBadgeClass } from '../../utils/roleBadgeUtils';
 import api from '../../utils/api';
+import Button from '../ui/Button';
+import StatusPill from '../ui/StatusPill';
 import LoadingOverlay from '../common/LoadingOverlay';
 import Pagination from '../common/Pagination';
+
+/** Role → pill tone: ADMIN = authority (amber), *MANAGER = info (blue), else neutral. */
+const roleTone = (role) => {
+    const r = String(role || '').toUpperCase();
+    if (r === 'ADMIN') return 'warning';
+    if (r.includes('MANAGER')) return 'info';
+    return 'neutral';
+};
 import AddEmployeeModal from './AddEmployeeModal';
 import EmployeeDetailsModal from './EmployeeDetailsModal';
 import ActivationConfirmModal from './ActivationConfirmModal';
@@ -408,18 +418,17 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                 </div>
                 <div className="gst-action-buttons">
                     {hasActiveFilters && (
-                        <button type="button" className="btn-reset-green-v4" onClick={clearFilters}>
-                            <RotateCcw size={14} /> Reset Filters
-                        </button>
+                        <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={clearFilters}>
+                            Reset Filters
+                        </Button>
                     )}
-                    <button type="button" className="btn-filter-trigger" onClick={() => setShowFilterModal(true)}>
-                        <Filter size={13} /> Filters
-                    </button>
+                    <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={() => setShowFilterModal(true)}>
+                        Filters
+                    </Button>
                     {canSignup && (
-                        <button type="button" className="btn-primary-action" onClick={() => setIsModalOpen(true)}>
-                            <Plus size={13} />
-                            <span>New Employee</span>
-                        </button>
+                        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setIsModalOpen(true)}>
+                            New Employee
+                        </Button>
                     )}
                 </div>
             </div>
@@ -434,7 +443,7 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
 
                     <div className="drawer-content-v4">
                         <div className="filter-section-v4">
-                            <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Core Identifiers</h4>
+                            <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Core Identifiers</h4>
                             <div className="drawer-filter-grid">
                                 <div className="filter-group-v4">
                                     <label>Employee ID</label>
@@ -447,10 +456,10 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                             </div>
                         </div>
 
-                        <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                        <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
                         <div className="filter-section-v4">
-                            <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Personal Details</h4>
+                            <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Personal Details</h4>
                             <div className="drawer-filter-grid">
                                 <div className="filter-group-v4">
                                     <label>First Name</label>
@@ -471,10 +480,10 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                             </div>
                         </div>
 
-                        <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                        <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
                         <div className="filter-section-v4">
-                            <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Configuration</h4>
+                            <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Configuration</h4>
                             <div className="drawer-filter-grid">
                                 <div className="filter-group-v4">
                                     <label>Status</label>
@@ -594,7 +603,7 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                     {loading ? (
                         <TableSkeleton />
                     ) : error ? (
-                        <div className="employee-table-error" style={{ padding: '40px', textAlign: 'center', color: '#f44336' }}>
+                        <div className="employee-table-error" style={{ padding: '40px', textAlign: 'center', color: 'var(--danger)' }}>
                             <AlertCircle size={32} style={{ marginBottom: '12px' }} />
                             <p>Error: {error}</p>
                         </div>
@@ -610,17 +619,15 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                                     key={item.emp_id}
                                     className="filings-ledger-row employee-grid-template"
                                 >
-                                    <div className="filings-ledger-cell sticky-id-column" style={{ fontWeight: 'bold', color: '#2eb87a' }}>
-                                        {item.emp_id}
+                                    <div className="filings-ledger-cell sticky-id-column">
+                                        <span className="ui-num">{item.emp_id}</span>
                                     </div>
                                     <div className="filings-ledger-cell" style={{ color: 'var(--text-primary)' }}>{item.email}</div>
                                     <div className="filings-ledger-cell">{item.first_name || '-'}</div>
                                     <div className="filings-ledger-cell">{item.last_name || '-'}</div>
-                                    <div className="filings-ledger-cell">{item.phone_number || '-'}</div>
+                                    <div className="filings-ledger-cell"><span className="ui-num">{item.phone_number || '-'}</span></div>
                                     <div className="filings-ledger-cell">
-                                        <span className={`role-badge-v4 ${getRoleBadgeClass(item.role)}`}>
-                                            {item.role}
-                                        </span>
+                                        <StatusPill value={item.role} tone={roleTone(item.role)} dot={false} />
                                     </div>
                                     <div className="filings-ledger-cell" title={item.manager_username}>
                                         {item.manager_username || managerMap[String(item.manager_emp_id)] || (
@@ -628,31 +635,24 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                                         )}
                                     </div>
                                     <div className="filings-ledger-cell">
-                                        <span className={`status-badge ${item.is_active ? 'active' : 'inactive'}`}>
-                                            {item.is_active ? 'Yes' : 'No'}
+                                        <StatusPill tone={item.is_active ? 'success' : 'neutral'}>
+                                            {item.is_active ? 'Active' : 'Inactive'}
+                                        </StatusPill>
+                                    </div>
+                                    <div className="filings-ledger-cell">
+                                        <span className="ui-num" style={{ color: 'var(--text-primary)' }}>
+                                            {item.created_at ? new Date(item.created_at).toLocaleDateString() : '-'}
                                         </span>
                                     </div>
-                                    <div className="filings-ledger-cell" style={{ color: 'var(--text-muted)' }}>
-                                        {item.created_at ? new Date(item.created_at).toLocaleDateString() : '-'}
-                                    </div>
-                                    <div className="filings-ledger-cell gst-action-buttons employee-actions-sticky" style={{ justifyContent: 'center' }}>
-                                        <button
-                                            type="button"
-                                            className="btn-view-action"
-                                            title="View profile"
-                                            onClick={(e) => openEmployeeView(item, e)}
-                                        >
-                                            <Eye size={14} />
-                                        </button>
+                                    <div className="filings-ledger-cell gst-action-buttons employee-actions-sticky" style={{ justifyContent: 'center', gap: '6px' }}>
+                                        <Button variant="ghost" icon={<Eye size={14} />} title="View profile" onClick={(e) => openEmployeeView(item, e)} />
                                         {canEditEmployee && (
-                                            <button
-                                                type="button"
-                                                className="btn-edit-action"
+                                            <Button
+                                                variant="ghost"
+                                                icon={<Pencil size={14} />}
                                                 title={!item.is_active && isAdmin ? 'Activate employee' : 'Edit profile'}
                                                 onClick={(e) => openEmployeeEdit(item, e)}
-                                            >
-                                                <Pencil size={14} />
-                                            </button>
+                                            />
                                         )}
                                     </div>
                                 </div>

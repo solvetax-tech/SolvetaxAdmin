@@ -1,5 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from dotenv import load_dotenv
 import os
 import sys
@@ -17,8 +21,39 @@ import multiprocessing
 logging.basicConfig(level=logging.INFO)
 
 from fastapi.openapi.utils import get_openapi
+from starlette.middleware.base import BaseHTTPMiddleware
 
-app = FastAPI(title="Slove Tax", version="1.0.0")
+# Environment flag — set APP_ENV=production in prod to disable interactive API
+# docs and enable HSTS. Defaults to development so local runs are unaffected.
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+_is_production = APP_ENV in ("production", "prod")
+
+# Optional error tracking (Sentry). No-op unless SENTRY_DSN is set AND the SDK is
+# installed — never breaks environments that don't configure it.
+_SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+if _SENTRY_DSN:
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=_SENTRY_DSN,
+            environment=APP_ENV,
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+        )
+        logging.info("Sentry error tracking enabled")
+    except Exception:
+        logging.warning(
+            "SENTRY_DSN set but sentry_sdk unavailable; error tracking disabled",
+            exc_info=True,
+        )
+
+app = FastAPI(
+    title="Slove Tax",
+    version="1.0.0",
+    # Don't expose the full API schema / interactive docs in production.
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
+)
 
 # Ensure DB pool is created once per process and closed on shutdown.
 from backend.utils import get_db_pool, close_db_pool
@@ -45,15 +80,81 @@ async def _shutdown_close_db_pool():
 # First add TokenValidator, then CORS - so CORS runs before TokenValidator
 app.add_middleware(TokenValidatorMiddleware)
 
-# Add CORS middleware AFTER TokenValidator so it runs FIRST
+# Add CORS middleware AFTER TokenValidator so it runs FIRST.
+# Explicit allow-list from ALLOWED_ORIGINS (comma-separated). Reflecting any
+# origin with credentials is unsafe, so we never use a wildcard here. Defaults
+# to local dev origins; set ALLOWED_ORIGINS in prod (e.g. https://admin.example.com).
+_default_cors_origins = "http://localhost:5174,http://127.0.0.1:5174,http://localhost:5173"
+_allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", _default_cors_origins).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",  # Regex to match all origins
-    allow_credentials=True,  # Allow credentials
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
-    expose_headers=["*"],  # Expose all headers
+    allow_origins=_allowed_origins,
+    allow_credentials=True,  # safe now that origins are an explicit allow-list
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Set baseline security response headers on every response.
+
+    Note: we deliberately DON'T set a resource-restricting CSP (default-src/
+    img-src) here — the app renders customer documents/images from Azure Blob
+    SAS URLs, so a strict CSP would break them. We only set frame-ancestors
+    (anti-clickjacking); a tuned full CSP is a follow-up.
+    """
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+        # HSTS only in production (over HTTPS); harmless-but-noise on local HTTP.
+        if _is_production:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=63072000; includeSubDomains"
+            )
+        return response
+
+
+# Added last → outermost, so headers land on every response (incl. errors).
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# --------------------------------------------------
+# Global exception handlers — consistent envelope, no internal leakage, full
+# server-side logging (also feeds Sentry when configured). Without these, an
+# unhandled error returns FastAPI's default 500 with no structured log line.
+# --------------------------------------------------
+_err_logger = logging.getLogger("FastAPIApp")
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Request validation failed", "errors": jsonable_encoder(exc.errors())},
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_error_handler(request: Request, exc: Exception):
+    # Explicitly-raised HTTP errors keep their intended status/detail.
+    if isinstance(exc, (StarletteHTTPException, HTTPException)):
+        return JSONResponse(
+            status_code=getattr(exc, "status_code", 500),
+            content={"detail": getattr(exc, "detail", "Error")},
+            headers=getattr(exc, "headers", None) or {},
+        )
+    # Truly unhandled: log full detail server-side, return a generic 500.
+    _err_logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error."})
 
 # Add BearerAuth to OpenAPI docs for global JWT authorization
 def custom_openapi():
@@ -219,7 +320,39 @@ if gst_filing_matrix_router:
 
 @app.get("/health")
 async def health_check():
+    """Liveness — cheap, no dependencies. For load-balancer 'is the process up'."""
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness — checks DB and Redis so a load balancer stops routing to an
+    instance whose dependencies are down. Returns 503 if the DB is unreachable.
+    Redis is reported but non-fatal (the app fails open on Redis outage)."""
+    import asyncio as _asyncio
+    from backend.redis_cache import redis_ping, is_redis_configured
+
+    db_ok = False
+    try:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            await _asyncio.wait_for(conn.execute("SELECT 1"), timeout=3)
+        db_ok = True
+    except Exception:
+        db_ok = False
+
+    if is_redis_configured():
+        try:
+            redis_ok = await _asyncio.wait_for(redis_ping(), timeout=2)
+        except Exception:
+            redis_ok = False
+    else:
+        redis_ok = None  # not configured → not a readiness dependency
+
+    ready = db_ok  # DB is the hard dependency
+    body = {"status": "ready" if ready else "not_ready", "db": db_ok, "redis": redis_ok}
+    return JSONResponse(status_code=200 if ready else 503, content=body)
+
 
 from backend.frontend_static import mount_frontend
 

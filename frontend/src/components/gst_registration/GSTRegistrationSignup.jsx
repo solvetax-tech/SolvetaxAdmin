@@ -411,7 +411,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                     <>
                         <div className="modal-header-v4">
                             <div className="header-content-v4">
-                                <div className="header-icon-box-v4" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#2eb87a' }}>
+                                <div className="header-icon-box-v4" style={{ background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--accent)' }}>
                                     <Users size={20} />
                                 </div>
                                 <div className="modal-title-box">
@@ -482,7 +482,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                                         </div>
                                         <div className="form-group-v4" style={{ gridColumn: 'span 2' }}>
                                             <label className="modal-label-caps">GSTIN</label>
-                                            <input type="text" name="gstin" value={formData.gstin} onChange={handleChange} className="modal-input-v4 mono-v4" style={{ color: '#2eb87a' }} placeholder="Optional" />
+                                            <input type="text" name="gstin" value={formData.gstin} onChange={handleChange} className="modal-input-v4 mono-v4" style={{ color: 'var(--accent)' }} placeholder="Optional" />
                                             {fieldErrors.gstin && <span className="field-error-msg">{fieldErrors.gstin}</span>}
                                         </div>
                                     </div>

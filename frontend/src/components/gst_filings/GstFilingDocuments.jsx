@@ -332,9 +332,9 @@ const GstFilingDocuments = ({
                                         <span className="filings-ledger-id-text">{doc.document_id}</span>
                                     </div>
                                     <div className="filings-ledger-cell filings-ledger-sticky-id filings-docs-ledger-sticky-col-2">
-                                        <span style={{ color: 'var(--emerald-success)', fontWeight: '700' }}>{doc.gst_filing_id}</span>
+                                        <span className="filings-ledger-id-text" style={{ fontWeight: '700' }}>{doc.gst_filing_id}</span>
                                     </div>
-                                    <div className="filings-ledger-cell filings-docs-col-3" style={{ fontSize: '11px', fontWeight: '600', color: '#3b82f6' }}>
+                                    <div className="filings-ledger-cell filings-docs-col-3" style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
                                         {doc.gstin || '-'}
                                     </div>
                                     <div className="filings-ledger-cell filings-docs-col-4">
@@ -359,7 +359,7 @@ const GstFilingDocuments = ({
                                                 Verified
                                             </div>
                                         ) : (
-                                            <div className="status-badge-v4 overdue" style={{ minWidth: '100px', background: 'rgba(244, 67, 54, 0.1)', color: '#f44336' }}>
+                                            <div className="status-badge-v4 overdue" style={{ minWidth: '100px' }}>
                                                 Not Verified
                                             </div>
                                         )}
@@ -382,7 +382,7 @@ const GstFilingDocuments = ({
                                         {!doc.verified ? (
                                             <button
                                                 className="status-badge-v4"
-                                                style={{ cursor: 'pointer', border: 'none', minWidth: '85px', fontSize: '9px', padding: '6px 10px', background: '#f59e0b', color: '#000', fontWeight: '800', borderRadius: '6px' }}
+                                                style={{ cursor: 'pointer', border: '1px solid rgba(var(--warning-rgb),0.32)', minWidth: '85px', fontSize: '9px', padding: '6px 10px', background: 'rgba(var(--warning-rgb),0.14)', color: 'var(--warning)', fontWeight: '800', borderRadius: '6px' }}
                                                 onClick={() => setConfirmDocId(doc.document_id)}
                                             >
                                                 Mark as Verified
@@ -502,7 +502,7 @@ const GstFilingDocuments = ({
                                                                             <span className="item-name">{f.filing_period}</span>
                                                                         </div>
                                                                         <div className="item-sub" style={{ paddingLeft: '40px' }}>
-                                                                            GSTIN: <span style={{ color: '#3b82f6', fontWeight: '700' }}>{f.gstin || 'N/A'}</span>
+                                                                            GSTIN: <span style={{ color: 'var(--info)', fontWeight: '700' }}>{f.gstin || 'N/A'}</span>
                                                                         </div>
                                                                     </div>
                                                                 ))
@@ -667,7 +667,7 @@ const GstFilingDocuments = ({
                     <div className="gst-modal-card-v4" style={{ maxWidth: '400px', padding: '32px' }}>
                         {!manualVerifyMessage ? (
                             <div style={{ textAlign: 'center' }}>
-                                <div className="header-icon-box-v4" style={{ margin: '0 auto 24px', background: 'rgba(46, 184, 122, 0.1)', color: 'var(--emerald-success)' }}>
+                                <div className="header-icon-box-v4" style={{ margin: '0 auto 24px', background: 'rgba(var(--accent-rgb), 0.1)', color: 'var(--emerald-success)' }}>
                                     <ShieldCheck size={24} />
                                 </div>
                                 <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px', fontSize: '18px' }}>Confirm Verification</h3>
@@ -688,7 +688,7 @@ const GstFilingDocuments = ({
                                         style={{
                                             padding: '10px',
                                             background: 'var(--emerald-success)',
-                                            color: '#000',
+                                            color: 'var(--text-inverse)',
                                             border: 'none',
                                             borderRadius: '100px',
                                             fontWeight: '700',
@@ -728,7 +728,7 @@ const GstFilingDocuments = ({
                             </div>
                         ) : (
                             <div style={{ textAlign: 'center' }}>
-                                <div className="header-icon-box-v4" style={{ margin: '0 auto 24px', background: 'rgba(255, 193, 7, 0.1)', color: '#ffc107' }}>
+                                <div className="header-icon-box-v4" style={{ margin: '0 auto 24px', background: 'rgba(var(--warning-rgb), 0.1)', color: 'var(--warning)' }}>
                                     <AlertCircle size={24} />
                                 </div>
                                 <h3 style={{ color: 'var(--text-primary)', marginBottom: '12px', fontSize: '18px' }}>Action Required</h3>
@@ -761,8 +761,9 @@ const GstFilingDocuments = ({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'rgba(0,0,0,0.8)',
-                    backdropFilter: 'blur(12px)',
+                    background: 'var(--bg-overlay)',
+                    WebkitBackdropFilter: 'blur(6px)',
+                    backdropFilter: 'blur(6px)',
                     animation: 'fadeIn 0.3s ease'
                 }}>
                     <div style={{ textAlign: 'center', animation: 'successPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}>
@@ -775,12 +776,12 @@ const GstFilingDocuments = ({
                             alignItems: 'center', 
                             justifyContent: 'center',
                             margin: '0 auto 24px',
-                            boxShadow: '0 0 40px rgba(46, 184, 122, 0.4)',
+                            boxShadow: 'var(--shadow-lg)',
                             animation: 'scale 0.3s ease-in-out 0.9s both'
                         }}>
                             <svg className="checkmark-svg-v4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
                                 <circle className="checkmark-circle-v4" cx="26" cy="26" r="25" fill="none" style={{ display: 'none' }} />
-                                <path className="checkmark-check-v4" fill="none" stroke="#000" strokeWidth="5" d="M14.1 27.2l7.1 7.2 16.7-16.8" />
+                                <path className="checkmark-check-v4" fill="none" stroke="var(--text-inverse)" strokeWidth="5" d="M14.1 27.2l7.1 7.2 16.7-16.8" />
                             </svg>
                         </div>
                         <h2 style={{ color: 'var(--text-primary)', fontSize: '24px', fontWeight: '800', marginBottom: '8px' }}>

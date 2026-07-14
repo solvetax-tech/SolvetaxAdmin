@@ -23,3 +23,6 @@ aiohttp==3.13.1
 azure-storage-blob==12.27.0
 twilio
 redis
+
+# Optional error tracking — only used when SENTRY_DSN is set (import is guarded).
+sentry-sdk[fastapi]>=2.0

@@ -128,7 +128,7 @@ export default function CrmLeadCallUpdateDrawer({
                                 style={{
                                     opacity: 0.7,
                                     cursor: 'not-allowed',
-                                    background: 'rgba(var(--fg-rgb), 0.02)',
+                                    background: 'var(--bg-surface-2)',
                                 }}
                             />
                         </div>
@@ -142,7 +142,7 @@ export default function CrmLeadCallUpdateDrawer({
                                 style={{
                                     opacity: 0.7,
                                     cursor: 'not-allowed',
-                                    background: 'rgba(var(--fg-rgb), 0.02)',
+                                    background: 'var(--bg-surface-2)',
                                 }}
                             />
                         </div>
@@ -188,7 +188,7 @@ export default function CrmLeadCallUpdateDrawer({
                                 error={Boolean(errors.followup_at)}
                             />
                             {errors.followup_at && (
-                                <span style={{ color: '#ff4d4d', fontSize: '11px', marginTop: '2px' }}>
+                                <span style={{ color: 'var(--danger)', fontSize: '11px', marginTop: '2px' }}>
                                     {errors.followup_at}
                                 </span>
                             )}

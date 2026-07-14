@@ -10,11 +10,11 @@
     align-items: center;
     gap: 8px;
     cursor: pointer;
-    color: var(--green-mid);
+    color: var(--text-secondary);
 }
 
 .gst-person-signup-error-msg {
-    color: #f44336;
+    color: var(--danger);
     text-align: center;
     margin-bottom: 15px;
     font-size: 14px;
@@ -28,11 +28,11 @@
 }
 
 .form-grid input.error {
-    border-color: rgba(244, 67, 54, 0.5);
+    border-color: rgba(var(--danger-rgb), 0.5);
 }
 
 .field-error {
-    color: #f44336;
+    color: var(--danger);
     font-size: 10px;
     font-weight: 600;
 }

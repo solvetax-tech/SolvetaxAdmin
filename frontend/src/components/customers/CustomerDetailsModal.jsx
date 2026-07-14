@@ -659,7 +659,7 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
                                                         {isLocationSelected && (
                                                             <X
                                                                 size={14}
-                                                                style={{ color: '#ef4444', cursor: 'pointer' }}
+                                                                style={{ color: 'var(--danger)', cursor: 'pointer' }}
                                                                 onClick={() => {
                                                                     setFormData(prev => ({ ...prev, city: '', state: '' }));
                                                                     setIsLocationSelected(false);
@@ -669,7 +669,7 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
                                                         {locationLoading ? (
                                                             <RotateCcw size={14} className="refresh-spin" style={{ color: 'rgba(var(--fg-rgb),0.2)' }} />
                                                         ) : (
-                                                            <Search size={14} style={{ color: isLocationSelected ? 'rgba(var(--fg-rgb),0.2)' : '#2eb87a' }} />
+                                                            <Search size={14} style={{ color: isLocationSelected ? 'rgba(var(--fg-rgb),0.2)' : 'var(--accent)' }} />
                                                         )}
                                                     </div>
                                                     {showLocationResults && (
@@ -926,7 +926,7 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
                     <div className="confirm-modal-overlay">
                         <div className="confirm-modal-content">
                             <div className="confirm-icon-wrapper">
-                                <AlertCircle size={32} color="#f44336" />
+                                <AlertCircle size={32} color="var(--danger)" />
                             </div>
                             <h2>Confirm Deactivation</h2>
                             <p>Are you sure you want to deactivate this customer? If the customer has GST registrations, associated records may also be deactivated.</p>

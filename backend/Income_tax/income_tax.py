@@ -448,14 +448,16 @@ async def create_income_tax_lead(
                 crm_lead_row = None
 
                 if link_existing_lead:
-                    crm_lead_row = await conn.fetchrow(
-                        f"""
-                        SELECT *
-                        FROM {DB_SCHEMA}.crm_leads
-                        WHERE id = $1
-                        FOR UPDATE
-                        """,
+                    # IDOR guard: only link a CRM lead the caller can actually
+                    # see (same visibility as CRM list/detail). Without this an
+                    # RM/OP could hijack another owner's unlinked lead by id.
+                    from backend.crm.crm_leads_common import _fetch_crm_lead_visible
+                    crm_lead_row = await _fetch_crm_lead_visible(
+                        conn,
+                        role_norm,
+                        emp_id or 0,
                         payload.crm_lead_id,
+                        for_update=True,
                     )
                     if not crm_lead_row:
                         raise HTTPException(status_code=404, detail="CRM lead not found.")
@@ -1005,12 +1007,17 @@ async def edit_income_tax(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role_norm = (current_user.get("role") or "").strip().upper()
 
     update_data = {
         k: v
         for k, v in payload.model_dump(exclude_unset=True).items()
         if k in INCOME_TAX_EDITABLE_FIELDS
     }
+    # Mass-assignment guard: only an admin may reassign ownership (rm_id/op_id).
+    if role_norm != "ADMIN":
+        update_data.pop("rm_id", None)
+        update_data.pop("op_id", None)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields provided for update.")
 
@@ -1018,9 +1025,24 @@ async def edit_income_tax(
         pool = await get_db_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
+                # IDOR guard: a WRITE holder may only mutate income-tax records
+                # they can see. ADMIN unrestricted; RM/OP/managers limited to
+                # their own assignments — matching get-by-id read scope.
+                visibility_sql, visibility_values, _vidx = build_income_tax_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["i.id = $1"]
+                fetch_args = [income_tax_id]
+                if visibility_sql:
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_args.extend(visibility_values)
                 old = await conn.fetchrow(
-                    f"SELECT * FROM {DB_SCHEMA}.income_tax WHERE id = $1 FOR UPDATE",
-                    income_tax_id,
+                    f"""
+                    SELECT i.* FROM {DB_SCHEMA}.income_tax i
+                    WHERE {' AND '.join(fetch_conditions)}
+                    FOR UPDATE
+                    """,
+                    *fetch_args,
                 )
                 if not old:
                     raise HTTPException(status_code=404, detail="Income tax record not found.")

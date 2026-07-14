@@ -75,6 +75,16 @@ import {
     parseActiveUsernamesFromApi,
     buildRmOpSelectOptions,
 } from '../../utils/activeEmployees';
+import Button from '../ui/Button';
+import StatusPill from '../ui/StatusPill';
+
+/** Priority → pill tone: HIGH/URGENT danger, LOW neutral, NORMAL info. */
+const priorityTone = (p) => {
+    const v = String(p || '').toUpperCase();
+    if (v === 'HIGH' || v === 'URGENT') return 'danger';
+    if (v === 'LOW') return 'neutral';
+    return 'info';
+};
 
 const extractErrorMessage = (err) => {
     const detail = err?.response?.data?.detail;
@@ -198,7 +208,7 @@ const LocationSearchField = React.memo(({ onSelect, defaultValue = '' }) => {
                     <div className="searchable-dropdown location-search-dropdown">
                         <div className="results-header">Search Results</div>
                         {locError ? (
-                            <div className="no-results-item" style={{ padding: '12px 15px', color: '#ff4d4f', fontSize: '13px', textAlign: 'center', background: 'rgba(255, 77, 79, 0.05)' }}>
+                            <div className="no-results-item" style={{ padding: '12px 15px', color: 'var(--danger)', fontSize: '13px', textAlign: 'center', background: 'rgba(var(--danger-rgb), 0.05)' }}>
                                 {locError}
                             </div>
                         ) : locResults.length > 0 ? (
@@ -496,10 +506,10 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
         setExistingPeriods([]);
         setError(null);
         setIsRegDropdownOpen(false);
-        setLocSearch('');
-        setLocResults([]);
-        setLocLoading(false);
-        setIsLocDropdownOpen(false);
+        // NOTE: the location-search state (locSearch/locResults/…) is owned by
+        // the child location-search input component, not this one; it resets
+        // itself when the modal unmounts. Calling those setters here referenced
+        // undefined variables and threw on every modal close.
     };
 
     const fetchExistingPeriods = async (regId) => {
@@ -1367,14 +1377,15 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
 
                 <div className="gst-portal-top-actions">
                     {activeFilterCount > 0 && (
-                        <button type="button" className="btn-clear-v2" onClick={handleResetFilters}>
-                            <RotateCcw size={14} /> Reset Filters
-                        </button>
+                        <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={handleResetFilters}>
+                            Reset Filters
+                        </Button>
                     )}
                     {(activeSubTab === 'GST Filings' || activeSubTab === 'GST Filings Returns') && (
-                        <button
-                            type="button"
-                            className="btn-gst-payments-entry"
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={<CreditCard size={13} />}
                             onClick={() => {
                                 const serviceType =
                                     activeSubTab === 'GST Filings Returns'
@@ -1392,24 +1403,21 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                     : 'Create GST filing payment'
                             }
                         >
-                            <CreditCard size={13} /> Record Payment
-                        </button>
+                            Record Payment
+                        </Button>
                     )}
-                    <button type="button" className="btn-filter-trigger" onClick={() => setShowFilterDrawer(true)}>
-                        <Filter size={13} />
-                        <span>Filters</span>
+                    <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={() => setShowFilterDrawer(true)}>
+                        Filters
                         {activeFilterCount > 0 && <span className="filter-badge-count">{activeFilterCount}</span>}
-                    </button>
+                    </Button>
                     {activeSubTab === 'Documents' ? (
-                        <button type="button" className="btn-primary-action" onClick={() => setShowCreateDocModal(true)}>
-                            <Plus size={13} />
-                            <span>Add Document Link</span>
-                        </button>
+                        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setShowCreateDocModal(true)}>
+                            Add Document Link
+                        </Button>
                     ) : activeSubTab === 'GST Filings' ? (
-                        <button type="button" className="btn-primary-action" onClick={() => setShowCreateModal(true)}>
-                            <Plus size={13} />
-                            <span>New Filing</span>
-                        </button>
+                        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setShowCreateModal(true)}>
+                            New Filing
+                        </Button>
                     ) : null}
                 </div>
             </div>
@@ -1560,38 +1568,34 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                     {data.map((item) => (
                                         <div key={item.id} className="filings-ledger-row filings-ledger-grid-template gst-table-row gst-table-row--static">
                                             <div className="filings-ledger-cell filings-ledger-sticky-id filings-ledger-sticky-col-1 gst-filings-filing-id-cell">
-                                                {item.id ?? '-'}
+                                                <span className="ui-num">{item.id ?? '-'}</span>
                                             </div>
                                             <div className="filings-ledger-cell filings-ledger-sticky-id filings-ledger-sticky-col-2">
-                                                {item.customer_id ?? '-'}
+                                                <span className="ui-num">{item.customer_id ?? '-'}</span>
                                             </div>
                                             <div className="filings-ledger-cell filings-ledger-sticky-id filings-ledger-sticky-col-3">
-                                                {item.gst_registration_id || '-'}
+                                                <span className="ui-num">{item.gst_registration_id || '-'}</span>
                                             </div>
                                             <div className="filings-ledger-cell">
-                                                <div className="period-tag small">{item.filing_period}</div>
+                                                <span className="ui-num" style={{ color: 'var(--text-primary)' }}>{item.filing_period}</span>
                                             </div>
                                             <div className="filings-ledger-cell">
-                                                <span className="category-badge">{item.filing_category}</span>
+                                                <StatusPill tone="neutral" dot={false}>{item.filing_category}</StatusPill>
                                             </div>
                                             <div className="filings-ledger-cell">
-                                                <span className={`priority-tag ${String(item.priority).toLowerCase()}`}>
-                                                    {item.priority}
-                                                </span>
+                                                <StatusPill value={item.priority} tone={priorityTone(item.priority)} dot={false} />
                                             </div>
                                             <div className="filings-ledger-cell gstin-cell">
-                                                {item.gstin}
+                                                <span className="ui-num">{item.gstin}</span>
                                             </div>
                                             <div className="filings-ledger-cell">
-                                                <span className="type-tag">{item.taxpayer_type}</span>
+                                                <StatusPill tone="neutral" dot={false}>{item.taxpayer_type}</StatusPill>
                                             </div>
                                             <div className="filings-ledger-cell">
                                                 <span className="freq-subtext">{item.filing_frequency}</span>
                                             </div>
                                             <div className="filings-ledger-cell">
-                                                <span className={`status-pill-v4 ${getStatusStyle(item.status)}`}>
-                                                    {item.status}
-                                                </span>
+                                                <StatusPill value={item.status} />
                                             </div>
                                             <div className="filings-ledger-cell state-cell">
                                                 {configs.states?.find(s => s.value === item.state)?.display_name || item.state || '-'}
@@ -1614,17 +1618,15 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                 </div>
                                             </div>
                                             <div className="filings-ledger-cell gst-action-buttons gst-sticky-actions" style={{ justifyContent: 'center' }}>
-                                                <button
-                                                    type="button"
-                                                    className="btn-edit-action"
+                                                <Button
+                                                    variant="ghost"
+                                                    icon={<Pencil size={14} />}
                                                     title="Edit Filing"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         handleEditFiling(item);
                                                     }}
-                                                >
-                                                    <Pencil size={14} />
-                                                </button>
+                                                />
                                             </div>
                                         </div>
                                     ))}
@@ -1833,11 +1835,11 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                     right: 0,
                                                     maxHeight: '220px',
                                                     overflowY: 'auto',
-                                                    background: '#1a1d21',
-                                                    border: '1px solid rgba(var(--fg-rgb),0.12)',
+                                                    background: 'var(--bg-elevated)',
+                                                    border: '1px solid var(--border)',
                                                     borderRadius: '12px',
                                                     zIndex: 1000,
-                                                    boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
+                                                    boxShadow: 'var(--shadow-lg)',
                                                     marginTop: '8px',
                                                     scrollbarWidth: 'thin',
                                                     scrollbarColor: 'rgba(var(--fg-rgb),0.2) transparent',
@@ -1847,9 +1849,9 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                         <div style={{
                                                             padding: '8px 16px',
                                                             fontSize: '10px',
-                                                            color: '#2eb87a',
-                                                            background: 'rgba(46, 184, 122, 0.05)',
-                                                            borderBottom: '1px solid rgba(var(--fg-rgb),0.03)',
+                                                            color: 'var(--accent)',
+                                                            background: 'rgba(var(--accent-rgb), 0.05)',
+                                                            borderBottom: '1px solid var(--border-subtle)',
                                                             fontWeight: '600',
                                                             display: 'flex',
                                                             justifyContent: 'space-between'
@@ -1886,13 +1888,13 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                                     display: 'flex',
                                                                     justifyContent: 'space-between',
                                                                     alignItems: 'center',
-                                                                    borderBottom: '1px solid rgba(var(--fg-rgb),0.03)',
-                                                                    background: docFilterInputs.verified_by === String(emp.emp_id) ? 'rgba(46, 184, 122, 0.12)' : 'transparent',
+                                                                    borderBottom: '1px solid var(--border-subtle)',
+                                                                    background: docFilterInputs.verified_by === String(emp.emp_id) ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent',
                                                                     transition: 'background 0.2s'
                                                                 }}
                                                             >
                                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                                                    <span style={{ fontSize: '13px', color: docFilterInputs.verified_by === String(emp.emp_id) ? '#2eb87a' : 'var(--text-primary)', fontWeight: '600' }}>{emp.username}</span>
+                                                                    <span style={{ fontSize: '13px', color: docFilterInputs.verified_by === String(emp.emp_id) ? 'var(--accent)' : 'var(--text-primary)', fontWeight: '600' }}>{emp.username}</span>
                                                                     <span style={{ fontSize: '10px', color: 'var(--text-primary)' }}>{emp.first_name || ''} {emp.last_name || ''}</span>
                                                                 </div>
                                                                 <span className="role-badge" style={{
@@ -1916,7 +1918,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                     <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                                     <div className="filter-section-v4">
-                                        <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Upload Timeline</h4>
+                                        <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Upload Timeline</h4>
                                         <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                             <div className="filter-group-v4">
                                                 <label>From Date</label>
@@ -2052,7 +2054,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                                             <div className="filter-section-v4">
-                                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>History & Versioning</h4>
+                                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>History & Versioning</h4>
                                                 <div className="filter-row-v4">
                                                     <div className="filter-group-v4" style={{ flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
                                                         <div 
@@ -2071,7 +2073,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                     ) : (
                                         <>
                                             <div className="filter-section-v4">
-                                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Account Identifiers</h4>
+                                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Account Identifiers</h4>
                                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                                     <div className="filter-group-v4">
                                                         <label>Filing ID (#)</label>
@@ -2087,7 +2089,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                                             <div className="filter-section-v4">
-                                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Assignment & Ownership</h4>
+                                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Assignment & Ownership</h4>
                                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                                     <div className="filter-group-v4">
                                                         <label>Assignee (RM)</label>
@@ -2142,7 +2144,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                                             <div className="filter-section-v4">
-                                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Entity & Location</h4>
+                                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Entity & Location</h4>
                                                 <div className="filter-group-v4" style={{ marginBottom: '12px' }}>
                                                     <label>GSTIN / Entity Identification</label>
                                                     <input
@@ -2184,7 +2186,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                                             <div className="filter-section-v4">
-                                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Audit Timeline</h4>
+                                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Audit Timeline</h4>
                                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                                     <div className="filter-group-v4">
                                                         <label>From Date</label>
@@ -2339,7 +2341,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                                             <span className="item-name">{r.gstin}</span>
                                                                         </div>
                                                                         <div className="item-sub">
-                                                                            {r.business_name} • <span style={{ color: '#2eb87a' }}>{r.state}</span>
+                                                                            {r.business_name} • <span style={{ color: 'var(--accent)' }}>{r.state}</span>
                                                                         </div>
                                                                     </div>
                                                                 ))}
@@ -2368,7 +2370,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                                             <span className="item-badge">{r.registration_status}</span>
                                                                         </div>
                                                                         <div className="item-sub">
-                                                                            {r.business_name} • <span style={{ color: '#2eb87a', fontWeight: '800' }}>{r.state}</span> • <span style={{ opacity: 0.6 }}>Cust {r.customer_id}</span>
+                                                                            {r.business_name} • <span style={{ color: 'var(--accent)', fontWeight: '800' }}>{r.state}</span> • <span style={{ opacity: 0.6 }}>Cust {r.customer_id}</span>
                                                                         </div>
                                                                     </div>
                                                                 ))}
@@ -2582,15 +2584,15 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                         <div 
                                                             className="warning-badge-v4" 
                                                             style={{ 
-                                                                color: '#ffb300', 
+                                                                color: 'var(--warning)',
                                                                 display: 'flex', 
                                                                 alignItems: 'center', 
                                                                 gap: '4px',
                                                                 cursor: 'help',
                                                                 padding: '4px 10px',
                                                                 borderRadius: '6px',
-                                                                background: 'rgba(255, 179, 0, 0.1)',
-                                                                border: '1px solid rgba(255, 179, 0, 0.15)',
+                                                                background: 'rgba(var(--warning-rgb), 0.1)',
+                                                                border: '1px solid rgba(var(--warning-rgb), 0.15)',
                                                                 whiteSpace: 'nowrap',
                                                                 width: 'fit-content',
                                                                 marginTop: '4px',
@@ -2618,8 +2620,8 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                         fontWeight: '700',
                                                         textTransform: 'uppercase',
                                                         letterSpacing: '0.04em',
-                                                        color: autoSelectPeriod ? '#2eb87a' : 'rgba(var(--fg-rgb),0.3)',
-                                                        background: autoSelectPeriod ? 'rgba(46, 184, 122, 0.1)' : 'transparent',
+                                                        color: autoSelectPeriod ? 'var(--accent)' : 'rgba(var(--fg-rgb),0.3)',
+                                                        background: autoSelectPeriod ? 'rgba(var(--accent-rgb), 0.1)' : 'transparent',
                                                         padding: autoSelectPeriod ? '4px 12px' : '0',
                                                         borderRadius: '6px',
                                                         width: 'fit-content',
@@ -2827,7 +2829,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                         right: '12px',
                                                         background: 'transparent',
                                                         border: 'none',
-                                                        color: '#6366f1',
+                                                        color: 'var(--accent)',
                                                         cursor: aiLoading || !createForm.business_name ? 'not-allowed' : 'pointer',
                                                         opacity: aiLoading || !createForm.business_name ? 0.5 : 1,
                                                         display: 'flex',
@@ -2872,7 +2874,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                     <div className="gst-modal-card-v4 returns-status-modal app-drawer-panel gst-reg-side-drawer-shell" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header-v4">
                             <div className="header-content-v4">
-                                <div className="header-icon-box-v4" style={{ background: 'rgba(172, 200, 255, 0.1)', color: '#3b82f6', borderColor: 'rgba(172, 200, 255, 0.2)' }}>
+                                <div className="header-icon-box-v4" style={{ background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)', borderColor: 'rgba(var(--info-rgb), 0.2)' }}>
                                     <Sparkles size={20} />
                                 </div>
                                 <div className="modal-title-box">

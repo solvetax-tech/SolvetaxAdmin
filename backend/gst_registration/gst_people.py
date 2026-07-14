@@ -504,7 +504,7 @@ async def create_registration_person(
                 status_code=409,
                 detail=UNIQUE_MAP.get(
                     constraint,
-                    f"Duplicate value violates constraint: {constraint}",
+                    "Duplicate value violates a uniqueness rule.",
                 ),
             )
 
@@ -529,7 +529,7 @@ async def create_registration_person(
                 status_code=400,
                 detail=CHECK_MAP.get(
                     constraint,
-                    f"Data violates constraint: {constraint}",
+                    "Data violates a validation rule.",
                 ),
             )
 
@@ -666,7 +666,11 @@ async def list_registration_persons(
             param_index += 1
 
         if customer_id is not None:
-            conditions.append(f"p.customer_id = ${param_index}")
+            # persons have no customer_id; the customer lives on gst_registration.
+            conditions.append(
+                f"p.gst_registration_id IN "
+                f"(SELECT g.id FROM {DB_SCHEMA}.gst_registration g WHERE g.customer_id = ${param_index})"
+            )
             values.append(customer_id)
             param_index += 1
 
@@ -880,6 +884,8 @@ async def edit_registration_person(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -943,16 +949,30 @@ async def edit_registration_person(
 
                 # --------------------------------------------------
                 # 1️⃣ Fetch existing person
+                #     IDOR guard: a person is visible only if its parent GST
+                #     registration is visible to the caller (RM/OP/managers
+                #     limited to their own; ADMIN unrestricted).
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["person_id = $1", "is_active = TRUE"]
+                fetch_values = [person_id]
+                if visibility_sql:
+                    fetch_conditions.append(
+                        f"gst_registration_id IN "
+                        f"(SELECT g.id FROM {DB_SCHEMA}.gst_registration g WHERE {visibility_sql})"
+                    )
+                    fetch_values.extend(visibility_values)
+
                 old_row = await conn.fetchrow(
                     f"""
                     SELECT *
                     FROM {DB_SCHEMA}.gst_registration_persons
-                    WHERE person_id = $1
-                    AND is_active = TRUE
+                    WHERE {' AND '.join(fetch_conditions)}
                     LIMIT 1
                     """,
-                    person_id,
+                    *fetch_values,
                 )
 
                 if not old_row:
@@ -1220,7 +1240,7 @@ async def edit_registration_person(
 
             field, message = UNIQUE_FIELD_MAP.get(
                 constraint_name,
-                ("non_field_error", f"Duplicate value violates constraint: {constraint_name}"),
+                ("non_field_error", "Duplicate value violates a uniqueness rule."),
             )
 
             raise HTTPException(
@@ -1252,7 +1272,7 @@ async def edit_registration_person(
 
             field, message = CHECK_MAP.get(
                 constraint,
-                ("non_field_error", f"Data violates constraint: {constraint}"),
+                ("non_field_error", "Data violates a validation rule."),
             )
 
             raise HTTPException(
@@ -1302,6 +1322,8 @@ async def soft_delete_registration_person(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -1329,15 +1351,29 @@ async def soft_delete_registration_person(
 
                 # --------------------------------------------------
                 # 1️⃣ Fetch Existing Person
+                #     IDOR guard: person visible only if its parent GST
+                #     registration is visible to the caller.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["person_id = $1"]
+                fetch_values = [person_id]
+                if visibility_sql:
+                    fetch_conditions.append(
+                        f"gst_registration_id IN "
+                        f"(SELECT g.id FROM {DB_SCHEMA}.gst_registration g WHERE {visibility_sql})"
+                    )
+                    fetch_values.extend(visibility_values)
+
                 person_row = await conn.fetchrow(
                     f"""
                     SELECT *
                       FROM {DB_SCHEMA}.gst_registration_persons
-                     WHERE person_id = $1
+                     WHERE {' AND '.join(fetch_conditions)}
                      LIMIT 1
                     """,
-                    person_id,
+                    *fetch_values,
                 )
 
                 if not person_row:
@@ -1445,16 +1481,16 @@ async def soft_delete_registration_person(
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
 
-        except asyncpg.exceptions.CheckViolationError as e:
+        except asyncpg.exceptions.CheckViolationError:
             log.exception("CHECK ERROR")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail="Operation violates a data constraint.")
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(status_code=400, detail="Invalid data format.")
 
-        except asyncpg.PostgresError as e:
+        except asyncpg.PostgresError:
             log.exception("Postgres error")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="A database error occurred.")
 
         except HTTPException:
             raise
@@ -1487,6 +1523,8 @@ async def activate_registration_person(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -1511,21 +1549,35 @@ async def activate_registration_person(
 
                 # --------------------------------------------------
                 # 1️⃣ Fetch Person + GST + Customer Status (LOCK ROW)
+                #     IDOR guard: person visible only if its parent GST
+                #     registration is visible to the caller.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["rp.person_id = $1"]
+                fetch_values = [person_id]
+                if visibility_sql:
+                    fetch_conditions.append(
+                        f"rp.gst_registration_id IN "
+                        f"(SELECT g.id FROM {DB_SCHEMA}.gst_registration g WHERE {visibility_sql})"
+                    )
+                    fetch_values.extend(visibility_values)
+
                 person_row = await conn.fetchrow(
                     f"""
-                    SELECT rp.*, 
-                           c.is_active AS customer_active, 
+                    SELECT rp.*,
+                           c.is_active AS customer_active,
                            gst.is_active AS gst_active
                       FROM {DB_SCHEMA}.gst_registration_persons rp
-                      JOIN {DB_SCHEMA}.customers c
-                        ON rp.customer_id = c.customer_id
                       JOIN {DB_SCHEMA}.gst_registration gst
                         ON rp.gst_registration_id = gst.id
-                     WHERE rp.person_id = $1
-                     FOR UPDATE
+                      LEFT JOIN {DB_SCHEMA}.customers c
+                        ON gst.customer_id = c.customer_id
+                     WHERE {' AND '.join(fetch_conditions)}
+                     FOR UPDATE OF rp
                     """,
-                    person_id,
+                    *fetch_values,
                 )
 
                 if not person_row:
@@ -1546,7 +1598,9 @@ async def activate_registration_person(
                         detail="Cannot activate person: associated GST is inactive. Activate GST first.",
                     )
 
-                if not person_row["customer_active"]:
+                # Customer is optional (gst_registration.customer_id may be NULL).
+                # Only block when a customer actually exists and is inactive.
+                if person_row["customer_active"] is False:
                     raise HTTPException(
                         status_code=400,
                         detail="Cannot activate person: associated customer is inactive.",
@@ -1677,11 +1731,11 @@ async def activate_registration_person(
                 detail="Foreign key constraint violation.",
             )
 
-        except asyncpg.exceptions.CheckViolationError as e:
+        except asyncpg.exceptions.CheckViolationError:
             log.exception("CHECK ERROR")
             raise HTTPException(
                 status_code=400,
-                detail=str(e),
+                detail="Operation violates a data constraint.",
             )
 
         except asyncpg.exceptions.DataError:
@@ -1690,11 +1744,11 @@ async def activate_registration_person(
                 detail="Invalid data format.",
             )
 
-        except asyncpg.PostgresError as e:
+        except asyncpg.PostgresError:
             log.exception("Database error during person activation")
             raise HTTPException(
                 status_code=500,
-                detail=str(e),
+                detail="A database error occurred.",
             )
 
         except HTTPException:

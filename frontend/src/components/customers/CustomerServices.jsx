@@ -14,6 +14,7 @@ import FilterDateInput from '../common/FilterDateInput';
 import './CustomerServices.css';
 import CustomerServiceDetailsModal from './CustomerServiceDetailsModal';
 import FollowupManager from './FollowupManager';
+import AddPayment from '../payments/AddPayment';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromPairs } from '../common/selectOptionUtils';
 import { fetchStaffServiceConfig } from '../../utils/staffServiceConfigApi';
@@ -67,6 +68,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
     const rowsPerPage = 20;
 
     const [showFilterModal, setShowFilterModal] = useState(false);
+    const [showAddPayment, setShowAddPayment] = useState(false);
     const [filterInputs, setFilterInputs] = useState(() => readFiltersFromSearch(location.search));
     const [appliedFilters, setAppliedFilters] = useState(() => readFiltersFromSearch(location.search));
 
@@ -377,9 +379,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                     <button
                         type="button"
                         className="btn-cs-payments-entry"
-                        onClick={() =>
-                            navigate('/dashboard?tab=add-payment&service_type=CUSTOMER_SERVICE&return_tab=customer-services')
-                        }
+                        onClick={() => setShowAddPayment(true)}
                         title="Create customer service payment"
                     >
                         <CreditCard size={13} /> Record Payment
@@ -404,7 +404,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                         
                         <div className="drawer-content">
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Core Identifiers</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Core Identifiers</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Customer ID</label>
@@ -427,7 +427,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Service Status</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Service Status</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Record Status</label>
@@ -465,7 +465,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Assignment</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Assignment</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>RM</label>
@@ -495,7 +495,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Timeline</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Timeline</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Created From</label>
@@ -698,6 +698,18 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                     onUpdated={fetchServices}
                     initialEditMode={detailsEditMode}
                     onClose={closeServiceDetails}
+                />
+            )}
+
+            {/* Inline payment — stays on the Customer Services tab instead of
+                switching to the add-payment tab (keeps the flow within 2 tabs). */}
+            {showAddPayment && (
+                <AddPayment
+                    initialServiceType="CUSTOMER_SERVICE"
+                    onBack={() => {
+                        setShowAddPayment(false);
+                        fetchServices();
+                    }}
                 />
             )}
         </div>

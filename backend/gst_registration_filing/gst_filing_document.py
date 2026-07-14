@@ -197,11 +197,13 @@ async def create_gst_filing_document(
                     "This document type already exists for this filing (active)."
             }
 
+            if constraint not in UNIQUE_MAP:
+                log.warning("Unmapped unique violation | constraint=%s", constraint)
             raise HTTPException(
                 status_code=409,
                 detail=UNIQUE_MAP.get(
                     constraint,
-                    f"Duplicate value violates constraint: {constraint}",
+                    "Duplicate value violates a uniqueness rule.",
                 ),
             )
 
@@ -217,11 +219,13 @@ async def create_gst_filing_document(
                 "chk_document_type_upper": "Document type must be uppercase.",
             }
 
+            if constraint not in CHECK_MAP:
+                log.warning("Unmapped check violation | constraint=%s", constraint)
             raise HTTPException(
                 status_code=400,
                 detail=CHECK_MAP.get(
                     constraint,
-                    f"Data violates constraint: {constraint}",
+                    "Data violates a validation rule.",
                 ),
             )
 
@@ -253,6 +257,8 @@ async def update_gst_filing_document(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -274,15 +280,29 @@ async def update_gst_filing_document(
 
                 # --------------------------------------------------
                 # 1️⃣ FETCH EXISTING DOCUMENT (LOCK)
+                #     IDOR guard: document visible only if its parent filing is
+                #     visible to the caller.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["document_id = $1"]
+                fetch_values = [document_id]
+                if visibility_sql:
+                    fetch_conditions.append(
+                        f"gst_filing_id IN "
+                        f"(SELECT f.id FROM {DB_SCHEMA}.gst_filings f WHERE {visibility_sql})"
+                    )
+                    fetch_values.extend(visibility_values)
+
                 old = await conn.fetchrow(
                     f"""
                     SELECT *
                     FROM {DB_SCHEMA}.gst_filings_documents
-                    WHERE document_id = $1
+                    WHERE {' AND '.join(fetch_conditions)}
                     FOR UPDATE
                     """,
-                    document_id,
+                    *fetch_values,
                 )
 
                 if not old:
@@ -400,11 +420,13 @@ async def update_gst_filing_document(
                     "This document type already exists for this filing (active)."
             }
 
+            if constraint not in UNIQUE_MAP:
+                log.warning("Unmapped unique violation | constraint=%s", constraint)
             raise HTTPException(
                 status_code=409,
                 detail=UNIQUE_MAP.get(
                     constraint,
-                    f"Duplicate value violates constraint: {constraint}",
+                    "Duplicate value violates a uniqueness rule.",
                 ),
             )
 
@@ -420,11 +442,13 @@ async def update_gst_filing_document(
                 "chk_document_type_upper": "Document type must be uppercase.",
             }
 
+            if constraint not in CHECK_MAP:
+                log.warning("Unmapped check violation | constraint=%s", constraint)
             raise HTTPException(
                 status_code=400,
                 detail=CHECK_MAP.get(
                     constraint,
-                    f"Data violates constraint: {constraint}",
+                    "Data violates a validation rule.",
                 ),
             )
 
@@ -722,6 +746,8 @@ async def deactivate_gst_filing_document(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -746,7 +772,24 @@ async def deactivate_gst_filing_document(
 
                 # --------------------------------------------------
                 # 🔥 UPDATE WITH JOIN (GET CUSTOMER_ID)
+                #     IDOR guard: only mutate a filing-document whose parent
+                #     filing is visible to the caller. Scope BOTH the update and
+                #     the existence fallback so a non-visible doc returns 404.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                del_vis_clause = ""
+                exist_vis_clause = ""
+                extra_values = []
+                if visibility_sql:
+                    del_vis_clause = f" AND ({visibility_sql})"
+                    exist_vis_clause = (
+                        f" AND gst_filing_id IN "
+                        f"(SELECT f.id FROM {DB_SCHEMA}.gst_filings f WHERE {visibility_sql})"
+                    )
+                    extra_values = visibility_values
+
                 deleted_row = await conn.fetchrow(
                     f"""
                     UPDATE {DB_SCHEMA}.gst_filings_documents d
@@ -756,9 +799,10 @@ async def deactivate_gst_filing_document(
                      WHERE d.document_id = $1
                        AND d.gst_filing_id = f.id
                        AND d.is_active = TRUE
+                       {del_vis_clause}
                      RETURNING d.*, f.customer_id
                     """,
-                    document_id,
+                    document_id, *extra_values,
                 )
 
                 # --------------------------------------------------
@@ -770,8 +814,9 @@ async def deactivate_gst_filing_document(
                         SELECT document_id, is_active
                         FROM {DB_SCHEMA}.gst_filings_documents
                         WHERE document_id = $1
+                        {exist_vis_clause}
                         """,
-                        document_id,
+                        document_id, *extra_values,
                     )
 
                     if not existing:
@@ -857,6 +902,8 @@ async def activate_gst_filing_document(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -881,15 +928,29 @@ async def activate_gst_filing_document(
 
                 # --------------------------------------------------
                 # LOCK ROW
+                #     IDOR guard: document visible only if its parent filing is
+                #     visible to the caller.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["document_id = $1"]
+                fetch_values = [document_id]
+                if visibility_sql:
+                    fetch_conditions.append(
+                        f"gst_filing_id IN "
+                        f"(SELECT f.id FROM {DB_SCHEMA}.gst_filings f WHERE {visibility_sql})"
+                    )
+                    fetch_values.extend(visibility_values)
+
                 doc_row = await conn.fetchrow(
                     f"""
                     SELECT *
                     FROM {DB_SCHEMA}.gst_filings_documents
-                    WHERE document_id = $1
+                    WHERE {' AND '.join(fetch_conditions)}
                     FOR UPDATE
                     """,
-                    document_id,
+                    *fetch_values,
                 )
 
                 if not doc_row:

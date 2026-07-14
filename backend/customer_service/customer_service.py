@@ -557,16 +557,16 @@ async def soft_delete_customer_service(
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
 
-        except asyncpg.exceptions.CheckViolationError as e:
+        except asyncpg.exceptions.CheckViolationError:
             log.exception("CHECK constraint error")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail="Operation violates a data constraint.")
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(status_code=400, detail="Invalid data format.")
 
-        except asyncpg.PostgresError as e:
+        except asyncpg.PostgresError:
             log.exception("Postgres error during customer service soft delete")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="A database error occurred.")
 
         except HTTPException:
             raise
@@ -714,16 +714,16 @@ async def activate_customer_service_row(
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
 
-        except asyncpg.exceptions.CheckViolationError as e:
+        except asyncpg.exceptions.CheckViolationError:
             log.exception("CHECK ERROR")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail="Operation violates a data constraint.")
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(status_code=400, detail="Invalid data format.")
 
-        except asyncpg.PostgresError as e:
+        except asyncpg.PostgresError:
             log.exception("Database error during customer service activate")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="A database error occurred.")
 
         except HTTPException:
             raise

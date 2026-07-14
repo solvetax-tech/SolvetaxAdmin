@@ -317,7 +317,7 @@ const CustomerServiceDetailsModal = ({
     if (error && !service) {
         return drawerShell(
             <div className="drawer-content gst-reg-details-scroll cs-drawer-error-state">
-                <AlertCircle size={48} color="#ef4444" />
+                <AlertCircle size={48} color="var(--danger)" />
                 <h2>Error Loading Service</h2>
                 <p>{error}</p>
             </div>,

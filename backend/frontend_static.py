@@ -27,11 +27,20 @@ def mount_frontend(app: FastAPI) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
-        if full_path.startswith(_API_PREFIXES) or full_path in _DOC_PATHS:
+        # The path param arrives without a leading slash (e.g. "api/foo"), while
+        # our prefixes are absolute — normalize before matching so real API/doc
+        # routes 404 instead of silently returning index.html.
+        normalized = "/" + full_path
+        if normalized.startswith(_API_PREFIXES) or normalized in _DOC_PATHS:
             raise HTTPException(status_code=404, detail="Not found")
 
-        candidate = FRONTEND_DIST / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(candidate)
+        dist_root = FRONTEND_DIST.resolve()
+        index_file = dist_root / "index.html"
+        if full_path:
+            candidate = (dist_root / full_path).resolve()
+            # Containment check: reject any path that escapes the dist directory
+            # (e.g. "../../etc/passwd") before serving it.
+            if candidate.is_file() and dist_root in candidate.parents:
+                return FileResponse(candidate)
 
-        return FileResponse(FRONTEND_DIST / "index.html")
+        return FileResponse(index_file)

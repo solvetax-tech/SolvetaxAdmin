@@ -146,6 +146,85 @@ async def delete_key(cache_key: str) -> None:
         logger.warning("Redis delete failed for key=%s", cache_key, exc_info=True)
 
 
+async def incr_with_ttl(key: str, ttl_seconds: int) -> Optional[int]:
+    """Atomically increment a counter, setting its TTL on first creation.
+
+    Returns the new value, or None when Redis is unavailable so callers can
+    fail open (never lock out a legitimate user during a Redis outage).
+    """
+    if not is_redis_configured() or _redis_temporarily_disabled():
+        return None
+    try:
+        client = get_redis_client()
+        value = await client.incr(key)
+        if value == 1:
+            await client.expire(key, ttl_seconds)
+        return int(value)
+    except Exception:
+        _mark_redis_unhealthy()
+        logger.warning("Redis incr failed for key=%s", key, exc_info=True)
+        return None
+
+
+async def get_int(key: str) -> Optional[int]:
+    """Read an integer counter. Returns 0 if unset, or None if Redis is down."""
+    if not is_redis_configured() or _redis_temporarily_disabled():
+        return None
+    try:
+        raw = await get_redis_client().get(key)
+        return int(raw) if raw is not None else 0
+    except Exception:
+        _mark_redis_unhealthy()
+        logger.warning("Redis get_int failed for key=%s", key, exc_info=True)
+        return None
+
+
+async def acquire_lock(key: str, token: str, ttl_seconds: int) -> bool:
+    """Try to acquire a distributed lock (SET NX EX). Returns True if acquired.
+
+    Fails CLOSED (returns False) when Redis is unavailable — a caller that needs
+    a single fleet-wide runner (e.g. the scheduler) must decide separately
+    whether to proceed when Redis is unconfigured vs merely down.
+    """
+    if not is_redis_configured() or _redis_temporarily_disabled():
+        return False
+    try:
+        return bool(await get_redis_client().set(key, token, nx=True, ex=ttl_seconds))
+    except Exception:
+        _mark_redis_unhealthy()
+        logger.warning("Redis acquire_lock failed for key=%s", key, exc_info=True)
+        return False
+
+
+async def release_lock(key: str, token: str) -> None:
+    """Release a lock only if we still own it (compare-and-delete via Lua).
+
+    Guards against deleting a lock another instance re-acquired after our TTL
+    expired mid-run.
+    """
+    if not is_redis_configured() or _redis_temporarily_disabled():
+        return
+    try:
+        lua = (
+            "if redis.call('get', KEYS[1]) == ARGV[1] "
+            "then return redis.call('del', KEYS[1]) else return 0 end"
+        )
+        await get_redis_client().eval(lua, 1, key, token)
+    except Exception:
+        _mark_redis_unhealthy()
+        logger.warning("Redis release_lock failed for key=%s", key, exc_info=True)
+
+
+async def redis_ping() -> bool:
+    """Lightweight readiness check — True if Redis answers PING within timeout."""
+    if not is_redis_configured():
+        return False
+    try:
+        return bool(await get_redis_client().ping())
+    except Exception:
+        return False
+
+
 async def close_redis_client() -> None:
     global _redis_client
     if _redis_client is None:

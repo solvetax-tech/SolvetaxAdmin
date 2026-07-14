@@ -25,10 +25,11 @@
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    border-radius: 8px;
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
-    background: rgba(var(--fg-rgb), 0.03);
-    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-surface-2);
+    color: var(--text-secondary);
+    font-family: var(--font-accent);
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
@@ -38,20 +39,21 @@
 }
 
 .cs-leads-tab:hover {
-    background: rgba(var(--fg-rgb), 0.06);
+    background: var(--bg-hover);
+    border-color: var(--border);
     color: var(--text-primary);
 }
 
 .cs-leads-tab.is-active {
-    background: rgba(46, 184, 122, 0.12);
-    border-color: rgba(46, 184, 122, 0.45);
-    color: #2eb87a;
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: var(--accent);
 }
 
 .cs-leads-tab--referral.is-active {
-    border-color: rgba(139, 92, 246, 0.45);
-    color: #8b5cf6;
-    background: rgba(139, 92, 246, 0.1);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.12);
 }
 
 .cs-leads-tab-count {
@@ -77,19 +79,30 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--text-primary);
+    color: var(--text-secondary);
 }
 
 .cs-leads-filter-field input,
 .cs-leads-filter-field select {
     height: 34px;
     padding: 0 10px;
-    border-radius: 8px;
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
-    background: rgba(0, 0, 0, 0.35);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--bg-input);
     color: var(--text-primary);
     font-size: 13px;
     min-width: 130px;
+}
+
+.cs-leads-filter-field input::placeholder {
+    color: var(--text-faint);
+}
+
+.cs-leads-filter-field input:focus,
+.cs-leads-filter-field select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--ring);
 }
 
 .cs-leads-grid {
@@ -136,44 +149,68 @@
     white-space: nowrap;
 }
 
+/* Data values use text-primary; ids/phones use tabular mono for alignment */
+.cs-leads-grid .filings-ledger-cell {
+    color: var(--text-primary);
+}
+
+/* Phone column (3rd cell in both grids) reads as an aligned numeric value */
+.cs-leads-grid .filings-ledger-cell:nth-child(3) {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+
+.cs-leads-grid .customer-id-green-v4 {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
 .cs-status-pill {
     display: inline-flex;
-    padding: 2px 8px;
-    border-radius: 6px;
+    align-items: center;
+    padding: 3px 9px;
+    border-radius: var(--radius-pill);
+    border: 1px solid transparent;
+    font-family: var(--font-accent);
     font-size: 10px;
     font-weight: 700;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
 }
 
 .cs-status-pill.resolved {
-    background: rgba(46, 184, 122, 0.15);
-    color: #2eb87a;
+    background: rgba(var(--success-rgb), 0.14);
+    border-color: rgba(var(--success-rgb), 0.32);
+    color: var(--success);
 }
 
 .cs-status-pill.open {
-    background: rgba(245, 158, 11, 0.15);
-    color: #f59e0b;
+    background: rgba(var(--warning-rgb), 0.14);
+    border-color: rgba(var(--warning-rgb), 0.32);
+    color: var(--warning);
 }
 
 .cs-row-action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     padding: 0;
-    border-radius: 8px;
-    border: 1px solid rgba(46, 184, 122, 0.25);
-    background: rgba(46, 184, 122, 0.08);
-    color: #2eb87a;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
 .cs-row-action:hover {
-    background: rgba(46, 184, 122, 0.18);
-    border-color: rgba(46, 184, 122, 0.45);
-    color: #2eb87a;
+    background: var(--bg-hover);
+    border-color: var(--border-subtle);
+    color: var(--text-primary);
 }
 
 /* Contact/Referral edit opens as a right drawer */
@@ -208,34 +245,29 @@
 .cs-leads-page .input-group-v4 textarea {
     width: 100%;
     min-height: 96px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
     color: var(--text-primary);
     padding: 12px 14px;
-    border-radius: 14px;
+    border-radius: var(--radius-md);
     font-size: 14px;
     line-height: 1.45;
     outline: none;
     resize: vertical;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
     transition: all 0.2s ease;
 }
 
 .cs-leads-page .input-group-v4 textarea::placeholder {
-    color: var(--text-primary);
+    color: var(--text-faint);
 }
 
 .cs-leads-page .input-group-v4 textarea:hover {
-    border-color: rgba(var(--fg-rgb), 0.2);
-    background: rgba(0, 0, 0, 0.4);
+    border-color: var(--border-strong);
 }
 
 .cs-leads-page .input-group-v4 textarea:focus {
-    border-color: #2eb87a;
-    background: rgba(0, 0, 0, 0.5);
-    box-shadow:
-        0 0 0 4px rgba(46, 184, 122, 0.1),
-        inset 0 2px 4px rgba(0, 0, 0, 0.3);
+    border-color: var(--accent);
+    box-shadow: var(--ring);
 }
 
 .cs-multi-chip-wrap {
@@ -245,19 +277,19 @@
 }
 
 .cs-chip-btn {
-    border: 1px solid rgba(var(--fg-rgb), 0.12);
-    background: rgba(var(--fg-rgb), 0.04);
-    color: var(--text-primary);
-    border-radius: 999px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-secondary);
+    border-radius: var(--radius-pill);
     padding: 4px 10px;
     font-size: 11px;
     cursor: pointer;
 }
 
 .cs-chip-btn.is-active {
-    border-color: rgba(46, 184, 122, 0.45);
-    background: rgba(46, 184, 122, 0.16);
-    color: #c6f6de;
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: var(--accent);
 }
 
 .cs-ref-input-row {
@@ -278,27 +310,34 @@
 }
 
 .cs-list-view-btn {
-    border: 1px solid rgba(56, 189, 248, 0.3);
-    background: rgba(56, 189, 248, 0.12);
-    color: #bfefff;
-    border-radius: 7px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
     padding: 4px 10px;
     font-size: 11px;
     cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cs-list-view-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: var(--text-primary);
 }
 
 .cs-list-view-btn.is-open {
-    border-color: rgba(14, 165, 233, 0.6);
-    background: rgba(14, 165, 233, 0.2);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.14);
+    color: var(--accent);
 }
 
 .cs-inline-preview-row {
-    background: rgba(var(--bg-rgb), 0.85);
+    background: var(--bg-surface-2);
 }
 
 .cs-inline-preview-cell {
     grid-column: 1 / -1;
-    border-top: 1px solid rgba(var(--fg-rgb), 0.06);
+    border-top: 1px solid var(--border-subtle);
     padding: 10px 12px !important;
 }
 
@@ -318,17 +357,17 @@
 .cs-sticky-drawer-footer {
     position: sticky;
     bottom: 0;
-    background: rgba(var(--bg-rgb), 0.96);
-    border-top: 1px solid rgba(var(--fg-rgb), 0.08);
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border-subtle);
     margin-top: 8px;
     padding-top: 12px;
 }
 
 .cs-chip-tag {
-    border: 1px solid rgba(99, 102, 241, 0.3);
-    background: rgba(99, 102, 241, 0.14);
-    color: #d6dcff;
-    border-radius: 999px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-secondary);
+    border-radius: var(--radius-pill);
     padding: 4px 10px;
     font-size: 11px;
     cursor: pointer;
@@ -344,6 +383,6 @@
 }
 
 .cs-chip-empty {
-    color: var(--text-primary);
+    color: var(--text-faint);
     font-size: 12px;
 }

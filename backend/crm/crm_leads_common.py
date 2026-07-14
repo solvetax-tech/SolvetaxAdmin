@@ -1630,15 +1630,30 @@ async def _svc_execute_bulk_assign(
                             )
                         valid_emp_ids.append(username_to_emp[key])
                 else:
+                    # Enforce that every selected employee actually holds the
+                    # assignment_role (RM/OP). Without this, a caller could set
+                    # rm_id to an OP (or any other role) employee — the username
+                    # branch above already filters by role, so mirror it here.
                     valid_rows = await conn.fetch(
-                        f"SELECT emp_id FROM {DB_SCHEMA}.employees WHERE is_active = TRUE AND emp_id = ANY($1::bigint[])",
+                        f"""
+                        SELECT emp_id FROM {DB_SCHEMA}.employees
+                         WHERE is_active = TRUE
+                           AND role = $1
+                           AND emp_id = ANY($2::bigint[])
+                        """,
+                        payload.assignment_role,
                         unique_emp_ids,
                     )
                     valid_emp_ids = [int(r["emp_id"]) for r in valid_rows]
                     if len(valid_emp_ids) != len(unique_emp_ids):
                         raise _validation_error(
                             "Invalid selected_employee_ids.",
-                            {"selected_employee_ids": "One or more employees are invalid/inactive."},
+                            {
+                                "selected_employee_ids": (
+                                    f"One or more employees are invalid, inactive, "
+                                    f"or not a {payload.assignment_role}."
+                                )
+                            },
                         )
 
                 vis_sql, vis_vals, _ = _build_crm_visibility(role, emp_id, 2)
@@ -2927,7 +2942,34 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
                         )
                     },
                 )
-            try:
+            # Dedup (mobile + entity_type): a public marketing form must not be
+            # able to spawn unlimited duplicate leads for the same person. This
+            # mirrors the bulk-upload path which skips duplicates. If an active
+            # lead already exists we return it idempotently instead of inserting.
+            async with conn.transaction():
+                existing_lead = await conn.fetchrow(
+                    f"""
+                    SELECT *
+                    FROM {DB_SCHEMA}.crm_leads
+                    WHERE trim(mobile) = trim($1)
+                      AND entity_type = $2
+                      AND is_active = TRUE
+                    ORDER BY id DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    mobile,
+                    entity_norm,
+                )
+                if existing_lead is not None:
+                    lead_dict = dict(existing_lead)
+                    await _invalidate_crm_cache(existing_lead["id"])
+                    return {
+                        "message": "CRM lead already exists.",
+                        "lead_id": existing_lead["id"],
+                        "lead": lead_dict,
+                        "duplicate": True,
+                    }
                 row = await conn.fetchrow(
                     f"""
                     INSERT INTO {DB_SCHEMA}.crm_leads (
@@ -2982,17 +3024,17 @@ async def create_crm_lead_marketing(request: Request, payload: CRMLeadMarketingC
                     lead_source_u,
                     ay_val,
                 )
-            except asyncpg.UndefinedColumnError as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail=(
-                        "Database is missing CRM lead columns "
-                        "(expected full_name / email / preferred_language columns on crm_leads where applicable). "
-                        f"PostgreSQL hint: {getattr(exc, 'column_name', exc)}."
-                    ),
-                )
     except HTTPException:
         raise
+    except asyncpg.UndefinedColumnError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database is missing CRM lead columns "
+                "(expected full_name / email / preferred_language columns on crm_leads where applicable). "
+                f"PostgreSQL hint: {getattr(exc, 'column_name', exc)}."
+            ),
+        )
     except asyncpg.PostgresError:
         logger.exception("Database error creating marketing CRM lead")
         raise HTTPException(status_code=500, detail="Database error.")

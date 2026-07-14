@@ -697,7 +697,7 @@ const PipelineStages = ({ entityType = 'GST_REGISTRATION', stage = null, initial
                         <td>{act.id}</td>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {act.activity_type === 'CALL' ? <PhoneCall size={14} color="var(--text-primary)" /> : <Activity size={14} color="#3b82f6" />}
+                            {act.activity_type === 'CALL' ? <PhoneCall size={14} color="var(--text-primary)" /> : <Activity size={14} color="var(--info)" />}
                             <span style={{ fontWeight: 500 }}>{act.activity_type?.replace(/_/g, ' ')}</span>
                           </div>
                         </td>
