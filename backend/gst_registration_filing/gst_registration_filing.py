@@ -283,6 +283,12 @@ async def _invalidate_gst_filing_cache(gst_registration_id: Optional[int] = None
     await redis_invalidate_tag(_gst_filing_table_return_details_tag())
     if gst_registration_id is not None:
         await redis_invalidate_tag(_gst_filing_prefill_tag(gst_registration_id))
+    # gst_filings.status can transition into/out of FILED ("service done"), which
+    # changes the service-done-payment-pending dashboard.
+    from backend.Dashboard.service_done_payment_pending import (
+        invalidate_service_done_payment_pending_cache,
+    )
+    await invalidate_service_done_payment_pending_cache()
 
 
 def _lead_days_for_periodic_frequency(filing_frequency: str) -> int:

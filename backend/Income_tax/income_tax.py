@@ -47,6 +47,12 @@ async def _invalidate_income_tax_cache(income_tax_id: Optional[int] = None) -> N
     await redis_invalidate_tag(_income_tax_filter_tag())
     if income_tax_id is not None:
         await redis_invalidate_tag(_income_tax_detail_tag(income_tax_id))
+    # filed_status can transition into/out of FILED ("service done"), which
+    # changes the service-done-payment-pending dashboard.
+    from backend.Dashboard.service_done_payment_pending import (
+        invalidate_service_done_payment_pending_cache,
+    )
+    await invalidate_service_done_payment_pending_cache()
 
 
 def _income_tax_returning_sql() -> str:
@@ -853,7 +859,8 @@ async def filter_income_tax(
     if language:
         add_eq("i.language", language.strip().upper())
     if state:
-        idx = append_fuzzy_name_filter(conditions, values, idx, "i.state", state)
+        # Dropdown enum — exact match (fuzzy over-matched the "PRADESH" family).
+        add_eq("upper(trim(i.state))", state.strip().upper())
     src_filters = [s.strip().upper() for s in normalize_query_str_list(source_of_income)]
     if src_filters:
         conditions.append(

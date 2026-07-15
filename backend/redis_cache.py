@@ -4,10 +4,12 @@ import os
 import asyncio
 import random
 import hashlib
+import secrets
 import time
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
 import redis.asyncio as redis
+from fastapi.encoders import jsonable_encoder
 
 from backend.utils import REDIS_HOST, REDIS_PASSWORD, REDIS_PORT
 
@@ -22,6 +24,12 @@ _LOADER_WAIT_ATTEMPTS = int(os.getenv("REDIS_LOADER_WAIT_ATTEMPTS", "40"))
 _LOADER_WAIT_INTERVAL_SEC = float(os.getenv("REDIS_LOADER_WAIT_INTERVAL_SEC", "0.05"))
 _REDIS_CONNECT_TIMEOUT_SEC = float(os.getenv("REDIS_CONNECT_TIMEOUT_SEC", "2"))
 _REDIS_COOLDOWN_SEC = int(os.getenv("REDIS_COOLDOWN_SEC", "15"))
+# Bound the pool so a request burst can't exceed the Azure Cache connection
+# limit for the tier (Basic C0 allows 256). Health-check + keepalive keep pooled
+# connections from going stale — Azure closes idle connections after ~10 min, and
+# without a health check the first request afterwards fails and trips the cooldown.
+_REDIS_MAX_CONNECTIONS = int(os.getenv("REDIS_MAX_CONNECTIONS", "50"))
+_REDIS_HEALTH_CHECK_INTERVAL_SEC = int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL_SEC", "30"))
 _redis_skip_until_ts = 0.0
 
 
@@ -57,6 +65,8 @@ def get_redis_client() -> redis.Redis:
             port=REDIS_PORT,
             ssl=True,
             connect_timeout_sec=_REDIS_CONNECT_TIMEOUT_SEC,
+            max_connections=_REDIS_MAX_CONNECTIONS,
+            health_check_interval_sec=_REDIS_HEALTH_CHECK_INTERVAL_SEC,
         )
         _redis_client = redis.Redis(
             host=REDIS_HOST,
@@ -66,7 +76,15 @@ def get_redis_client() -> redis.Redis:
             decode_responses=True,
             socket_connect_timeout=_REDIS_CONNECT_TIMEOUT_SEC,
             socket_timeout=_REDIS_CONNECT_TIMEOUT_SEC,
-            retry_on_timeout=False,
+            # No command retries by design: fail fast and let callers fall back to
+            # the DB (fail-open). Omitting retry_on_timeout leaves .retry=None (the
+            # redis 8.x default); passing it only raised a deprecation warning.
+            # Detect dead/idle-dropped connections before issuing a command so a
+            # stale pooled socket transparently reconnects instead of failing the
+            # request and tripping the unhealthy cooldown.
+            socket_keepalive=True,
+            health_check_interval=_REDIS_HEALTH_CHECK_INTERVAL_SEC,
+            max_connections=_REDIS_MAX_CONNECTIONS,
         )
     return _redis_client
 
@@ -117,12 +135,24 @@ async def set_json(cache_key: str, value: Any, ttl_seconds: int = 300) -> None:
             redis_cooldown=_redis_temporarily_disabled(),
         )
         return
+    # Encode with the SAME encoder FastAPI applies to endpoint return values, so a
+    # cache HIT (deserialized JSON) has the identical shape to a cache MISS (the
+    # loader's raw object re-encoded by FastAPI). Without this, datetime cached via
+    # str() came back "2026-07-15 10:30:00" on a hit vs ISO "2026-07-15T10:30:00"
+    # on a miss, and Decimal came back as a JSON string on a hit vs a number on a
+    # miss. Serialize OUTSIDE the Redis try so a serialization failure skips the
+    # write without tripping the unhealthy cooldown.
     try:
-        await get_redis_client().setex(
+        payload = json.dumps(jsonable_encoder(value), default=_json_default_serializer)
+    except Exception:
+        logger.warning(
+            "Cache value serialization failed for key=%s; skipping cache write",
             cache_key,
-            ttl_seconds,
-            json.dumps(value, default=_json_default_serializer),
+            exc_info=True,
         )
+        return
+    try:
+        await get_redis_client().setex(cache_key, ttl_seconds, payload)
         _log_cache_step("set_json_success", key=cache_key, ttl_seconds=ttl_seconds)
     except Exception:
         _mark_redis_unhealthy()
@@ -146,8 +176,25 @@ async def delete_key(cache_key: str) -> None:
         logger.warning("Redis delete failed for key=%s", cache_key, exc_info=True)
 
 
+# Atomic INCR + EXPIRE. A plain "incr, then if value==1 expire" leaves a window:
+# if the EXPIRE is lost (a blip between the two calls), the counter survives with
+# NO TTL and never resets — every later request sees count > limit, permanently
+# locking out that identifier (rate-limit bucket / OTP-attempt key). Running both
+# in one Lua script closes that window, and the TTL-repair branch heals any key
+# that was already stranded without an expiry.
+_INCR_WITH_TTL_LUA = (
+    "local v = redis.call('INCR', KEYS[1]) "
+    "if v == 1 then "
+    "  redis.call('EXPIRE', KEYS[1], ARGV[1]) "
+    "elseif redis.call('TTL', KEYS[1]) < 0 then "
+    "  redis.call('EXPIRE', KEYS[1], ARGV[1]) "
+    "end "
+    "return v"
+)
+
+
 async def incr_with_ttl(key: str, ttl_seconds: int) -> Optional[int]:
-    """Atomically increment a counter, setting its TTL on first creation.
+    """Atomically increment a counter, guaranteeing it always carries a TTL.
 
     Returns the new value, or None when Redis is unavailable so callers can
     fail open (never lock out a legitimate user during a Redis outage).
@@ -155,10 +202,7 @@ async def incr_with_ttl(key: str, ttl_seconds: int) -> Optional[int]:
     if not is_redis_configured() or _redis_temporarily_disabled():
         return None
     try:
-        client = get_redis_client()
-        value = await client.incr(key)
-        if value == 1:
-            await client.expire(key, ttl_seconds)
+        value = await get_redis_client().eval(_INCR_WITH_TTL_LUA, 1, key, ttl_seconds)
         return int(value)
     except Exception:
         _mark_redis_unhealthy()
@@ -394,8 +438,12 @@ async def get_or_set_json(
     try:
         client = get_redis_client()
         lock_key = _loader_lock_redis_key(cache_key)
+        # Unique per-owner token so the lock is released with compare-and-delete:
+        # a loader that overruns the lock TTL must not delete a lock another worker
+        # has since acquired.
+        lock_token = secrets.token_hex(16)
         _log_cache_step("get_or_set_lock_attempt", key=cache_key, lock_key=lock_key)
-        acquired = await client.set(lock_key, "1", nx=True, ex=_LOADER_LOCK_TTL_SEC)
+        acquired = await client.set(lock_key, lock_token, nx=True, ex=_LOADER_LOCK_TTL_SEC)
         _log_cache_step("get_or_set_lock_result", key=cache_key, acquired=bool(acquired))
     except Exception:
         _mark_redis_unhealthy()
@@ -428,11 +476,10 @@ async def get_or_set_json(
             _log_cache_step("get_or_set_store_complete", key=cache_key, ttl_seconds=ttl_with_jitter)
             return value
         finally:
-            try:
-                await client.delete(lock_key)
-                _log_cache_step("get_or_set_lock_released", key=cache_key, lock_key=lock_key)
-            except Exception:
-                logger.warning("Redis loader lock release failed for key=%s", cache_key, exc_info=True)
+            # Compare-and-delete (only release the lock if we still own it) so a
+            # slow loader can't clobber a lock another worker already re-acquired.
+            await release_lock(lock_key, lock_token)
+            _log_cache_step("get_or_set_lock_released", key=cache_key, lock_key=lock_key)
     else:
         _log_cache_step("get_or_set_wait_loop_start", key=cache_key, attempts=_LOADER_WAIT_ATTEMPTS)
         try:

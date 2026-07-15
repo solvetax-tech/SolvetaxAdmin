@@ -726,13 +726,10 @@ async def list_registration_persons(
             )
 
         if designation_norm:
-            param_index = append_fuzzy_name_filter(
-                conditions,
-                values,
-                param_index,
-                "p.designation",
-                designation_norm,
-            )
+            # Fixed dropdown enum — exact match, not fuzzy substring/word match.
+            conditions.append(f"upper(trim(p.designation)) = upper(trim(${param_index}))")
+            values.append(designation_norm)
+            param_index += 1
 
         # --------------------------------------------------
         # Active Filtering Pattern

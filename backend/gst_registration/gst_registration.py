@@ -63,6 +63,12 @@ async def _invalidate_gst_registration_cache(
     await redis_invalidate_tag(_gst_filter_tag())
     if registration_id is not None:
         await redis_invalidate_tag(_gst_detail_tag(registration_id))
+    # registration_status can transition into/out of APPROVED ("service done"),
+    # which changes the service-done-payment-pending dashboard.
+    from backend.Dashboard.service_done_payment_pending import (
+        invalidate_service_done_payment_pending_cache,
+    )
+    await invalidate_service_done_payment_pending_cache()
 
 
 async def _customer_exists_and_active(conn: asyncpg.Connection, customer_id: int) -> bool:
@@ -895,6 +901,7 @@ async def list_gst_registrations(
     business_type: Optional[str] = None,
     registration_status: Optional[str] = None,
     ownership_category: Optional[str] = None,
+    registration_type: Optional[str] = None,
     state: Optional[str] = None,
     language: Optional[str] = None,
     client_name: Optional[str] = None,
@@ -961,6 +968,7 @@ async def list_gst_registrations(
     business_type_norm = business_type.strip().upper() if business_type and business_type.strip() else None
     registration_status_norm = registration_status.strip().upper() if registration_status and registration_status.strip() else None
     ownership_category_norm = ownership_category.strip().upper() if ownership_category and ownership_category.strip() else None
+    registration_type_norm = registration_type.strip().upper() if registration_type and registration_type.strip() else None
     state_norm = state.strip().upper() if state and state.strip() else None
     language_norm = language.strip().upper() if language and language.strip() else None
     client_name_clean = client_name.strip() if client_name and client_name.strip() else None
@@ -987,6 +995,7 @@ async def list_gst_registrations(
         business_type=business_type_norm,
         registration_status=registration_status_norm,
         ownership_category=ownership_category_norm,
+        registration_type=registration_type_norm,
         state=state_norm,
         language=language_norm,
         client_name=client_name_clean,
@@ -1103,14 +1112,18 @@ async def list_gst_registrations(
             values.append(ownership_category_norm)
             param_index += 1
 
+        if registration_type_norm:
+            # Was silently dropped (no param) — the frontend's Registration Type
+            # filter returned every row. Now an exact enum match.
+            conditions.append(f"upper(trim(g.registration_type)) = ${param_index}")
+            values.append(registration_type_norm)
+            param_index += 1
+
         if state_norm:
-            param_index = append_fuzzy_name_filter(
-                conditions,
-                values,
-                param_index,
-                "g.state",
-                state_norm,
-            )
+            # Dropdown enum — exact match (fuzzy over-matched the "PRADESH" family).
+            conditions.append(f"upper(trim(g.state)) = ${param_index}")
+            values.append(state_norm)
+            param_index += 1
 
         if language_norm:
             conditions.append(f"g.{_gst_reg_sql_col('language')} = ${param_index}")

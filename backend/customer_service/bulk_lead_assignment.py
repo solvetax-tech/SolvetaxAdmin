@@ -78,6 +78,12 @@ async def _invalidate_customer_services_index_caches() -> None:
         "customer_service_followups:alerts:index",
     ):
         await redis_invalidate_tag(tag)
+    # A customer_services write can flip service_status into/out of a "done" state,
+    # which changes what qualifies for the service-done-payment-pending dashboard.
+    from backend.Dashboard.service_done_payment_pending import (
+        invalidate_service_done_payment_pending_cache,
+    )
+    await invalidate_service_done_payment_pending_cache()
 
 
 async def svc_bulk_assign_candidates(

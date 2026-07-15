@@ -1376,7 +1376,7 @@ async def filter_customer_services_extended(
                 ON op.emp_id = cs.op_id
 
             {where_clause}
-            ORDER BY cs.created_at DESC
+            ORDER BY cs.created_at DESC, cs.id DESC
             {pagination_sql}
         """
 

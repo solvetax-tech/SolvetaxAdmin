@@ -21,6 +21,7 @@ import {
 import {
     fetchActiveRmUsernames,
     fetchActiveOpUsernames,
+    fetchActiveRmEmployees,
     buildRmOpSelectOptions,
     withAssignmentFormFields,
 } from '../../utils/activeEmployees';
@@ -105,7 +106,8 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
         turnoverDetailsList: [],
         registrationStatuses: [],
         activeRMs: [],
-        activeOps: []
+        activeOps: [],
+        activeRmEmployees: []
     });
 
     const [filterInputs, setFilterInputs] = useState({
@@ -223,12 +225,14 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 } catch (err) { /* Silently fail config fetch */ }
             }));
             try {
-                const [activeRMs, activeOps] = await Promise.all([
+                const [activeRMs, activeOps, activeRmEmployees] = await Promise.all([
                     fetchActiveRmUsernames(),
                     fetchActiveOpUsernames(),
+                    fetchActiveRmEmployees(),
                 ]);
                 newConfigs.activeRMs = activeRMs;
                 newConfigs.activeOps = activeOps;
+                newConfigs.activeRmEmployees = activeRmEmployees;
             } catch (err) { /* Silently fail */ }
             setConfigs(newConfigs);
         };
@@ -428,7 +432,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                             name="rm_id"
                             value={filterInputs.rm_id}
                             onChange={handleFilterChange}
-                            options={optionsFromPairs(buildRmOpSelectOptions(configs.activeRMs), 'Any RM')}
+                            options={optionsFromPairs(buildRmOpSelectOptions(configs.activeRmEmployees), 'Any RM')}
                             placeholder="Any RM"
                             ariaLabel="Assignee RM"
                         />

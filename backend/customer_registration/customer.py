@@ -1598,9 +1598,14 @@ async def filter_customers(
             if business_name:
                 idx = append_fuzzy_name_filter(conditions, values, idx, "business_name", business_name)
             if email:
-                idx = append_ilike_contains(conditions, values, idx, "lower(email)", email)
-            if state:
-                idx = append_fuzzy_name_filter(conditions, values, idx, "state", state)
+                idx = append_ilike_contains(conditions, values, idx, "lower(c.email)", email)
+            if state and state.strip():
+                # State comes from a fixed dropdown (same config the value is
+                # stored from) — exact match. Fuzzy over-matched: "ANDHRA PRADESH"
+                # also pulled Uttar/Madhya Pradesh via the shared "PRADESH" word.
+                conditions.append(f"upper(trim(c.state)) = upper(trim(${idx}))")
+                values.append(state.strip())
+                idx += 1
             if city:
                 idx = append_fuzzy_name_filter(conditions, values, idx, "city", city)
 
@@ -1650,12 +1655,12 @@ async def filter_customers(
         # DATE FILTER
         # --------------------------------------------------
             if from_date:
-                conditions.append(f"created_at::date >= ${idx}")
+                conditions.append(f"c.created_at::date >= ${idx}")
                 values.append(from_date)
                 idx += 1
 
             if to_date:
-                conditions.append(f"created_at::date <= ${idx}")
+                conditions.append(f"c.created_at::date <= ${idx}")
                 values.append(to_date)
                 idx += 1
 
@@ -1749,7 +1754,7 @@ async def filter_customers(
                 LEFT JOIN {DB_SCHEMA}.employees e_op
                        ON c.op_id = e_op.emp_id
                 {where_clause_c}
-                ORDER BY c.created_at DESC
+                ORDER BY c.created_at DESC, c.customer_id DESC
                 {pagination_sql}
             """
 

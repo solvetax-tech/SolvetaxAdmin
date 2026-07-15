@@ -568,6 +568,13 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
 
             if (selectedDates && selectedDates.length > 0) {
                 params.dates = selectedDates.join(',');
+                // "Overdue" is a derived state, not a stored status. Translate it to
+                // PENDING/MISSED so the backend (which only accepts
+                // PENDING/COMPLETED/MISSED) doesn't 400 when a date is also selected.
+                if (params.status === 'OVERDUE' || filters.is_overdue) {
+                    params.statuses = ['PENDING', 'MISSED'];
+                    delete params.status;
+                }
                 delete params.today_only;
                 delete params.is_overdue;
                 delete params.followup_from;
@@ -616,6 +623,10 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
             let fetchedData = [];
             if (activeFollowupCategory === 'services') {
                 const listParams = Object.fromEntries(queryParams.entries());
+                // Object.fromEntries collapses duplicate keys to the last value, which drops
+                // 'PENDING' from a multi-value statuses filter (e.g. ['PENDING','MISSED']).
+                const statusesArr = queryParams.getAll('statuses');
+                if (statusesArr.length > 1) listParams.statuses = statusesArr;
                 Object.keys(listParams).forEach((key) => {
                     if (listParams[key] === 'true') listParams[key] = true;
                     if (listParams[key] === 'false') listParams[key] = false;
@@ -665,6 +676,10 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 }
             } else {
                 const listParams = Object.fromEntries(queryParams.entries());
+                // Object.fromEntries collapses duplicate keys to the last value, which drops
+                // 'PENDING' from a multi-value statuses filter (e.g. ['PENDING','MISSED']).
+                const statusesArr = queryParams.getAll('statuses');
+                if (statusesArr.length > 1) listParams.statuses = statusesArr;
                 Object.keys(listParams).forEach((key) => {
                     if (listParams[key] === 'true') listParams[key] = true;
                     if (listParams[key] === 'false') listParams[key] = false;
@@ -978,7 +993,10 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
     }, []);
 
     const renderFilterDrawer = () => {
-        const statuses = ['PENDING', 'OVERDUE', 'COMPLETED', 'CANCELLED'];
+        // CANCELLED has no backend equivalent (domain is PENDING/COMPLETED/MISSED),
+        // so it could never return results — omitted. OVERDUE is a derived state
+        // translated to PENDING+MISSED in fetchFollowups.
+        const statuses = ['PENDING', 'OVERDUE', 'COMPLETED'];
         const serviceEntityTypes = Object.keys(SERVICE_TYPE_MAP);
         const isPaymentsTab = activeFollowupCategory === 'payments';
 

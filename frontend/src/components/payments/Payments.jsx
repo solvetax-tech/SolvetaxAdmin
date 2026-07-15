@@ -367,8 +367,7 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                                 { value: '', label: 'All Status' },
                                                 { value: 'PAID', label: 'Paid' },
                                                 { value: 'PENDING', label: 'Pending' },
-                                                { value: 'PARTIAL_PAID', label: 'Partial' },
-                                                { value: 'FAILED', label: 'Failed' },
+                                                { value: 'CANCELLED', label: 'Cancelled' },
                                             ])}
                                             placeholder="All Status"
                                             ariaLabel="Payment status"

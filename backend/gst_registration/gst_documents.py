@@ -375,13 +375,10 @@ async def list_registration_documents(
         # --------------------------------------------------
 
         if document_type_norm:
-            param_index = append_fuzzy_name_filter(
-                conditions,
-                values,
-                param_index,
-                "d.document_type",
-                document_type_norm,
-            )
+            # Fixed dropdown enum — exact match, not fuzzy substring/word match.
+            conditions.append(f"upper(trim(d.document_type)) = upper(trim(${param_index}))")
+            values.append(document_type_norm)
+            param_index += 1
 
         # --------------------------------------------------
         # Active Filtering Pattern

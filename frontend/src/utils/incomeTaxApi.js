@@ -105,9 +105,13 @@ export const setIncomeTaxActive = async (incomeTaxId, isActive) => {
     return editIncomeTax(incomeTaxId, { is_active: !!isActive });
 };
 
-/** List ITR payments (backend: GET /api/v1/income-tax-payments/filter). */
+/** List ITR payments via the unified payments ledger endpoint scoped to INCOME_TAX.
+ * (There is no dedicated /income-tax-payments/filter route — that 404'd and fell
+ * back to this same call, wasting a request per load.) */
 export const fetchIncomeTaxPaymentsFilter = async (params = {}) => {
-    return api.get('/api/v1/income-tax-payments/filter', { params });
+    return api.get('/api/v1/payments/dynamic_filter', {
+        params: { ...params, entity_type: 'INCOME_TAX' },
+    });
 };
 
 /** CRM entity type for income tax ↔ CRM links from this module. */

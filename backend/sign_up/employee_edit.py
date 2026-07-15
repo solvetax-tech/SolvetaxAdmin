@@ -337,6 +337,7 @@ async def edit_employee(
 async def filter_employees(
     emp_id: Optional[int] = None,
     full_name: Optional[str] = None,
+    username: Optional[str] = None,
     email: Optional[str] = None,
     phone_number: Optional[str] = None,
 
@@ -381,6 +382,7 @@ async def filter_employees(
         "employees:filter",
         emp_id=emp_id,
         full_name=full_name.strip() if full_name else None,
+        username=username.strip() if username else None,
         email=email.strip() if email else None,
         phone_number=phone_number.strip() if phone_number else None,
         role=role_cleaned,
@@ -427,6 +429,11 @@ async def filter_employees(
                     param_index,
                     "(first_name || ' ' || last_name)",
                     full_name.strip(),
+                )
+
+            if username and username.strip():
+                param_index = append_ilike_contains(
+                    conditions, values, param_index, "username", username.strip()
                 )
 
             if email and email.strip():

@@ -122,7 +122,7 @@ Client uses **`ssl=True`**, **`decode_responses=True`**.
 | `delete_by_pattern` | `SCAN` + `DELETE` (utility; prefer tags). |
 | `get_or_set_json` | Read-through cache: `GET` → miss → **`SET` loader lock `NX`** → one **owner** runs `loader`, `set_json_with_tags`; **waiters** poll `GET`; rare timeout → fallback `loader`. TTL **jitter** ~90–110% of base (min 30s). |
 
-Loader lock keys: `cache:loader:` + SHA256 of `cache_key`; TTL **25s**; waiters poll up to **~10s** (`200 × 0.05s`).
+Loader lock keys: `cache:loader:` + SHA256 of `cache_key`; TTL **25s**; the lock value is a per-owner random token released via compare-and-delete (a slow loader can't delete another worker's lock). Waiters poll up to **~2s** (`REDIS_LOADER_WAIT_ATTEMPTS=40 × REDIS_LOADER_WAIT_INTERVAL_SEC=0.05s`), then fall back to running the loader themselves.
 
 ---
 
