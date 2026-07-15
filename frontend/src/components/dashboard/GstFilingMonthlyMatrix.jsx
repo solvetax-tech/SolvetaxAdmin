@@ -536,11 +536,23 @@ function FollowupEditorPopover({
         const handleEscape = (event) => {
             if (event.key === 'Escape') onClose();
         };
+        // The popover is position:fixed at coordinates captured when it opened, so
+        // it doesn't track its anchor once the matrix scrolls. Close it on any
+        // scroll or resize (capture phase so scrolling a nested table container is
+        // caught too), but ignore scrolls inside the popover's own options list.
+        const handleDismissOnScroll = (event) => {
+            if (event.type === 'scroll' && popoverRef.current && popoverRef.current.contains(event.target)) return;
+            onClose();
+        };
         document.addEventListener('mousedown', handlePointerDown);
         document.addEventListener('keydown', handleEscape);
+        window.addEventListener('scroll', handleDismissOnScroll, true);
+        window.addEventListener('resize', handleDismissOnScroll);
         return () => {
             document.removeEventListener('mousedown', handlePointerDown);
             document.removeEventListener('keydown', handleEscape);
+            window.removeEventListener('scroll', handleDismissOnScroll, true);
+            window.removeEventListener('resize', handleDismissOnScroll);
         };
     }, [onClose]);
 
@@ -634,11 +646,23 @@ function StatusEditorPopover({
         const handleEscape = (event) => {
             if (event.key === 'Escape') onClose();
         };
+        // The popover is position:fixed at coordinates captured when it opened, so
+        // it doesn't track its anchor once the matrix scrolls. Close it on any
+        // scroll or resize (capture phase so scrolling a nested table container is
+        // caught too), but ignore scrolls inside the popover's own options list.
+        const handleDismissOnScroll = (event) => {
+            if (event.type === 'scroll' && popoverRef.current && popoverRef.current.contains(event.target)) return;
+            onClose();
+        };
         document.addEventListener('mousedown', handlePointerDown);
         document.addEventListener('keydown', handleEscape);
+        window.addEventListener('scroll', handleDismissOnScroll, true);
+        window.addEventListener('resize', handleDismissOnScroll);
         return () => {
             document.removeEventListener('mousedown', handlePointerDown);
             document.removeEventListener('keydown', handleEscape);
+            window.removeEventListener('scroll', handleDismissOnScroll, true);
+            window.removeEventListener('resize', handleDismissOnScroll);
         };
     }, [onClose]);
 

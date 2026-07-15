@@ -29,6 +29,7 @@ import Pagination from '../common/Pagination';
 import '../common/Filters.css';
 import FilterDateInput from '../common/FilterDateInput';
 import { Filter, X, RotateCcw, Plus, AlertCircle, CheckCircle2, Users, FileText, LayoutDashboard, Eye, Pencil, CalendarClock, CreditCard } from 'lucide-react';
+import Button from '../ui/Button';
 import {
     buildGstCrmLeadActionSearchParams,
     getCrmLeadByGstRegistrationId,
@@ -621,10 +622,9 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                             </button>
                         )}
                         {canManageRmOpRecords(profileData, isAdmin) && (
-                            <button type="button" className="btn-primary-action" onClick={() => setShowCreateModal(true)}>
-                                <Plus size={13} />
-                                <span>Create GST</span>
-                            </button>
+                            <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setShowCreateModal(true)}>
+                                Create GST
+                            </Button>
                         )}
                     </>
                     )}

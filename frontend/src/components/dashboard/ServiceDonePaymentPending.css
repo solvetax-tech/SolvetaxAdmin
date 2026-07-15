@@ -25,7 +25,7 @@
 }
 
 .sdpp-page .progress-tracker-container-v4::-webkit-scrollbar {
-    width: 0;
+    width: 6px;
     height: 6px;
 }
 

@@ -32,7 +32,8 @@
 .modal-overlay.app-side-drawer-mode > .modal-content-glass.employee-details-modal {
     width: var(--app-side-drawer-width) !important;
     max-width: calc(100vw - 24px) !important;
-    max-height: 100vh !important;
+    /* Zoom-compensated: raw 100vh is scaled to ~75% by html { zoom: 0.75 }. */
+    max-height: calc(100vh / var(--app-zoom)) !important;
     border-radius: 0 !important;
 }
 

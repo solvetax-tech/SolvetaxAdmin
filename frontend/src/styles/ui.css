@@ -105,7 +105,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-faint);
+  color: var(--text-primary);
   padding: 12px 16px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
@@ -117,10 +117,13 @@
 .ui-table tbody td {
   padding: 13px 16px;
   font-size: 13px;
-  color: var(--text-secondary);
+  /* Full-contrast table text — pure white on dark, pure black on light.
+     Use .ui-cell-meta on a cell to intentionally de-emphasise metadata. */
+  color: var(--text-primary);
   border-bottom: 1px solid var(--border-subtle);
   vertical-align: middle;
 }
+.ui-table tbody td.ui-cell-meta { color: var(--text-muted); }
 .ui-table tbody tr { transition: background var(--transition); }
 .ui-table tbody tr:hover td { background: var(--bg-hover); }
 .ui-table tbody tr:last-child td { border-bottom: none; }
@@ -202,7 +205,7 @@
 .audit-ledger-scroll-root,
 .sdpp-page,
 .stats-cards-scroll {
-  scrollbar-width: auto !important;               /* Firefox: normal, not thin */
+  scrollbar-width: thin !important;               /* Firefox: thin, consistent across tables */
   scrollbar-color: rgba(var(--fg-rgb), 0.32) transparent !important;
   scrollbar-gutter: stable;
 }
@@ -230,8 +233,8 @@
 .audit-ledger-scroll-root::-webkit-scrollbar,
 .sdpp-page::-webkit-scrollbar,
 .stats-cards-scroll::-webkit-scrollbar {
-  width: 12px !important;
-  height: 12px !important;                          /* grabbable horizontal bar */
+  width: 6px !important;
+  height: 6px !important;                            /* thin bar, consistent on both axes */
 }
 
 .payments-ledger-container::-webkit-scrollbar-track,
@@ -257,7 +260,7 @@
 .audit-ledger-scroll-root::-webkit-scrollbar-track,
 .sdpp-page::-webkit-scrollbar-track,
 .stats-cards-scroll::-webkit-scrollbar-track {
-  background: rgba(var(--fg-rgb), 0.05) !important;
+  background: transparent !important;
   border-radius: 10px !important;
 }
 
@@ -284,10 +287,8 @@
 .audit-ledger-scroll-root::-webkit-scrollbar-thumb,
 .sdpp-page::-webkit-scrollbar-thumb,
 .stats-cards-scroll::-webkit-scrollbar-thumb {
-  background: rgba(var(--fg-rgb), 0.28) !important;
+  background: rgba(var(--fg-rgb), 0.1) !important;
   border-radius: 10px !important;
-  border: 3px solid transparent !important;
-  background-clip: padding-box !important;
 }
 
 .payments-ledger-container::-webkit-scrollbar-thumb:hover,
@@ -313,9 +314,20 @@
 .audit-ledger-scroll-root::-webkit-scrollbar-thumb:hover,
 .sdpp-page::-webkit-scrollbar-thumb:hover,
 .stats-cards-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(var(--accent-rgb), 0.7) !important;
-  background-clip: padding-box !important;
+  background: rgba(var(--accent-rgb), 0.3) !important;
 }
+
+/* Income Tax ledger — same thin unified scrollbar as every other table (its
+   scroll element .itr-ledger-body isn't in the lists above). */
+.itr-ledger-body {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(var(--fg-rgb), 0.32) transparent !important;
+  scrollbar-gutter: stable;
+}
+.itr-ledger-body::-webkit-scrollbar { width: 6px !important; height: 6px !important; }
+.itr-ledger-body::-webkit-scrollbar-track { background: transparent !important; }
+.itr-ledger-body::-webkit-scrollbar-thumb { background: rgba(var(--fg-rgb), 0.1) !important; border-radius: 10px !important; }
+.itr-ledger-body::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.3) !important; }
 
 /* ============================================================
    COMPACT ROW ACTION BUTTONS
@@ -403,4 +415,54 @@
 .activation-confirm-overlay,
 .change-password-overlay {
   z-index: 13000 !important;
+}
+
+/* ============================================================
+   FULL-CONTRAST TABLE COLUMN HEADERS
+   User direction: column names must read at FULL contrast — pure
+   white on dark, pure black on light — not the dim --text-faint
+   caps that every table system defaulted to. Each table feature
+   defines its own header rule (a couple are themselves !important),
+   so this authoritative layer uses doubled-class specificity +
+   !important to win regardless of CSS load order. Headers keep
+   their uppercase caps styling; only the ink goes to full strength.
+   ============================================================ */
+.filings-ledger-header-cell.filings-ledger-header-cell,
+.ledger-header-cell.ledger-header-cell,
+.audit-ledger-header-cell.audit-ledger-header-cell,
+.payments-ledger-header.payments-ledger-header .payments-ledger-cell,
+.itr-ledger-header.itr-ledger-header .itr-ledger-cell,
+.gfm-table-head.gfm-table-head,
+.gfm-table-head.gfm-table-head .gfm-table-cell,
+.gst-registrations-table.gst-registrations-table thead th,
+.followups-table.followups-table thead th,
+.cs-services-table.cs-services-table thead th,
+.crm-leads-table.crm-leads-table thead th {
+  color: var(--text-primary) !important;
+}
+
+/* ============================================================
+   OPAQUE STICKY COLUMNS ON HOVER
+   Sticky action / ID columns must fully hide the columns scrolling
+   behind them. Their per-feature :hover rules tint with --bg-hover
+   (which is transparent), so cells behind bled through on a hovered
+   row (e.g. "MONTHLY" from Filing Pref showing under the Actions
+   column). Force an OPAQUE accent-tinted background. The row class is
+   tripled so this out-specifies the per-feature :hover rules whatever
+   the CSS load order; sticky cells keep their normal opaque bg at rest.
+   ============================================================ */
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .gst-sticky-actions,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .customer-actions-sticky,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .cs-actions-sticky,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .employee-actions-sticky,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .filings-ledger-sticky-id,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .sticky-id-column,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover > :nth-child(1),
+.payments-ledger-row.payments-ledger-row.payments-ledger-row:hover .pay-ledger-actions-sticky,
+.payments-ledger-row.payments-ledger-row.payments-ledger-row:hover .pay-ledger-sticky-id,
+.itr-ledger-row.itr-ledger-row.itr-ledger-row:hover .itr-ledger-sticky-actions,
+.itr-ledger-row.itr-ledger-row.itr-ledger-row:hover .itr-ledger-sticky-id,
+.ledger-row.ledger-row.ledger-row:hover .gst-sticky-actions,
+.ledger-row.ledger-row.ledger-row:hover .ledger-sticky-id {
+  background-color: color-mix(in srgb, var(--accent) 8%, var(--bg-app)) !important;
 }

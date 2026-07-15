@@ -18,6 +18,7 @@ import './gst_registration.css';
 import './GSTRegistrationSignup.css';
 import './gst_people.css';
 import { Filter, X, RotateCcw, Plus, AlertCircle, CheckCircle2, Upload, Eye, Pencil, User, FileText } from 'lucide-react';
+import Button from '../ui/Button';
 import UploadDocuments from './UploadDocuments';
 import GSTPeopleViewPanel from './GSTPeopleViewPanel';
 import {
@@ -364,10 +365,9 @@ export const GSTPeople = ({ handleLogout, isAdmin, profileData, onRenderToolbar 
                 </button>
             )}
             {canEdit && (
-                <button type="button" className="btn-primary-action" onClick={() => setShowCreateModal(true)}>
-                    <Plus size={13} />
-                    <span>Create Person</span>
-                </button>
+                <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setShowCreateModal(true)}>
+                    Create Person
+                </Button>
             )}
         </>
     );

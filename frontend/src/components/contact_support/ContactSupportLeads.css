@@ -386,3 +386,17 @@
     color: var(--text-faint);
     font-size: 12px;
 }
+
+/* Internal-scroll layout (matches GST Portal): the table fills its area and its
+   horizontal scrollbar sits at the bottom of the table. Every element in the DOM
+   chain from the page root down to the scroll container must be a bounded flex
+   column so the page does not grow. Scoped under .cs-leads-page so these override
+   the single-class Dashboard.css defaults without affecting other pages. */
+/* Contact/Referral PAGE-SCROLLS vertically (vertical scrollbar on the outer page
+   area, outside the table card, like GST Portal); the table container only
+   scrolls horizontally. */
+.cs-leads-page .progress-tracker-container-v4 {
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+}

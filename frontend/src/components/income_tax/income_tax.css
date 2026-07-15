@@ -20,6 +20,8 @@
     gap: 10px;
     margin-bottom: 8px;
     width: 100%;
+    /* Toolbar above the table keeps its natural height */
+    flex: 0 0 auto;
 }
 
 .itr-income-tax-top-row .dashboard-sub-nav-v4 {
@@ -64,9 +66,17 @@
     margin-bottom: 10px;
     padding-top: 0;
     padding-bottom: 2px;
+    /* Active-filter chips row above the table keeps its natural height */
+    flex: 0 0 auto;
 }
 
-/* Table block sits closer to toolbar */
+/* Error banner above the table keeps its natural height */
+.gst-main-content.itr-income-tax-page .error-banner {
+    flex: 0 0 auto;
+}
+
+/* Table block sits closer to toolbar; fills remaining height so the ledger scrolls internally.
+   (Base .gst-table-wrapper already sets display:flex; flex-direction:column.) */
 .gst-main-content.itr-income-tax-page .gst-table-wrapper {
     gap: 12px;
 }
@@ -83,11 +93,10 @@
     --itr-col-9: 108px;  /* Record year */
     --itr-col-10: 140px; /* RM */
     --itr-col-11: 140px; /* OP */
-    --itr-col-12: 176px; /* Actions */
+    --itr-col-12: 88px; /* Actions (compact) */
 
-    flex: 1;
     overflow-x: auto;
-    overflow-y: auto;
+    overflow-y: visible;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);

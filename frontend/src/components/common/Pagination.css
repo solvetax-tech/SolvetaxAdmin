@@ -1,15 +1,15 @@
+/* In-flow pagination: sits directly below the table (after its horizontal
+   scrollbar) instead of floating as a fixed pill over the page bottom. This
+   guarantees the bottom scrollbar reads "below the table, above the pagination"
+   on every table, and never overlaps the pagination. */
 .premium-pagination-wrapper {
-    position: fixed;
-    left: 50%;
-    bottom: 8px;
-    transform: translateX(-50%);
+    flex: 0 0 auto;
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 0;
+    padding: 14px 0 10px;
     background: transparent;
-    z-index: 50;
-    pointer-events: none;
+    width: 100%;
 }
 
 .premium-pagination {

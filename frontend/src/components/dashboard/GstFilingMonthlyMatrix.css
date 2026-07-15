@@ -1129,19 +1129,21 @@
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.02em;
-    color: var(--text-secondary);
+    /* Identifiers are values, not status — full-contrast monochrome, never
+       accent/green (paid status is shown by its own pill). */
+    color: var(--text-primary);
 }
 
 .gfm-form-id--return {
-    color: var(--accent);
+    color: var(--text-primary);
 }
 
 .gfm-form-id--paid {
-    color: var(--success);
+    color: var(--text-primary);
 }
 
 .gfm-form-id--filing {
-    color: var(--text-secondary);
+    color: var(--text-primary);
 }
 
 .gfm-cell-footer {

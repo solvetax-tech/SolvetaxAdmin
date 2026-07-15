@@ -63,15 +63,16 @@
 }
 
 .gst-main-content.gst-portal-page .gst-table-wrapper--portal {
-    height: auto;
+    flex: 1;
+    min-height: 0;
     gap: 8px;
-    overflow: visible;
+    overflow: hidden;
 }
 
 .gst-main-content.gst-portal-page .gst-table-container--portal {
-    overflow-x: auto;
-    overflow-y: visible;
-    flex: none;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--text-muted) transparent;
 }
@@ -165,7 +166,7 @@
 }
 
 .gst-main-content.gst-portal-page .gst-table-container--portal::-webkit-scrollbar {
-    width: 0;
+    width: 6px;
     height: 6px;
 }
 
@@ -910,7 +911,7 @@
         minmax(100px, 0.7fr)    /* 11. Filing Pref */
         minmax(140px, 1fr)      /* 12. RM Name */
         minmax(140px, 1fr)      /* 13. Assigned OP */
-        minmax(160px, 1.2fr);   /* 14. Actions */
+        88px;                   /* 14. Actions (compact) */
     gap: 0 !important;
     grid-column-gap: 0 !important;
     width: fit-content !important;
@@ -931,7 +932,7 @@
         minmax(130px, 0.8fr)    /* 9. Primary Member */
         minmax(120px, 0.8fr)    /* 10. Record Status */
         minmax(160px, 1fr)      /* 11. Ownership Category */
-        minmax(140px, 1fr);     /* 12. Actions */
+        88px;                   /* 12. Actions (compact) */
     gap: 0 !important;
     grid-column-gap: 0 !important;
     width: fit-content !important;
@@ -948,56 +949,22 @@
     border-right: 1px solid var(--border-subtle);
 }
 
-.gst-people-grid-template > :nth-child(2) {
-    position: sticky !important;
-    left: 90px !important;
-    z-index: 5 !important;
-    min-width: 120px !important;
-    max-width: 120px !important;
-    background: var(--bg-app) !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.1);
+/* People: ONLY the first column (Person ID) is frozen-left — Customer ID and
+   Registration ID scroll with the rest of the table. */
+.filings-ledger-row.gst-people-grid-template:hover > :nth-child(1) {
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-app)) !important;
 }
 
-.gst-people-grid-template > :nth-child(3) {
-    position: sticky !important;
-    left: 210px !important;
-    z-index: 5 !important;
-    min-width: 135px !important;
-    max-width: 135px !important;
-    background: var(--bg-app) !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.1);
-}
-
-.filings-ledger-row.gst-people-grid-template:hover > :nth-child(1),
-.filings-ledger-row.gst-people-grid-template:hover > :nth-child(2),
-.filings-ledger-row.gst-people-grid-template:hover > :nth-child(3) {
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover)) !important;
-}
-
-.filings-ledger-header.gst-people-grid-template > :nth-child(1) { left: 0 !important; }
-.filings-ledger-header.gst-people-grid-template > :nth-child(2) { left: 90px !important; }
-.filings-ledger-header.gst-people-grid-template > :nth-child(3) { left: 210px !important; }
-
-.filings-ledger-header.gst-people-grid-template > :nth-child(1),
-.filings-ledger-header.gst-people-grid-template > :nth-child(2),
-.filings-ledger-header.gst-people-grid-template > :nth-child(3) {
+.filings-ledger-header.gst-people-grid-template > :nth-child(1) {
+    left: 0 !important;
     position: sticky !important;
     top: 0 !important;
-    z-index: 40 !important;
+    z-index: 25 !important;
     background: var(--bg-surface-2) !important;
 }
 
-.filings-ledger-header.gst-people-grid-template > :nth-child(1),
-.filings-ledger-header.gst-people-grid-template > :nth-child(2),
-.filings-ledger-header.gst-people-grid-template > :nth-child(3) {
-    z-index: 25 !important;
-    background: var(--bg-surface-2) !important; /* Match registrations header sticky */
-}
-
-.gst-table-row:hover .gst-people-grid-template > :nth-child(1),
-.gst-table-row:hover .gst-people-grid-template > :nth-child(2),
-.gst-table-row:hover .gst-people-grid-template > :nth-child(3) {
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover)) !important;
+.gst-table-row:hover .gst-people-grid-template > :nth-child(1) {
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-app)) !important;
 }
 
 .gst-docs-grid-template {
@@ -1012,7 +979,7 @@
         minmax(150px, 1fr)      /* 7. Verification Date */
         minmax(120px, 0.8fr)    /* 8. Record Status */
         minmax(100px, 0.7fr)    /* 9. File Action */
-        minmax(120px, 0.8fr);   /* 10. Actions */
+        88px;                   /* 10. Actions (compact) */
     gap: 0 !important;
     grid-column-gap: 0 !important;
     width: fit-content !important;
@@ -1029,27 +996,17 @@
     border-right: 1px solid var(--border-subtle);
 }
 
-.gst-docs-grid-template > :nth-child(2) {
-    position: sticky !important;
-    left: 100px !important;
-    z-index: 5 !important;
-    min-width: 100px !important;
-    max-width: 100px !important;
-    background: var(--bg-app) !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.1);
-}
-
-.filings-ledger-header.gst-docs-grid-template > :nth-child(1),
-.filings-ledger-header.gst-docs-grid-template > :nth-child(2) {
+/* Documents: ONLY the first column (Document ID) is frozen-left — Person ID
+   scrolls with the rest of the table. */
+.filings-ledger-header.gst-docs-grid-template > :nth-child(1) {
     position: sticky !important;
     top: 0 !important;
-    z-index: 40 !important;
+    z-index: 25 !important;
     background: var(--bg-surface-2) !important;
 }
 
-.filings-ledger-row.gst-docs-grid-template:hover > :nth-child(1),
-.filings-ledger-row.gst-docs-grid-template:hover > :nth-child(2) {
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover)) !important;
+.filings-ledger-row.gst-docs-grid-template:hover > :nth-child(1) {
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-app)) !important;
 }
 
 .form-error-banner-v2 {
@@ -1097,15 +1054,10 @@
     background: var(--bg-app) !important;
 }
 
+/* Customer ID is a normal scrolling column now — only the ID column stays frozen. */
 .gst-reg-grid-template > :nth-child(2) {
-    position: sticky !important;
-    left: 70px !important;
-    z-index: 5 !important;
     min-width: 90px !important;
     max-width: 90px !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.1) !important;
-    box-shadow: 1px 0 0 rgba(var(--fg-rgb), 0.08);
-    background: var(--bg-app) !important;
 }
 
 .filings-ledger-header {
@@ -1131,15 +1083,13 @@
     background: var(--bg-surface-2) !important;
 }
 
-.filings-ledger-header.gst-reg-grid-template > :nth-child(1),
-.filings-ledger-header.gst-reg-grid-template > :nth-child(2) {
+.filings-ledger-header.gst-reg-grid-template > :nth-child(1) {
     z-index: 15 !important;
     background-color: var(--bg-surface-2) !important;
 }
 
-.filings-ledger-row.gst-reg-grid-template > :nth-child(1),
-.filings-ledger-row.gst-reg-grid-template > :nth-child(2) {
-    background-color: var(--bg-app) !important; /* Solid background for sticky cells */
+.filings-ledger-row.gst-reg-grid-template > :nth-child(1) {
+    background-color: var(--bg-app) !important; /* Solid background for the sticky ID cell */
 }
 
 .filings-ledger-row:hover > :nth-child(1),
@@ -1152,8 +1102,8 @@
     position: sticky !important;
     right: 0 !important;
     z-index: 6 !important;
-    min-width: 160px !important;
-    max-width: 160px !important;
+    min-width: 88px !important;
+    max-width: 88px !important;
     background-color: var(--bg-app) !important;
     border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
     box-shadow: -4px 0 10px rgba(var(--shadow-rgb), 0.18);
@@ -1173,8 +1123,8 @@
     position: sticky !important;
     right: 0 !important;
     z-index: 6 !important;
-    min-width: 140px !important;
-    max-width: 140px !important;
+    min-width: 88px !important;
+    max-width: 88px !important;
     background-color: var(--bg-app) !important;
     border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
     box-shadow: -4px 0 10px rgba(var(--shadow-rgb), 0.18);
@@ -1194,8 +1144,8 @@
     position: sticky !important;
     right: 0 !important;
     z-index: 6 !important;
-    min-width: 120px !important;
-    max-width: 120px !important;
+    min-width: 88px !important;
+    max-width: 88px !important;
     background-color: var(--bg-app) !important;
     border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
     box-shadow: -4px 0 10px rgba(var(--shadow-rgb), 0.18);

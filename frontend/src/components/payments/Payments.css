@@ -14,6 +14,7 @@
     margin-bottom: 8px;
     padding: 0;
     gap: 10px;
+    flex: 0 0 auto;
 }
 
 @keyframes fadeIn {
@@ -142,9 +143,9 @@
     position: relative;
 }
 
-/* Horizontal scroll only — no vertical scrollbar on the table panel */
+/* Internal scroll on both axes — horizontal scrollbar sits at the table's bottom */
 .payments-ledger-container::-webkit-scrollbar {
-    width: 0;
+    width: 6px;
     height: 6px;
 }
 .payments-ledger-container::-webkit-scrollbar-track {

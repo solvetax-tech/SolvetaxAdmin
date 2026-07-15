@@ -89,8 +89,11 @@
 .gst-modal-overlay-v4.app-side-drawer-mode > .gst-modal-card-v4.returns-status-modal {
     width: var(--app-side-drawer-width) !important;
     max-width: calc(100vw - 24px) !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    /* Compensate the global html { zoom: 0.75 }: a raw 100vh renders at only
+       ~75% of the real viewport, leaving the drawer short with dead space below.
+       Dividing by --app-zoom makes the panel fill the full screen height. */
+    height: calc(100vh / var(--app-zoom)) !important;
+    max-height: calc(100vh / var(--app-zoom)) !important;
     margin: 0 !important;
     border-radius: 0 !important;
     animation: appSideDrawerSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
@@ -271,8 +274,9 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    /* Zoom-compensated full height (see note above). */
+    height: calc(100vh / var(--app-zoom)) !important;
+    max-height: calc(100vh / var(--app-zoom)) !important;
     border-radius: 0 !important;
     animation: appSideDrawerSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -401,7 +405,8 @@
     position: fixed !important;
     top: 0 !important;
     right: 0 !important;
-    height: 100vh !important;
+    /* Zoom-compensated full height (see note above). */
+    height: calc(100vh / var(--app-zoom)) !important;
     z-index: 12001 !important;
     transform: none !important;
     transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;

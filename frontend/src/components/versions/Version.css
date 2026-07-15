@@ -41,7 +41,7 @@
 }
 
 .audit-ledger-scroll-root::-webkit-scrollbar {
-    width: 0;
+    width: 6px;
     height: 6px;
 }
 
@@ -183,7 +183,7 @@
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     font-weight: 700;
-    color: var(--accent);
+    color: var(--text-primary);
     font-size: 11px;
 }
 

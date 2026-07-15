@@ -25,8 +25,11 @@
   --bg-input: rgba(230, 232, 240, 0.035);
   --bg-overlay: rgba(6, 7, 10, 0.72);
 
-  /* Text — a real hierarchy (cool off-white, never pure white on pure black). */
-  --text-primary: #edeff5;
+  /* Text hierarchy. Per user direction, PRIMARY data/values render at FULL
+     contrast: pure white on dark, pure black on light — "full thick" and
+     maximally legible in tables. Secondary/muted stay softened for metadata,
+     captions and de-emphasised labels so the hierarchy still reads. */
+  --text-primary: #ffffff;
   --text-secondary: rgba(230, 232, 240, 0.66);
   --text-muted: rgba(230, 232, 240, 0.45);
   --text-faint: rgba(230, 232, 240, 0.30);
@@ -167,9 +170,9 @@
   --bg-input: #ffffff;
   --bg-overlay: rgba(24, 26, 38, 0.42);
 
-  /* Near-black ink for light mode — values read crisp and high-contrast,
-     matching the brand wordmark, not a washed-out grey. */
-  --text-primary: #0a0b12;
+  /* Pure black ink for light mode — primary values read at FULL contrast
+     ("full thick" black), never a washed-out grey. */
+  --text-primary: #000000;
   --text-secondary: rgba(17, 19, 30, 0.78);
   --text-muted: rgba(17, 19, 30, 0.58);
   --text-faint: rgba(17, 19, 30, 0.40);

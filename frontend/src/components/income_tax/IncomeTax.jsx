@@ -14,6 +14,7 @@ import { formatDateIST, dateLocalToIstIso, formatEnumLabel } from '../../utils/f
 import IncomeSourcePills from './IncomeSourcePills';
 import FinancialYearPills from './FinancialYearPills';
 import RecordYearBadge from './RecordYearBadge';
+import Button from '../ui/Button';
 import '../gst_filings/gst_filings.css'; // Reusing the GST aesthetics
 import './income_tax.css';
 import Pagination from '../common/Pagination';
@@ -437,8 +438,10 @@ export const IncomeTax = ({ profileData }) => {
                         >
                             <Filter size={13} /> Filters
                         </button>
-                        <button 
-                            className="btn-primary-action"
+                        <Button
+                            variant="primary"
+                            size="sm"
+                            icon={<Plus size={13} />}
                             onClick={() => {
                                 setEditingRecord(null);
                                 setShowEditDrawer(false);
@@ -446,8 +449,8 @@ export const IncomeTax = ({ profileData }) => {
                                 ensureConfigs();
                             }}
                         >
-                            <Plus size={13} /> New Record
-                        </button>
+                            New Record
+                        </Button>
                 </div>
             </div>
 

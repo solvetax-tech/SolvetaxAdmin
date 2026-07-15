@@ -158,7 +158,9 @@
   gap: 12px;
   padding: 10px 16px;
   border-radius: 12px;
-  color: var(--text-secondary);
+  /* Full-contrast nav labels — pure white on dark / pure black on light.
+     Active state stays accent, hover stays primary (defined below). */
+  color: var(--text-primary);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -1057,6 +1059,10 @@
   min-height: 0;
   overflow: visible;
 }
+
+/* Single-table tabs PAGE-SCROLL vertically on this container, so the vertical
+   scrollbar sits on the outer page area (outside the table card), matching the
+   GST Portal. The table card itself only scrolls horizontally. */
 
 .dashboard-container-v2 .bg-orb {
   position: absolute;
@@ -2522,13 +2528,16 @@ button.progress-badge-v4 {
 }
 
 .progress-tracker-container-v4 {
-  flex: 1;
-  overflow: auto;
+  flex: 0 0 auto;
+  /* Grow with content and PAGE-SCROLL vertically — the up/down scrollbar sits on
+     the outer page (outside the card), not inside the table. Only the table
+     scrolls horizontally. */
+  overflow-x: auto;
+  overflow-y: visible;
   border-radius: 12px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   position: relative;
-  max-height: calc(100vh - 350px);
 }
 
 .date-cell-v4 {
@@ -2593,7 +2602,7 @@ button.progress-badge-v4 {
 .customer-mobile-v4 {
   font-size: 11px;
   color: var(--text-primary);
-  opacity: 0.8;
+  opacity: 1;
 }
 
 .service-count-badge-v4 {
@@ -2671,8 +2680,9 @@ button.progress-badge-v4 {
 .tracker-drawer {
     width: 460px !important;
     max-width: 100% !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    /* Zoom-compensated full height (html { zoom: 0.75 } scales raw 100vh to ~75%). */
+    height: calc(100vh / var(--app-zoom)) !important;
+    max-height: calc(100vh / var(--app-zoom)) !important;
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;
@@ -4130,8 +4140,9 @@ button.progress-badge-v4 {
 
 .followup-drawer-panel {
     width: 520px;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    /* Zoom-compensated full height (html { zoom: 0.75 } scales raw 100vh to ~75%). */
+    height: calc(100vh / var(--app-zoom)) !important;
+    max-height: calc(100vh / var(--app-zoom)) !important;
     overflow: hidden !important;
     background: var(--bg-surface);
     border-left: 1px solid var(--border);

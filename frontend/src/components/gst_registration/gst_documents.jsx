@@ -20,6 +20,7 @@ import './GSTRegistrationSignup.css';
 import './gst_documents.css';
 import './UploadDocuments.css';
 import { Filter, X, RotateCcw, Plus, UploadCloud, Download, FileDown, AlertCircle, CheckCircle2, FileText, Link as LinkIcon, File as FileIcon, Upload, Trash2, Hash, Eye, Pencil, ExternalLink, Edit3 } from 'lucide-react';
+import Button from '../ui/Button';
 import GSTDocumentsViewPanel from './GSTDocumentsViewPanel';
 import {
     handleDrawerCancelEdit,
@@ -408,17 +409,17 @@ export const GSTDocuments = ({ handleLogout, isAdmin, profileData, onRenderToolb
                 </button>
             )}
             {canEdit && (
-                <button
-                    type="button"
-                    className="btn-primary-action"
+                <Button
+                    variant="primary"
+                    size="sm"
+                    icon={<UploadCloud size={13} />}
                     onClick={() => {
                         setUploadMode('upload');
                         setShowUploadModal(true);
                     }}
                 >
-                    <UploadCloud size={13} />
-                    <span>Upload Document</span>
-                </button>
+                    Upload Document
+                </Button>
             )}
         </>
     );

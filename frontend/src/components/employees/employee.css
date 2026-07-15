@@ -24,6 +24,7 @@
     margin-bottom: 8px;
     padding: 0;
     width: 100%;
+    flex: 0 0 auto;
 }
 
 .employee-tab-container .gst-action-buttons {
@@ -77,7 +78,7 @@
         minmax(150px, 1.2fr)       /* MANAGER */
         90px                       /* ACTIVE */
         minmax(140px, 1fr)         /* CREATED AT */
-        110px;                     /* ACTIONS (sticky) */
+        88px;                      /* ACTIONS (sticky, compact) */
     align-items: center;
     width: 100%;
     min-width: 1320px;
@@ -151,7 +152,7 @@
 }
 
 .employee-table-container::-webkit-scrollbar {
-    width: 0;
+    width: 6px;
     height: 6px;
 }
 
@@ -257,8 +258,8 @@
     position: sticky !important;
     right: 0 !important;
     z-index: 6 !important;
-    min-width: 100px !important;
-    max-width: 100px !important;
+    min-width: 88px !important;
+    max-width: 88px !important;
     background-color: var(--bg-surface) !important;
     border-left: 1px solid var(--border-subtle) !important;
     box-shadow: -6px 0 12px rgba(var(--shadow-rgb), 0.1);

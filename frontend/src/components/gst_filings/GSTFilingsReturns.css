@@ -213,6 +213,19 @@
 }
 .ledger-sticky-col-3 { left: 160px; }
 
+/* Only the FIRST column (ID) stays frozen-left — Filing ID and the 3rd column
+   scroll with the rest. Doubled class beats the single-class sticky rules. */
+.ledger-sticky-id.ledger-sticky-col-2,
+.ledger-sticky-id.ledger-sticky-col-3 {
+    position: static !important;
+    left: auto !important;
+    z-index: auto !important;
+    box-shadow: none !important;
+    border-right: none !important;
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
 /* Sub-components */
 .ledger-id-text {
     font-family: var(--font-mono);

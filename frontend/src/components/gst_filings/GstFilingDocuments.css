@@ -394,3 +394,14 @@ input[type="number"] {
     border-right: 1px solid rgba(var(--fg-rgb), 0.08) !important;
     box-shadow: 4px 0 10px rgba(var(--shadow-rgb), 0.3);
 }
+
+/* Only the FIRST column (Document ID) stays frozen-left — Filing ID scrolls. */
+.filings-ledger-sticky-id.filings-docs-ledger-sticky-col-2 {
+    position: static !important;
+    left: auto !important;
+    z-index: auto !important;
+    box-shadow: none !important;
+    border-right: none !important;
+    background: transparent !important;
+    background-color: transparent !important;
+}

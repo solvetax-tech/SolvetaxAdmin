@@ -632,7 +632,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                 </div>
             </div>
 
-            <div className="gst-table-wrapper" style={{ height: 'calc(100vh - 200px)' }}>
+            <div className="gst-table-wrapper">
                 <div className="gst-table-container">
                     <div className="filings-ledger-header customer-grid-template">
                         <div className="filings-ledger-header-cell">Cust ID</div>

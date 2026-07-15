@@ -12,6 +12,7 @@
 }
 
 .customer-services-container .gst-action-bar-v2 {
+    flex: 0 0 auto; /* toolbar stays fixed height above the internally-scrolling table */
     margin-bottom: 4px;
     padding: 0;
     gap: 8px;
@@ -53,11 +54,13 @@
 
 /* --- Table Container (fluid width — vertical page scroll only, like Customers) --- */
 .customer-services-container .cs-services-table-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
     width: 100%;
     max-width: 100%;
     min-width: 0;
-    overflow-x: hidden;
-    overflow-y: visible;
+    overflow: hidden; /* clip to rounded corners; the inner container scrolls horizontally */
     border-radius: var(--radius-lg);
     border: 1px solid var(--border);
     background: var(--bg-surface);
@@ -66,7 +69,8 @@
 }
 
 .customer-services-container .cs-services-table-wrapper .gst-table-container {
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: visible;
     width: 100%;
     max-width: 100%;
     min-width: 0;
