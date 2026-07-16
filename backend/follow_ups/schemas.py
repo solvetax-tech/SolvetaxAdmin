@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from backend.common.status_constants import FollowupStatusLiteral
 
 # =========================================================
 # Base schema (follow_ups package)
@@ -39,7 +41,7 @@ class CreateCustomerServiceFollowupResponse(FollowupBaseSchema):
 class UpdateCustomerServiceFollowupRequest(FollowupBaseSchema):
     followup_at: Optional[datetime] = None
     remarks: Optional[str] = Field(None, max_length=2000)
-    status: Optional[Literal["PENDING", "COMPLETED", "MISSED"]] = Field(
+    status: Optional[FollowupStatusLiteral] = Field(
         None,
         description="Maps to customer_services.followup_status",
     )
@@ -105,7 +107,7 @@ class CreatePaymentFollowupResponse(FollowupBaseSchema):
 class UpdatePaymentFollowupRequest(FollowupBaseSchema):
     followup_at: Optional[datetime] = None
     remarks: Optional[str] = Field(None, max_length=2000)
-    status: Optional[Literal["PENDING", "COMPLETED", "MISSED"]] = Field(
+    status: Optional[FollowupStatusLiteral] = Field(
         None,
         description="Maps to payments.followup_status",
     )

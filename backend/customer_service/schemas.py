@@ -5,6 +5,8 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from backend.common.status_constants import ServiceStatusLiteral
+
 
 class CustomerServiceBaseSchema(BaseModel):
     model_config = {
@@ -43,14 +45,14 @@ class CustomerServicePatchIn(CustomerServiceBaseSchema):
 
     rm_id: Optional[int] = Field(None, gt=0)
     op_id: Optional[int] = Field(None, gt=0)
-    service_status: Optional[Literal["PENDING", "PROVIDED"]] = None
+    service_status: Optional[ServiceStatusLiteral] = None
     is_active: Optional[bool] = None
 
 
 class CustomerServiceStatusPatchIn(CustomerServiceBaseSchema):
     """Update only `service_status` (staff with EMPLOYEE WRITE; visibility rules apply)."""
 
-    service_status: Literal["PENDING", "PROVIDED"]
+    service_status: ServiceStatusLiteral
 
     @field_validator("service_status", mode="before")
     @classmethod

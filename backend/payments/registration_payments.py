@@ -3,6 +3,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from backend.security.rbac import require_permission
+from backend.common.status_constants import PAYMENT_STATUSES
 from backend.payments.schemas import RegistrationPaymentIn
 from backend.payments.payment_ledger import PaymentLedgerError
 from backend.payments.payment_ledger_db import (
@@ -299,12 +300,6 @@ async def list_registration_payments(
     # Enum Validation
     # --------------------------------------------------
 
-    ALLOWED_STATUS = {
-        "PENDING",
-        "PAID",
-        "CANCELLED",
-    }
-
     ALLOWED_MODES = {
         "CASH",
         "UPI",
@@ -317,7 +312,7 @@ async def list_registration_payments(
 
         payment_status = payment_status.strip().upper()
 
-        if payment_status not in ALLOWED_STATUS:
+        if payment_status not in PAYMENT_STATUSES:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid payment_status value.",

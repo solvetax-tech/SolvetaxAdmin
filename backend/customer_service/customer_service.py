@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from backend.common.status_constants import SERVICE_STATUSES
 from backend.customer_service.bulk_lead_assignment import (
     _invalidate_customer_services_index_caches,
     svc_bulk_assign_candidates,
@@ -143,8 +144,8 @@ async def filter_customer_services_staff(
     _require_emp(role, emp_id)
 
     status_u = service_status.strip().upper() if isinstance(service_status, str) and service_status.strip() else None
-    if status_u and status_u not in {"PENDING", "PROVIDED"}:
-        _raise_validation({"service_status": "Must be PENDING or PROVIDED."})
+    if status_u and status_u not in SERVICE_STATUSES:
+        _raise_validation({"service_status": f"Must be {' or '.join(SERVICE_STATUSES)}."})
 
     code_u = service_code.strip().upper() if isinstance(service_code, str) and service_code.strip() else None
     mobile_q = mobile.strip() if isinstance(mobile, str) and mobile.strip() else None
@@ -1228,8 +1229,7 @@ async def filter_customer_services_extended(
             detail="Use either service_code or service_codes, not both",
         )
 
-    valid_service_status = {"PENDING", "PROVIDED"}
-    if service_status_u and service_status_u not in valid_service_status:
+    if service_status_u and service_status_u not in SERVICE_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid service_status")
 
     valid_status = {"ACTIVE", "INACTIVE"}

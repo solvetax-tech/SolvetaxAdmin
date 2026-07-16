@@ -21,6 +21,7 @@ from backend.Income_tax.income_tax_helpers import (
     income_tax_select_columns,
     normalize_query_str_list,
 )
+from backend.common.status_constants import normalize_filed_status, normalize_priority
 from backend.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
 from backend.logger import logger
 from backend.text_search_filters import append_fuzzy_name_filter, append_ilike_contains
@@ -800,6 +801,12 @@ async def filter_income_tax(
     if created_from and created_to and created_from > created_to:
         raise HTTPException(status_code=400, detail="created_from must be <= created_to.")
 
+    try:
+        filed_status_u = normalize_filed_status(filed_status)
+        priority_u = normalize_priority(priority)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     cache_key = build_cache_key(
         "income_tax_filter",
         ver=income_tax_cache_ver(),
@@ -809,8 +816,8 @@ async def filter_income_tax(
         client_name=client_name.strip() if client_name else None,
         email_id=email_id.strip().lower() if email_id else None,
         financial_year=normalize_query_str_list(financial_year) or None,
-        filed_status=filed_status.strip().upper() if filed_status else None,
-        priority=priority.strip().upper() if priority else None,
+        filed_status=filed_status_u,
+        priority=priority_u,
         language=language.strip().upper() if language else None,
         state=state.strip().upper() if state else None,
         source_of_income=[s.strip().upper() for s in normalize_query_str_list(source_of_income)] or None,
@@ -852,10 +859,10 @@ async def filter_income_tax(
         conditions.append(f"i.financial_year && ${idx}::varchar[]")
         values.append(fy_filters)
         idx += 1
-    if filed_status:
-        add_eq("i.filed_status", filed_status.strip().upper())
-    if priority:
-        add_eq("i.priority", priority.strip().upper())
+    if filed_status_u:
+        add_eq("i.filed_status", filed_status_u)
+    if priority_u:
+        add_eq("i.priority", priority_u)
     if language:
         add_eq("i.language", language.strip().upper())
     if state:

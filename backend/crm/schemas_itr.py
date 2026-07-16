@@ -1,18 +1,11 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-ITR_STAGE_CODE = Literal[
-    "FRESH_LEAD",
-    "PENDING_ITR_DATA",
-    "FOLLOW_UP",
-    "INTERESTED",
-    "ITR_DONE",
-    "SCHEDULED_PAYMENTS",
-    "SUBSCRIBED",
-    "NOT_INTERESTED",
-]
+from backend.common.status_constants import CrmStageItrLiteral, FollowupStatusLiteral
+
+ITR_STAGE_CODE = CrmStageItrLiteral
 
 
 class CRMBaseSchema(BaseModel):
@@ -43,18 +36,7 @@ class CRMCallUpdateIn(CRMBaseSchema):
 
 
 class CRMLeadEditIn(CRMBaseSchema):
-    stage: Optional[
-        Literal[
-            "FRESH_LEAD",
-            "PENDING_ITR_DATA",
-            "FOLLOW_UP",
-            "INTERESTED",
-            "ITR_DONE",
-            "SCHEDULED_PAYMENTS",
-            "SUBSCRIBED",
-            "NOT_INTERESTED",
-        ]
-    ] = None
+    stage: Optional[ITR_STAGE_CODE] = None
     followup_at: Optional[datetime] = None
     rm_id: Optional[int] = Field(default=None, gt=0)
     op_id: Optional[int] = Field(default=None, gt=0)
@@ -100,6 +82,6 @@ class CRMLeadEditIn(CRMBaseSchema):
 
 
 class CRMFollowupStatusUpdateIn(CRMBaseSchema):
-    follow_up_status: Literal["PENDING", "COMPLETED", "MISSED"]
+    follow_up_status: FollowupStatusLiteral
     followup_at: Optional[datetime] = None
     remarks: Optional[str] = Field(default=None, max_length=2000)

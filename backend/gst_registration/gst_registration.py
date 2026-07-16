@@ -15,6 +15,7 @@ from backend.gst_registration.gst_registration_helpers import (
     DEFAULT_GST_INTAKE_TURNOVER_DETAILS,
     GST_CRM_ENTITY_TYPE,
 )
+from backend.common.status_constants import REGISTRATION_STATUSES
 from backend.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
 from backend.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from backend.security.rbac import require_permission
@@ -948,7 +949,7 @@ async def list_gst_registrations(
     secondary_email = secondary_email.strip().lower() if secondary_email else None
 
     # ✅ ENUM VALIDATIONS
-    valid_registration_status = {"DRAFT", "SUBMITTED", "APPROVED", "REJECTED"}
+    valid_registration_status = set(REGISTRATION_STATUSES)
     if registration_status and registration_status.strip().upper() not in valid_registration_status:
         raise HTTPException(400, "Invalid registration_status")
 

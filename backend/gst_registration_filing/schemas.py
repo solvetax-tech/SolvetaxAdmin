@@ -5,6 +5,12 @@ from typing import Optional, Literal, Annotated
 
 from pydantic import Field, field_validator, model_validator, BaseModel, EmailStr
 
+from backend.common.status_constants import (
+    FilingFrequencyLiteral,
+    RegistrationStatusLiteral,
+    TaxpayerTypeLiteral,
+    TurnoverDetailsLiteral,
+)
 from backend.gst_registration_filing.status_constants import (
     GstFilingStatusLiteral,
     GstReturnDetailStatusLiteral,
@@ -49,21 +55,17 @@ class GSTFilingIn(BaseSchema):
     # =====================================================
     filing_category: Literal["RETURN", "ANNUAL"]
 
-    taxpayer_type: Optional[Literal["REGULAR", "COMPOSITION"]] = None
+    taxpayer_type: Optional[TaxpayerTypeLiteral] = None
 
-    filing_frequency:Optional[Literal["MONTHLY", "QUARTERLY", "YEARLY"]] = None
+    filing_frequency:Optional[FilingFrequencyLiteral] = None
 
-    turnover_details: Optional[
-        Literal["LESS_THAN_2CR", "BETWEEN_2CR_5CR", "MORE_THAN_5CR"]
-    ] = None
+    turnover_details: Optional[TurnoverDetailsLiteral] = None
 
     state: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
     language: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
     referral_id: Optional[int] = Field(None, gt=0)
     referral_entity: Optional[Annotated[str, Field(min_length=2, max_length=100)]] = None
-    gst_reg_status: Optional[
-        Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
-    ] = None
+    gst_reg_status: Optional[RegistrationStatusLiteral] = None
 
     # =====================================================
     # 🔥 FILING PERIOD
@@ -261,10 +263,8 @@ class GSTFilingYearlyIn(BaseSchema):
         )]
     ] = None
 
-    taxpayer_type: Literal["REGULAR", "COMPOSITION"]
-    turnover_details: Literal[
-        "LESS_THAN_2CR", "BETWEEN_2CR_5CR", "MORE_THAN_5CR"
-    ]
+    taxpayer_type: TaxpayerTypeLiteral
+    turnover_details: TurnoverDetailsLiteral
 
     state: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
     language: Optional[Annotated[str, Field(min_length=2, max_length=50)]] = None
@@ -344,25 +344,17 @@ class GSTFilingEditIn(BaseSchema):
     # =====================================================
     filing_category: Optional[Literal["RETURN", "ANNUAL"]] = None
 
-    filing_frequency: Optional[
-        Literal["MONTHLY", "QUARTERLY", "YEARLY"]
-    ] = None
+    filing_frequency: Optional[FilingFrequencyLiteral] = None
 
-    taxpayer_type: Optional[
-        Literal["REGULAR", "COMPOSITION"]
-    ] = None
+    taxpayer_type: Optional[TaxpayerTypeLiteral] = None
 
-    turnover_details: Optional[
-        Literal["LESS_THAN_2CR","BETWEEN_2CR_5CR", "MORE_THAN_5CR"]
-    ] = None
+    turnover_details: Optional[TurnoverDetailsLiteral] = None
 
     state: Optional[str] = Field(None, max_length=50)
     language: Optional[str] = Field(None, max_length=50)
     referral_id: Optional[int] = Field(None, gt=0)
     referral_entity: Optional[str] = Field(None, max_length=100)
-    gst_reg_status: Optional[
-        Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
-    ] = None
+    gst_reg_status: Optional[RegistrationStatusLiteral] = None
 
     # =====================================================
     # GSTIN only — gst_registration_id is fixed on the filing (not PATCHable)
@@ -510,7 +502,7 @@ class GSTReturnStatusUpdateIn(BaseSchema):
     gstr9c_followup_at: Optional[datetime] = None
     cmp08_followup_at: Optional[datetime] = None
     gstr4_followup_at: Optional[datetime] = None
-    filing_frequency: Optional[Literal["MONTHLY", "QUARTERLY", "YEARLY"]] = Field(
+    filing_frequency: Optional[FilingFrequencyLiteral] = Field(
         None,
         description="Cadence for this return-detail row (`gst_filing_return_details.filing_frequency`).",
     )

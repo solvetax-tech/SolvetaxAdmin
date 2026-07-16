@@ -1,4 +1,4 @@
-from typing import Optional, Literal, List, Any
+from typing import Optional, List, Any
 
 from pydantic import AliasChoices, BaseModel, Field, EmailStr, field_validator, model_validator
 
@@ -6,6 +6,7 @@ from backend.Income_tax.income_tax_helpers import (
     normalize_financial_year_list,
     normalize_source_of_income_list,
 )
+from backend.common.status_constants import FiledStatusLiteral, IncomeTaxPriorityLiteral
 
 
 class BaseSchema(BaseModel):
@@ -21,13 +22,13 @@ class IncomeTaxIn(BaseSchema):
     client_name: str = Field(..., min_length=2, max_length=150)
     mobile: str = Field(..., pattern=r"^\d{10}$")
     pan_number: Optional[str] = Field(None, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
-    priority: Literal["LOW", "NORMAL", "HIGH"] = "NORMAL"
+    priority: IncomeTaxPriorityLiteral = "NORMAL"
     financial_year: List[str] = Field(..., min_length=1)
     email_id: Optional[EmailStr] = None
     state: Optional[str] = Field(None, max_length=100)
     language: Optional[str] = Field(None, max_length=50)
     source_of_income: Optional[List[str]] = None
-    filed_status: Literal["FILED", "NOT_FILED"] = "NOT_FILED"
+    filed_status: FiledStatusLiteral = "NOT_FILED"
     refund_amount: Optional[float] = Field(None, ge=0)
     referral_phone_number: Optional[str] = Field(None, pattern=r"^\d{10}$")
     remarks: Optional[str] = None
@@ -193,13 +194,13 @@ class IncomeTaxEditIn(BaseSchema):
     client_name: Optional[str] = Field(None, min_length=2, max_length=150)
     mobile: Optional[str] = Field(None, pattern=r"^\d{10}$")
     pan_number: Optional[str] = Field(None, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
-    priority: Optional[Literal["LOW", "NORMAL", "HIGH"]] = None
+    priority: Optional[IncomeTaxPriorityLiteral] = None
     financial_year: Optional[List[str]] = Field(None, min_length=1)
     email_id: Optional[EmailStr] = None
     state: Optional[str] = Field(None, max_length=100)
     language: Optional[str] = Field(None, max_length=50)
     source_of_income: Optional[List[str]] = None
-    filed_status: Optional[Literal["FILED", "NOT_FILED"]] = None
+    filed_status: Optional[FiledStatusLiteral] = None
     refund_amount: Optional[float] = Field(None, ge=0)
     referral_phone_number: Optional[str] = Field(None, pattern=r"^\d{10}$")
     remarks: Optional[str] = None

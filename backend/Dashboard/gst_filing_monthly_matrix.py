@@ -27,6 +27,7 @@ from backend.Dashboard.schemas import (
     GstFilingMatrixMonthCell,
     GstFilingMatrixRow,
 )
+from backend.common.status_constants import GST_RETURN_DETAIL_STATUSES
 from backend.gst_registration_filing.gst_registration_filing import (
     _return_detail_effective_period_lateral,
 )
@@ -116,16 +117,16 @@ _FORM_LABELS = {
     "GSTR9C": "GSTR-9C",
 }
 
-_STATUS_LABELS = {
-    "DATA_PENDING": "Data Pending",
-    "DATA_RECEIVED": "Data Received",
-    "IN_PREPARATION": "In Preparation",
+# Labels for the statuses that title-casing gets wrong; everything else derives below.
+_STATUS_LABEL_OVERRIDES = {
     "PENDING_OTP": "Pending OTP",
     "READY_TO_FILE": "Ready to File",
-    "FILED": "Filed",
-    "OVERDUE": "Overdue",
-    "NOT_FILED": "Not Filed",
-    "MISSED": "Missed",
+}
+
+# Keyed off the shared vocabulary so a new status always gets a label.
+_STATUS_LABELS = {
+    status: _STATUS_LABEL_OVERRIDES.get(status, status.replace("_", " ").title())
+    for status in GST_RETURN_DETAIL_STATUSES
 }
 
 

@@ -12,6 +12,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from pydantic import ValidationError
 
+from backend.common.status_constants import CRM_STAGES, FOLLOWUP_STATUSES
 from backend.crm.schemas_common import (
     CRMBulkAssignExecuteIn,
     CRMBulkAutoAssignConfigIn,
@@ -197,13 +198,7 @@ SMART_BOARD_STAGES_ITR = (
     "FRESH_LEAD",
 )
 # Fallback when DB has no configured rows yet; union of GST + ITR funnel stage codes used in this app.
-ALL_STAGES = (
-    FIRST_PITCH_ALLOWED_STAGES
-    | {"PENDING_REGISTRATION_DATA", "PENDING_ITR_DATA"}
-    | FINAL_PITCH_ALLOWED_STAGES
-    | {"ITR_DONE"}
-    | CLOSED_STAGES
-)
+ALL_STAGES = frozenset(CRM_STAGES)
 
 FIRST_PITCH_STATUSES_FALLBACK = frozenset(
     {
@@ -249,7 +244,6 @@ FIRST_PITCH_CONNECTED = {
 }
 # FINAL_PITCH_CALL: NOT_INTERESTED does not increment connected (first pitch only).
 FINAL_PITCH_CONNECTED = {"SCHEDULED_PAYMENT", "CALL_BACK", "CALL_DONE"}
-FOLLOWUP_STATUSES = {"PENDING", "COMPLETED", "MISSED"}
 
 CRM_SERVICE_FOLLOWUP_STAGES: tuple[str, ...] = (
     "FRESH_LEAD",

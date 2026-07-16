@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from backend.common.status_constants import FOLLOWUP_STATUSES
 from backend.follow_ups.schemas import (
     CreatePaymentFollowupRequest,
     CreatePaymentFollowupResponse,
@@ -76,11 +77,10 @@ def _normalized_followup_statuses(
         parts.append(status_filter.strip().upper())
     if not parts:
         return None
-    valid = {"PENDING", "COMPLETED", "MISSED"}
     out: List[str] = []
     seen = set()
     for p in parts:
-        if p not in valid:
+        if p not in FOLLOWUP_STATUSES:
             raise HTTPException(status_code=400, detail="Invalid followup status value")
         if p not in seen:
             seen.add(p)
