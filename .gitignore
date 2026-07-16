@@ -31,3 +31,7 @@ frontend/dist/
 frontend/dist-ssr/
 .playwright-mcp/
 .gstack/
+
+# DB migration: dumps contain full production data — never commit
+scripts/db-migration/_dump/
+*.dump

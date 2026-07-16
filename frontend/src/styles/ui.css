@@ -493,3 +493,39 @@
 .ledger-row.ledger-row.ledger-row:hover .ledger-sticky-id {
   background-color: color-mix(in srgb, var(--accent) 8%, var(--bg-surface)) !important;
 }
+
+/* ============================================================================
+   Long-text ledger cells
+   ----------------------------------------------------------------------------
+   THE TRAP: every ledger cell is `display: flex` AND sets
+   `text-overflow: ellipsis`. Those two cannot work together. On a flex
+   container a bare text child becomes an *anonymous flex item*, which cannot be
+   styled -- so the ellipsis never renders and an overflowing value is simply
+   hard-clipped. Where the cell is also centred (`justify-content: center`) the
+   overflow spills equally off BOTH sides, so the value loses its head and its
+   tail with no visual cue at all:
+
+       TILES ORGANIZATION KRISHNA ENTERPRISES  ->  S ORGANIZATION KRISHNA ENTERPR
+
+   which reads as a real -- but wrong -- business name rather than a truncation.
+
+   THE FIX: long free-text columns wrap instead of clipping, and left-align so
+   the first character is always the first character. Pair with a `title`
+   attribute on the cell so the full value is still available on hover.
+
+   gst_filings.css solved this for its own table with `.business-name-cell`;
+   this is that same fix, shared, so every table can use it.
+
+   Specificity note: gst_filings.css declares a GLOBAL `.filings-ledger-cell`
+   with `justify-content/text-align: center !important`, and being a component
+   stylesheet it loads after this file -- so a single-class selector here loses
+   the tie even with !important. Hence the doubled class: (0,0,2,0) beats
+   (0,0,1,0) outright and no longer depends on import order.
+   ========================================================================== */
+.ledger-cell-longtext.ledger-cell-longtext {
+  justify-content: flex-start !important;
+  text-align: left !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}

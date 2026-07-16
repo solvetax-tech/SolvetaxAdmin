@@ -565,7 +565,7 @@ const ContactSupportLeads = () => {
                                                                 </button>
                                                             </div>
                                                         )}
-                                                        <div className="filings-ledger-cell">{row.email_address || '—'}</div>
+                                                        <div className="filings-ledger-cell ledger-cell-longtext" title={row.email_address || ''}>{row.email_address || '—'}</div>
                                                         <div className="filings-ledger-cell">
                                                             <button
                                                                 type="button"

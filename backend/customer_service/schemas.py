@@ -40,6 +40,53 @@ class CustomerServiceBulkAssignExecuteIn(CustomerServiceBaseSchema):
         return v
 
 
+class CustomerServiceCreateIn(CustomerServiceBaseSchema):
+    """Create one customer_services row directly.
+
+    customer_id is OPTIONAL: the column is nullable so a service can exist
+    before it is attached to a customer (see
+    db/migrations/2026-07-17_customer_services_nullable_customer_id.sql).
+    """
+
+    service_code: str = Field(..., min_length=1, max_length=50)
+    customer_id: Optional[int] = Field(None, gt=0)
+    service_status: Optional[ServiceStatusLiteral] = None
+    rm_id: Optional[int] = Field(None, gt=0)
+    op_id: Optional[int] = Field(None, gt=0)
+    followup_at: Optional[datetime] = None
+    followup_remarks: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("service_code", mode="before")
+    @classmethod
+    def normalise_service_code(cls, v):
+        # Stored as-typed, but matched against service_config with
+        # upper(btrim(...)) -- normalise on the way in so the unique index
+        # (customer_id, service_code) cannot be defeated by case/whitespace.
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
+
+    @field_validator("service_status", mode="before")
+    @classmethod
+    def upper_service_status(cls, v):
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
+
+
+class CustomerServiceCreateOut(CustomerServiceBaseSchema):
+    id: int
+    customer_id: Optional[int] = None
+    service_code: str
+    service_status: str
+    rm_id: Optional[int] = None
+    op_id: Optional[int] = None
+    followup_at: Optional[datetime] = None
+    is_active: bool
+    created_at: datetime
+
+
 class CustomerServicePatchIn(CustomerServiceBaseSchema):
     """Service-level fields only (no follow-up columns)."""
 
@@ -66,7 +113,9 @@ class CustomerServiceDetailOut(CustomerServiceBaseSchema):
     """Subset of row + joined labels for GET detail."""
 
     id: int
-    customer_id: int
+    # Nullable since 2026-07-17: a service can exist before it is attached to a
+    # customer, in which case the customers LEFT JOIN yields NULL labels too.
+    customer_id: Optional[int] = None
     service_code: str
     service_status: str
     provided_at: Optional[datetime] = None
@@ -85,7 +134,8 @@ class CustomerServiceDetailOut(CustomerServiceBaseSchema):
 
 class CustomerServiceListItemOut(CustomerServiceBaseSchema):
     id: int
-    customer_id: int
+    # Nullable since 2026-07-17 -- see CustomerServiceDetailOut.
+    customer_id: Optional[int] = None
     service_code: str
     service_status: str
     provided_at: Optional[datetime] = None

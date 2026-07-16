@@ -18,6 +18,7 @@ from backend.crm.crm_leads_common import _invalidate_crm_cache
 from backend.payments.payment_scheduler import sync_settled_payment_entities
 from backend.gst_registration_filing.gst_filing_auto_generation import (
     build_next_row_from_source,
+    chain_filing_frequency,
     gstr9c_sync_category_sql,
 )
 from backend.redis_cache import invalidate_tag as redis_invalidate_tag

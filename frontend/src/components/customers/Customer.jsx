@@ -684,7 +684,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                                     <div className="filings-ledger-cell" title={item.email}>{item.email || '-'}</div>
                                     <div className="filings-ledger-cell"><span className="ui-num">{item.mobile || '-'}</span></div>
                                     <div className="filings-ledger-cell"><span className="ui-num">{item.referral_phone_number || '-'}</span></div>
-                                    <div className="filings-ledger-cell" title={item.business_name}>{item.business_name || '-'}</div>
+                                    <div className="filings-ledger-cell ledger-cell-longtext" title={item.business_name}>{item.business_name || '-'}</div>
                                     <div className="filings-ledger-cell" title={item.business_type}>
                                         <StatusPill tone="neutral" dot={false}>
                                             {getDisplayName(businessTypes, item.business_type)}

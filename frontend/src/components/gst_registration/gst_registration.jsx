@@ -718,7 +718,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                                 <div className="filings-ledger-cell" title={item.username || ''}>{item.username || '-'}</div>
                                                 <div className="filings-ledger-cell" title={item.password || ''}>{item.password || '-'}</div>
                                                 <div className="filings-ledger-cell" style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{item.gstin}</div>
-                                                <div className="filings-ledger-cell" style={{ fontWeight: '600' }} title={item.business_name || item.legal_name || item.username || ''}>{item.business_name || item.legal_name || item.username || '-'}</div>
+                                                <div className="filings-ledger-cell ledger-cell-longtext" style={{ fontWeight: '600' }} title={item.business_name || item.legal_name || item.username || ''}>{item.business_name || item.legal_name || item.username || '-'}</div>
                                                 <div className="filings-ledger-cell" title={item.registration_type || ''}>{item.registration_type || '-'}</div>
                                                 <div className="filings-ledger-cell" title={item.ownership_category || ''}>{item.ownership_category || '-'}</div>
                                                 <div className="filings-ledger-cell" title={item.business_type || ''}>{item.business_type || '-'}</div>

@@ -275,14 +275,22 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
                 }
                 break;
             case 'business_name':
-                if (!trimmedValue) errorMsg = 'field required';
-                else if (trimmedValue.length > 200) errorMsg = 'Maximum 200 characters';
+                // Optional, matching AddCustomerModal (max-length only) and the unstarred
+                // "Business Name" label. Requiring it here blocked editing any customer
+                // registered without one -- and a customer is a person, not necessarily a
+                // business, so plenty legitimately have none.
+                if (trimmedValue && trimmedValue.length > 200) errorMsg = 'Maximum 200 characters';
                 break;
             case 'rm_id':
                 if (showRmField && !value) errorMsg = 'field required';
                 break;
             case 'op_id':
-                if (showOpField && !value) errorMsg = 'field required';
+                // Optional, matching AddCustomerModal (`case 'op_id': break;`) and the
+                // unstarred "Assigned OP" label on both forms. Requiring it here made
+                // every customer created without an OP permanently uneditable: Save
+                // failed validation, so no request was ever sent, and the only feedback
+                // was "Please correct the highlighted fields" -- pointing at a field the
+                // form never marks as required.
                 break;
             case 'language':
                 if (trimmedValue && trimmedValue.length > 50) errorMsg = 'Maximum 50 characters';
@@ -535,35 +543,47 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
                                     <h3 className="section-title">1. Customer Details</h3>
                                     <div className="form-grid-3">
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Full Name</label>
+                                            <label className="modal-label-caps">Full Name *</label>
                                             {editMode ? (
-                                                <input name="full_name" value={formData.full_name || ''} onChange={handleChange} className="modal-input-v4" />
+                                                <input name="full_name" value={formData.full_name || ''} onChange={handleChange} className={`modal-input-v4 ${fieldErrors.full_name ? 'error' : ''}`} />
                                             ) : (
                                                 <div className="gst-form-value-box highlight">{customer?.full_name}</div>
                                             )}
+                                            {editMode && fieldErrors.full_name && (
+                                                <div className="field-error-msg">{fieldErrors.full_name}</div>
+                                            )}
                                         </div>
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Mobile</label>
+                                            <label className="modal-label-caps">Mobile *</label>
                                             {editMode ? (
-                                                <input type="tel" name="mobile" value={formData.mobile || ''} onChange={handleChange} maxLength="10" className="modal-input-v4" />
+                                                <input type="tel" name="mobile" value={formData.mobile || ''} onChange={handleChange} maxLength="10" className={`modal-input-v4 ${fieldErrors.mobile ? 'error' : ''}`} />
                                             ) : (
                                                 <div className="gst-form-value-box highlight">{customer?.mobile}</div>
+                                            )}
+                                            {editMode && fieldErrors.mobile && (
+                                                <div className="field-error-msg">{fieldErrors.mobile}</div>
                                             )}
                                         </div>
                                         <div className="form-group-v4">
                                             <label className="modal-label-caps">Email</label>
                                             {editMode ? (
-                                                <input name="email" value={formData.email || ''} onChange={handleChange} className="modal-input-v4" />
+                                                <input name="email" value={formData.email || ''} onChange={handleChange} className={`modal-input-v4 ${fieldErrors.email ? 'error' : ''}`} />
                                             ) : (
                                                 <div className="gst-form-value-box">{customer?.email || '-'}</div>
+                                            )}
+                                            {editMode && fieldErrors.email && (
+                                                <div className="field-error-msg">{fieldErrors.email}</div>
                                             )}
                                         </div>
                                         <div className="form-group-v4">
                                             <label className="modal-label-caps">Business Name</label>
                                             {editMode ? (
-                                                <input name="business_name" value={formData.business_name || ''} onChange={handleChange} className="modal-input-v4" />
+                                                <input name="business_name" value={formData.business_name || ''} onChange={handleChange} className={`modal-input-v4 ${fieldErrors.business_name ? 'error' : ''}`} />
                                             ) : (
                                                 <div className="gst-form-value-box highlight">{customer?.business_name || '-'}</div>
+                                            )}
+                                            {editMode && fieldErrors.business_name && (
+                                                <div className="field-error-msg">{fieldErrors.business_name}</div>
                                             )}
                                         </div>
                                         <div className="form-group-v4">
@@ -703,7 +723,7 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
                                     <div className="form-grid-3">
                                         {showRmField && (
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Relationship Manager</label>
+                                            <label className="modal-label-caps">Relationship Manager *</label>
                                             {editMode ? (
                                                 <FormCustomSelect
                                                     name="rm_id"
@@ -718,9 +738,13 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
                                                     )}
                                                     placeholder="Select RM"
                                                     ariaLabel="Relationship manager"
+                                                    error={Boolean(fieldErrors.rm_id)}
                                                 />
                                             ) : (
                                                 <div className="gst-form-value-box">{customer?.rm_username || customer?.rm_name || customer?.rm_id || 'Unassigned'}</div>
+                                            )}
+                                            {editMode && fieldErrors.rm_id && (
+                                                <div className="field-error-msg">{fieldErrors.rm_id}</div>
                                             )}
                                         </div>
                                         )}

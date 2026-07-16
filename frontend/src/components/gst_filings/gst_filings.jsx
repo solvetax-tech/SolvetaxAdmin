@@ -23,6 +23,7 @@ import {
     getActiveReturnStatusRules,
     formatReturnStatusRulesSummary,
 } from '../../utils/gstFilingStatusConstants';
+import { pickFilingPayloadFields } from '../../utils/gstFilingFields';
 import {
     FILING_ATTRIBUTE_FIELD_OPTIONS,
     DOCUMENT_FILTER_FIELD_OPTIONS,
@@ -1179,53 +1180,16 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
             // If Auto-select is ON, we ensure it's enabled.
             payload.is_auto_enabled = autoSelectPeriod;
 
-            // 🔥 STRICT PAYLOAD FILTERING: Remove fields not expected by the backend filing schema
-            // This prevents "Extra inputs are not permitted" errors
-            const allowedFields = [
-                'customer_id',
-                'gst_registration_id',
-                'gstin',
-                'filing_period',
-                'filing_frequency',
-                'filing_category',
-                'taxpayer_type',
-                'turnover_details',
-                'state',
-                'rent',
-                'username',
-                'password',
-                'priority',
-                'status',
-                'remarks',
-                'rm_id',
-                'op_id',
-                'mode',
-                'business_name',
-                'business_type',
-                'business_description',
-                'email_id',
-                'rule14a',
-                'is_auto_enabled'
-            ];
-
-            Object.keys(payload).forEach(key => {
-                if (!allowedFields.includes(key)) {
-                    delete payload[key];
-                }
-            });
-
-            // Smart Whitelist: Remove restricted fields for PATCH requests
-            if (editingFiling) {
-                const restrictedFields = ['customer_id', 'gst_registration_id', 'gstin'];
-                restrictedFields.forEach(field => delete payload[field]);
-            } else {
-                delete payload.status;
-            }
+            // Both filing schemas are extra:"forbid", so a single field the target
+            // request does not accept 422s the WHOLE payload. See gstFilingFields.js
+            // for which fields belong to which request and why.
+            const body = pickFilingPayloadFields(payload, Boolean(editingFiling));
+            if (!editingFiling) delete body.status;
 
             const method = editingFiling ? 'patch' : 'post';
             const endpoint = editingFiling ? `/api/v1/gst-filings/${editingFiling.id}` : '/api/v1/gst-filings';
 
-            const response = await api[method](endpoint, payload);
+            const response = await api[method](endpoint, body);
 
             // Check for potential "Duplicate" message returned with 200 OK status
             if (response.data?.message && response.data.message.includes('already exists')) {
@@ -2527,7 +2491,11 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                                 setCreateForm(prev => ({
                                                                     ...prev,
                                                                     is_auto_enabled: newState,
-                                                                    filing_period: newState ? calculatePreviousPeriod(prev.filing_frequency) : prev.filing_period
+                                                                    // Editing: is_auto_enabled still saves, but the period itself is
+                                                                    // fixed -- don't show a recalculated one that can never persist.
+                                                                    filing_period: (newState && !editingFiling)
+                                                                        ? calculatePreviousPeriod(prev.filing_frequency)
+                                                                        : prev.filing_period
                                                                 }));
                                                             }}
                                                         >
@@ -2542,7 +2510,11 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                                 setCreateForm(prev => ({
                                                                     ...prev,
                                                                     is_auto_enabled: newState,
-                                                                    filing_period: newState ? calculatePreviousPeriod(prev.filing_frequency) : prev.filing_period
+                                                                    // Editing: is_auto_enabled still saves, but the period itself is
+                                                                    // fixed -- don't show a recalculated one that can never persist.
+                                                                    filing_period: (newState && !editingFiling)
+                                                                        ? calculatePreviousPeriod(prev.filing_frequency)
+                                                                        : prev.filing_period
                                                                 }));
                                                             }}
                                                         >
@@ -2556,6 +2528,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                 </div>
 
                                                 {/* COLUMN 2: Period Dropdown & Warning Badge */}
+                                                {/* Period is identity: fixed once the filing exists (see gstFilingFields.js). */}
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                                     <div style={{ width: '100%' }}>
                                                         <FormCustomSelect
@@ -2563,7 +2536,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                             name="filing_period"
                                                             value={createForm.filing_period}
                                                             onChange={(e) => setCreateForm({ ...createForm, filing_period: e.target.value })}
-                                                            disabled={autoSelectPeriod}
+                                                            disabled={autoSelectPeriod || Boolean(editingFiling)}
                                                             options={optionsFromPairs([
                                                                 ...(!autoSelectPeriod ? [{ value: '', label: 'Select Period' }] : []),
                                                                 ...generateFilingPeriods(createForm.filing_frequency)
@@ -2579,7 +2552,13 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                         />
                                                     </div>
 
-                                                    {autoSelectPeriod && createForm.filing_period && createForm.filing_period !== "" && 
+                                                    {editingFiling && (
+                                                        <p style={{ margin: 0, fontSize: '10px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                                                            Period is fixed once the filing exists. Create a new filing for another period.
+                                                        </p>
+                                                    )}
+
+                                                    {autoSelectPeriod && createForm.filing_period && createForm.filing_period !== "" &&
                                                         existingPeriods.some(ep => ep === normalizePeriod(createForm.filing_period)) && (
                                                         <div 
                                                             className="warning-badge-v4" 

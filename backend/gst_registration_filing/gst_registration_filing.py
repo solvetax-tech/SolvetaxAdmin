@@ -259,6 +259,44 @@ _LEAD_DAYS_YEARLY_ANNUAL = 7
 
 _FILING_FREQUENCY_TO_SERVICE_ID = {"MONTHLY": 4, "QUARTERLY": 5, "YEARLY": 6}
 
+# Identity sync: gst_filings column -> gst_registration column. When a filing is
+# linked to a registration, editing the filing writes these back to the master
+# record ("Identity Sync Active" in the edit modal).
+#
+# EVERY VALUE MUST BE A REAL gst_registration COLUMN. This map is interpolated
+# straight into an UPDATE, so a name that does not exist raises
+# UndefinedColumnError, which aborts the whole transaction and fails the ENTIRE
+# edit with a generic 500 -- even when the user only touched something unrelated
+# like status. Two entries did exactly that, which is why no filing linked to a
+# registration could be edited at all:
+#
+#   "taxpayer_type": "taxpayer_type" -- gst_registration has no such column. The
+#       equivalent is `registration_type` (same REGULAR/COMPOSITION vocabulary).
+#       Deliberately NOT remapped: this path has never written that column, and
+#       starting to is a product decision, not a bug fix. The filing's own
+#       taxpayer_type still updates normally.
+#   "business_description": "business_description" -- gst_registration has no
+#       such column and no equivalent. It is a filing-only field.
+#
+# Both were dropped rather than remapped, so the sync now does what the modal
+# actually promises: State, Frequency, Turnover (plus login/identity fields).
+#
+# Before adding an entry, verify the target column exists:
+#     python db/checks/verify_gst_filing_sync_map.py
+# It checks this map against the live schema and exits non-zero on a bad column.
+FILING_TO_REGISTRATION_SYNC = {
+    "gstin": "gstin",
+    "turnover_details": "turnover_details",
+    "filing_frequency": "filing_preference",
+    "state": "state",
+    "language": "language",
+    "gst_reg_status": "registration_status",
+    "username": "username",
+    "password": "password",
+    "business_name": "business_name",
+    "business_type": "business_type",
+}
+
 
 def _gst_filing_table_filings_tag() -> str:
     """Redis cache tag for GET ``/table/filings`` (``gst_filings`` only)."""
@@ -2026,24 +2064,10 @@ async def update_gst_filing(
 
                 # Keep shared GST registration fields in sync when this filing is linked.
                 if new_reg:
-                    filing_to_registration = {
-                        "gstin": "gstin",
-                        "taxpayer_type": "taxpayer_type",
-                        "turnover_details": "turnover_details",
-                        "filing_frequency": "filing_preference",
-                        "state": "state",
-                        "language": "language",
-                        "gst_reg_status": "registration_status",
-                        "username": "username",
-                        "password": "password",
-                        "business_name": "business_name",
-                        "business_type": "business_type",
-                        "business_description": "business_description",
-                    }
                     reg_fields = []
                     reg_values = []
                     reg_idx = 1
-                    for filing_key, reg_col in filing_to_registration.items():
+                    for filing_key, reg_col in FILING_TO_REGISTRATION_SYNC.items():
                         if filing_key in update_data:
                             reg_fields.append(f"{reg_col}=${reg_idx}")
                             reg_values.append(update_data[filing_key])

@@ -19,6 +19,8 @@ from backend.customer_service.bulk_lead_assignment import (
 from backend.customer_service.schemas import (
     CustomerServiceBulkAssignCandidatesOut,
     CustomerServiceBulkAssignExecuteIn,
+    CustomerServiceCreateIn,
+    CustomerServiceCreateOut,
     CustomerServiceDetailOut,
     CustomerServiceListItemOut,
     CustomerServicePatchIn,
@@ -230,7 +232,7 @@ async def filter_customer_services_staff(
                 c.mobile,
                 sc.service_name
             FROM {DB_SCHEMA}.customer_services cs
-            JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+            LEFT JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
             LEFT JOIN LATERAL (
                 SELECT sc.service_name
                 FROM {DB_SCHEMA}.service_config sc
@@ -245,7 +247,7 @@ async def filter_customer_services_staff(
         cnt_sql = f"""
             SELECT COUNT(*)::bigint
               FROM {DB_SCHEMA}.customer_services cs
-              JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+              LEFT JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
             {where_sql}
         """
         try:
@@ -338,6 +340,110 @@ async def bulk_assign_execute(
     return await svc_bulk_assign_execute(payload, current_user)
 
 
+@router.post(
+    "/create",
+    response_model=CustomerServiceCreateOut,
+    status_code=201,
+    summary="Create one customer service directly",
+    description=(
+        "Creates a single customer_services row. `customer_id` is OPTIONAL -- omit it "
+        "to record a service that is not yet attached to a customer. All other "
+        "creation paths go through customer registration; this is the direct route."
+    ),
+    responses={
+        400: {"description": "Unknown service_code, or customer_id/rm_id/op_id does not exist"},
+        409: {"description": "This service_code already exists for that customer (or already exists unattached)"},
+    },
+)
+async def create_customer_service(
+    payload: CustomerServiceCreateIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    role, emp_id = _ctx(current_user)
+    _require_emp(role, emp_id)
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        # service_code must exist and be active. Matched the same unsargable-safe
+        # way the rest of the module does (upper(btrim(...))), which the
+        # idx_customer_services_service_code_norm expression index mirrors.
+        svc = await conn.fetchrow(
+            f"""
+            SELECT service_code
+            FROM {DB_SCHEMA}.service_config
+            WHERE upper(btrim(service_code)) = upper(btrim($1))
+              AND is_active IS NOT DISTINCT FROM TRUE
+            """,
+            payload.service_code,
+        )
+        if not svc:
+            _raise_validation({"service_code": "Unknown or inactive service_code."})
+
+        # Validate the optional FKs up front so the client gets a 400 naming the
+        # bad field, rather than a raw ForeignKeyViolation.
+        if payload.customer_id is not None:
+            ok = await conn.fetchval(
+                f"SELECT 1 FROM {DB_SCHEMA}.customers WHERE customer_id = $1", payload.customer_id
+            )
+            if not ok:
+                _raise_validation({"customer_id": "Customer does not exist."})
+
+        for field, value in (("rm_id", payload.rm_id), ("op_id", payload.op_id)):
+            if value is None:
+                continue
+            ok = await conn.fetchval(
+                f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE emp_id = $1 AND is_active IS TRUE",
+                value,
+            )
+            if not ok:
+                _raise_validation({field: "Employee does not exist or is inactive."})
+
+        try:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {DB_SCHEMA}.customer_services (
+                    customer_id, service_code, service_status,
+                    rm_id, op_id, followup_at, followup_remarks, is_active
+                )
+                VALUES ($1, $2, COALESCE($3, 'PENDING'), $4, $5, $6, $7, COALESCE($8, TRUE))
+                RETURNING id, customer_id, service_code, service_status,
+                          rm_id, op_id, followup_at, is_active, created_at
+                """,
+                payload.customer_id,
+                svc["service_code"],
+                payload.service_status,
+                payload.rm_id,
+                payload.op_id,
+                payload.followup_at,
+                payload.followup_remarks,
+                payload.is_active,
+            )
+        except asyncpg.UniqueViolationError:
+            # uq_customer_services_customer_service_code (customer_id, service_code).
+            # It is NULLS NOT DISTINCT, so this also fires for a second unattached
+            # row with the same service_code -- which is what stops a retried
+            # request from silently duplicating.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Service '{svc['service_code']}' already exists for "
+                    + (f"customer {payload.customer_id}." if payload.customer_id is not None
+                       else "an unattached record.")
+                ),
+            )
+        except asyncpg.ForeignKeyViolationError:
+            _raise_validation({"customer_id": "Referenced row no longer exists."})
+
+    # Lists/counts are Redis-cached; without this the new row is invisible until TTL.
+    await _invalidate_customer_services_index_caches()
+
+    logger.info(
+        "customer_service_created id=%s customer_id=%s service_code=%s by emp_id=%s",
+        row["id"], row["customer_id"], row["service_code"], emp_id,
+    )
+    return CustomerServiceCreateOut(**dict(row))
+
+
 @router.get(
     "/{customer_service_id}",
     response_model=CustomerServiceDetailOut,
@@ -391,7 +497,7 @@ async def get_customer_service_detail(
                 rm.first_name AS rm_first_name,
                 op.first_name AS op_first_name
             FROM {DB_SCHEMA}.customer_services cs
-            JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+            LEFT JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
             LEFT JOIN {DB_SCHEMA}.service_config sc
               ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
              AND sc.is_active IS NOT DISTINCT FROM TRUE
