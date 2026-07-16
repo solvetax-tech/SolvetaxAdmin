@@ -59,14 +59,16 @@ app = FastAPI(
 from backend.utils import get_db_pool, close_db_pool
 from backend.redis_cache import close_redis_client
 from backend.schedular.schedular import start_scheduler_if_enabled, stop_scheduler
-from backend.db_indexes import ensure_performance_indexes
 import asyncio
 
 @app.on_event("startup")
 async def _startup_init_db_pool():
     await get_db_pool()
-    # Ensure performance indexes exist without blocking startup (idempotent, best-effort).
-    asyncio.create_task(ensure_performance_indexes())
+    # Indexes are no longer created here. They live in db/migrations/ (see
+    # 2026-07-17_performance_indexes.sql) and are applied deliberately, because
+    # a failed CREATE INDEX CONCURRENTLY leaves an INVALID index that
+    # IF NOT EXISTS then skips forever -- so retrying at every boot never
+    # repaired it, it only hid it behind a warning log.
     start_scheduler_if_enabled()
 
 
