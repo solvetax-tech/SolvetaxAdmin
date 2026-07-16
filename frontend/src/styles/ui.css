@@ -71,12 +71,19 @@
 /* compact icon action in dense table rows */
 .ui-btn--icon.ui-btn--sm { width: 28px; height: 28px; }
 
-/* ---------------- Pills / status badges ---------------- */
+/* ---------------- Pills / status badges ----------------
+   Two kinds of pill, and the difference is deliberate:
+   - TONED (success/warning/danger/info/accent) = a status. The tone owns the
+     whole pill: tinted background, border, dot AND label, so OPEN reads amber
+     and RESOLVED green at a glance.
+   - NEUTRAL = metadata (Category, Type, Business Type). No status to signal,
+     so the label is a plain value at full contrast.
+   Either way the family matches every other value in the row. */
 .ui-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: var(--font-accent);
+  font-family: var(--font-body);
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -86,15 +93,18 @@
   border: 1px solid transparent;
   white-space: nowrap;
   line-height: 1.45;
+  color: var(--text-primary);
 }
-.ui-pill__dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+.ui-pill__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--pill-tone, currentColor); flex: none; }
 
-.ui-pill--neutral { color: var(--text-muted); background: rgba(var(--fg-rgb), 0.06); border-color: rgba(var(--fg-rgb), 0.12); }
-.ui-pill--accent  { color: var(--accent);  background: var(--accent-soft);  border-color: color-mix(in srgb, var(--accent) 28%, transparent); }
-.ui-pill--success { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 28%, transparent); }
-.ui-pill--warning { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 28%, transparent); }
-.ui-pill--danger  { color: var(--danger);  background: var(--danger-soft);  border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
-.ui-pill--info    { color: var(--info);    background: var(--info-soft);    border-color: color-mix(in srgb, var(--info) 28%, transparent); }
+/* Neutral = metadata: label stays the full-contrast ink from .ui-pill above. */
+.ui-pill--neutral { --pill-tone: var(--text-muted); background: rgba(var(--fg-rgb), 0.06); border-color: rgba(var(--fg-rgb), 0.12); }
+/* Toned = status: the label carries the tone too. */
+.ui-pill--accent  { --pill-tone: var(--accent);  color: var(--accent);  background: var(--accent-soft);  border-color: color-mix(in srgb, var(--accent) 28%, transparent); }
+.ui-pill--success { --pill-tone: var(--success); color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 28%, transparent); }
+.ui-pill--warning { --pill-tone: var(--warning); color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 28%, transparent); }
+.ui-pill--danger  { --pill-tone: var(--danger);  color: var(--danger);  background: var(--danger-soft);  border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
+.ui-pill--info    { --pill-tone: var(--info);    color: var(--info);    background: var(--info-soft);    border-color: color-mix(in srgb, var(--info) 28%, transparent); }
 
 /* ---------------- Data table ---------------- */
 .ui-table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: var(--font-body); }
@@ -107,7 +117,7 @@
   letter-spacing: 0.06em;
   color: var(--text-primary);
   padding: 12px 16px;
-  background: var(--bg-surface);
+  background: var(--bg-surface-2);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
@@ -128,8 +138,11 @@
 .ui-table tbody tr:hover td { background: var(--bg-hover); }
 .ui-table tbody tr:last-child td { border-bottom: none; }
 /* Numeric / identifier cells — tabular monospace, the data signature. */
+/* Numeric values (IDs, GSTINs, periods, amounts) read in the SAME family as
+   every other value — tabular-nums keeps the digits column-aligned without a
+   second typeface in the row. */
 .ui-num, .ui-table .ui-num {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   color: var(--text-primary);
@@ -376,10 +389,21 @@
 .premium-filter-overlay {
   z-index: 12000 !important;
 }
-/* Drawer panels that are positioned siblings (not children) of their overlay */
+/* Drawer panels that are positioned siblings (not children) of their overlay.
+   Their overlay is raised to 12000 above, so a panel left below that gets
+   covered by its own backdrop: the drawer looks dimmed, every click lands on
+   the overlay, and because the overlay's handler is onClose the drawer shuts
+   instead of accepting input. Any sibling panel MUST out-rank its overlay.
+   (Panels nested INSIDE their overlay -- e.g. .premium-drawer-right,
+   .crm-lead-details-drawer -- are safe and deliberately not listed.) */
 .gst-details-drawer,
 .gst-details-drawer.itr-details-drawer,
-.side-panel-drawer {
+.side-panel-drawer,
+.crm-drawer-panel,
+.followups-calendar-drawer,
+.followups-alerts-drawer,
+.followups-filter-drawer,
+.followups-history-drawer {
   z-index: 12001 !important;
 }
 
@@ -450,6 +474,9 @@
    column). Force an OPAQUE accent-tinted background. The row class is
    tripled so this out-specifies the per-feature :hover rules whatever
    the CSS load order; sticky cells keep their normal opaque bg at rest.
+   The tint mixes over --bg-surface because that is what the rows sit
+   on; mixing over --bg-app left the frozen cells a different tone than
+   the row they belong to.
    ============================================================ */
 .filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .gst-sticky-actions,
 .filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .customer-actions-sticky,
@@ -464,5 +491,5 @@
 .itr-ledger-row.itr-ledger-row.itr-ledger-row:hover .itr-ledger-sticky-id,
 .ledger-row.ledger-row.ledger-row:hover .gst-sticky-actions,
 .ledger-row.ledger-row.ledger-row:hover .ledger-sticky-id {
-  background-color: color-mix(in srgb, var(--accent) 8%, var(--bg-app)) !important;
+  background-color: color-mix(in srgb, var(--accent) 8%, var(--bg-surface)) !important;
 }

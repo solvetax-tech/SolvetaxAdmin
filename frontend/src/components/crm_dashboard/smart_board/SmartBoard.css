@@ -113,7 +113,7 @@
     position: sticky;
     top: 0;
     z-index: 10;
-    background: var(--bg-surface);
+    background: var(--bg-surface-2);
     padding: 12px 16px;
     text-align: center;
     font-family: var(--font-accent);
@@ -132,8 +132,8 @@
     position: sticky;
     left: 0;
     z-index: 5;
-    background-color: var(--bg-app) !important;
-    border-right: 1px solid var(--border);
+    background-color: var(--bg-surface) !important;
+    border-right: 1px solid var(--border-subtle);
 }
 
 .gst-registrations-table thead th:first-child {
@@ -189,12 +189,12 @@
     color: var(--text-primary) !important;
 }
 
-.stage-badge.fresh_lead { color: var(--info); background: rgba(var(--info-rgb), 0.1); }
-.stage-badge.follow_up { color: var(--warning); background: rgba(var(--warning-rgb), 0.1); }
+.stage-badge.fresh_lead { color: var(--text-primary); background: rgba(var(--info-rgb), 0.1); }
+.stage-badge.follow_up { color: var(--text-primary); background: rgba(var(--warning-rgb), 0.1); }
 .stage-badge.interested { color: var(--text-primary); background: rgba(var(--success-rgb), 0.1); }
 
 .active-badge.active { color: var(--text-primary); background: rgba(var(--success-rgb), 0.1); }
-.active-badge.inactive { color: var(--text-muted); background: rgba(var(--fg-rgb), 0.06); }
+.active-badge.inactive { color: var(--text-primary); background: rgba(var(--fg-rgb), 0.06); }
 
 .btn-table-action {
     background: transparent;

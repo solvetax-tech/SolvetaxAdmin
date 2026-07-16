@@ -1,19 +1,36 @@
 import React, { useEffect, useState } from 'react';
-import { Sun, Moon } from 'lucide-react';
-import { getTheme, toggleTheme, subscribeTheme } from '../../utils/themeManager';
+import { Sun, Moon, Palette } from 'lucide-react';
+import {
+    getTheme,
+    nextTheme,
+    toggleTheme,
+    subscribeTheme,
+    THEME_LABELS,
+} from '../../utils/themeManager';
+
+/** Icon per theme, keyed by the theme the toggle would switch TO. */
+const ICONS = {
+    dark: Moon,
+    light: Sun,
+    violet: Palette,
+};
 
 /**
- * Sidebar footer toggle that flips the app between light and dark themes.
- * Styled as a standard `nav-item footer-item` so it matches the Profile /
- * Settings entries in both the Dashboard and CRM sidebars.
+ * Sidebar footer control that cycles the app through its themes
+ * (Dark → White → Violet). It is labelled with the theme it switches TO, so
+ * the next click is predictable. Styled as a standard `nav-item footer-item`
+ * so it matches the Profile / Settings entries in both the Dashboard and CRM
+ * sidebars.
  */
 export default function ThemeToggle() {
     const [theme, setThemeState] = useState(getTheme());
 
     useEffect(() => subscribeTheme(setThemeState), []);
 
-    const isDark = theme === 'dark';
-    const label = isDark ? 'Light Mode' : 'Dark Mode';
+    // Advertise the destination, not the current state.
+    const next = nextTheme(theme);
+    const Icon = ICONS[next] || Sun;
+    const label = `${THEME_LABELS[next]} Mode`;
 
     return (
         <div
@@ -30,7 +47,7 @@ export default function ThemeToggle() {
             title={label}
             aria-label={label}
         >
-            <span className="nav-icon">{isDark ? <Sun size={18} /> : <Moon size={18} />}</span>
+            <span className="nav-icon"><Icon size={18} /></span>
             <span className="nav-label">{label}</span>
         </div>
     );

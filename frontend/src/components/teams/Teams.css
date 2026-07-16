@@ -139,7 +139,7 @@
 }
 
 .team-code-cell {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-size: 13px;
     color: var(--text-primary);
@@ -307,7 +307,7 @@
 
 .member-emp-id-badge {
     font-size: 11px;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     color: var(--text-primary);
     background: rgba(var(--fg-rgb), 0.05);
@@ -330,7 +330,7 @@
     /* neutral metadata chip — role name is not a status */
     background: rgba(var(--fg-rgb), 0.05);
     border: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
+    color: var(--text-primary);
 }
 
 .member-list-actions {
@@ -394,7 +394,7 @@
     background: rgba(var(--fg-rgb), 0.05);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-pill);
-    color: var(--text-secondary);
+    color: var(--text-primary);
     font-size: 12px;
 }
 

@@ -124,7 +124,7 @@
 }
 
 .scheduler-status-badge.stopped {
-  color: var(--text-muted);
+  color: var(--text-primary);
   background: rgba(var(--fg-rgb), 0.08);
 }
 
@@ -135,7 +135,7 @@
   padding: 3px 8px;
   border-radius: 6px;
   font-size: 11px;
-  color: rgba(var(--fg-rgb), 0.75);
+  color: var(--text-primary);
   background: rgba(var(--fg-rgb), 0.06);
   white-space: nowrap;
 }

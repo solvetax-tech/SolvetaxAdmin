@@ -2457,7 +2457,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                             {act.full_name || 'N/A'}
                                         </span>
                                         {/* Cust ID Badge */}
-                                        <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(var(--info-rgb), 0.06)', border: '1px solid rgba(var(--info-rgb), 0.12)', color: 'var(--info)', fontFamily: 'var(--font-mono)', fontWeight: 600, flexShrink: 0 }}>
+                                        <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(var(--info-rgb), 0.06)', border: '1px solid rgba(var(--info-rgb), 0.12)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontVariantNumeric: 'tabular-nums', fontWeight: 600, flexShrink: 0 }}>
                                             CID {act.customer_id || 'N/A'}
                                         </span>
                                     </div>
@@ -2491,7 +2491,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                         <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                             {act.service_name}
                                         </span>
-                                        <span style={{ fontSize: '9px', padding: '2px 5px', borderRadius: '4px', background: 'rgba(var(--fg-rgb), 0.04)', border: '1px solid rgba(var(--fg-rgb), 0.08)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                                        <span style={{ fontSize: '9px', padding: '2px 5px', borderRadius: '4px', background: 'rgba(var(--fg-rgb), 0.04)', border: '1px solid rgba(var(--fg-rgb), 0.08)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                                             {act.lead_id}
                                         </span>
                                     </div>

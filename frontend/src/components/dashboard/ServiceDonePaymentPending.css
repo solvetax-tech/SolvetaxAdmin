@@ -188,7 +188,7 @@
     text-transform: uppercase;
     border: 1px solid var(--border-subtle);
     background: rgba(var(--fg-rgb), 0.05);
-    color: var(--text-secondary);
+    color: var(--text-primary);
 }
 
 .sdpp-status-chip {
@@ -202,7 +202,7 @@
     letter-spacing: 0.04em;
     border: 1px solid var(--border-subtle);
     background: rgba(var(--fg-rgb), 0.05);
-    color: var(--text-secondary);
+    color: var(--text-primary);
 }
 
 .sdpp-col-pending {
@@ -213,7 +213,7 @@
     font-size: 12px;
     font-weight: 700;
     color: var(--text-primary);
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 

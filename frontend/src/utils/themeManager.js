@@ -1,16 +1,28 @@
 /**
  * @file themeManager.js
- * @description Single source of truth for the app's light/dark theme.
+ * @description Single source of truth for the app's theme.
  *
- * The theme is applied by setting `data-theme="light|dark"` on the document
- * root (<html>). All component CSS reads theme tokens (CSS custom properties)
+ * Three themes: dark, light (neutral white) and violet (the light palette
+ * with a violet cast). Applied by setting `data-theme` on the document root
+ * (<html>). All component CSS reads theme tokens (CSS custom properties)
  * defined in index.css, so flipping the attribute re-themes the whole app
  * instantly. The choice persists in localStorage.
  */
 
 const STORAGE_KEY = 'solvetax_theme';
 const DEFAULT_THEME = 'dark';
-const VALID = new Set(['light', 'dark']);
+
+/** Every theme, in the order the toggle cycles through them. */
+export const THEMES = ['dark', 'light', 'violet'];
+
+/** Human labels for the toggle. */
+export const THEME_LABELS = {
+    dark: 'Dark',
+    light: 'White',
+    violet: 'Violet',
+};
+
+const VALID = new Set(THEMES);
 
 const listeners = new Set();
 
@@ -46,9 +58,19 @@ export function setTheme(theme) {
     return next;
 }
 
-/** Flip between light and dark, returning the new theme. */
+/** Advance to the next theme in the cycle (dark → light → violet → dark). */
 export function toggleTheme() {
-    return setTheme(getTheme() === 'dark' ? 'light' : 'dark');
+    const i = THEMES.indexOf(getTheme());
+    return setTheme(THEMES[(i + 1) % THEMES.length]);
+}
+
+/**
+ * The theme the toggle would move to next — for labelling the control.
+ * @param {string} [current] Defaults to the persisted theme.
+ */
+export function nextTheme(current) {
+    const i = THEMES.indexOf(VALID.has(current) ? current : getTheme());
+    return THEMES[(i + 1) % THEMES.length];
 }
 
 /**

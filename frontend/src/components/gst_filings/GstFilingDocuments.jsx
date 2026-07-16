@@ -334,7 +334,7 @@ const GstFilingDocuments = ({
                                     <div className="filings-ledger-cell filings-ledger-sticky-id filings-docs-ledger-sticky-col-2">
                                         <span className="filings-ledger-id-text" style={{ fontWeight: '700' }}>{doc.gst_filing_id}</span>
                                     </div>
-                                    <div className="filings-ledger-cell filings-docs-col-3" style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
+                                    <div className="filings-ledger-cell filings-docs-col-3" style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontVariantNumeric: 'tabular-nums' }}>
                                         {doc.gstin || '-'}
                                     </div>
                                     <div className="filings-ledger-cell filings-docs-col-4">

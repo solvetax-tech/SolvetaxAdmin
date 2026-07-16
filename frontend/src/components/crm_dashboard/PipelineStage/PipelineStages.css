@@ -17,7 +17,7 @@
     text-transform: uppercase;
     background: rgba(var(--fg-rgb), 0.05);
     border: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
+    color: var(--text-primary);
 }
 
 .stage-mini {

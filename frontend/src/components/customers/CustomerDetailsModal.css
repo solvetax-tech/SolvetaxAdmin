@@ -118,8 +118,8 @@
     letter-spacing: 0.05em;
 }
 
-.header-badge-v4.view-mode { background: rgba(var(--info-rgb), 0.15); color: var(--info); border: 1px solid rgba(var(--info-rgb), 0.3); }
-.header-badge-v4.edit-mode { background: rgba(var(--warning-rgb), 0.15); color: var(--warning); border: 1px solid rgba(var(--warning-rgb), 0.3); }
+.header-badge-v4.view-mode { background: rgba(var(--info-rgb), 0.15); color: var(--text-primary); border: 1px solid rgba(var(--info-rgb), 0.3); }
+.header-badge-v4.edit-mode { background: rgba(var(--warning-rgb), 0.15); color: var(--text-primary); border: 1px solid rgba(var(--warning-rgb), 0.3); }
 
 .modal-close-btn {
     background: var(--bg-surface-2);

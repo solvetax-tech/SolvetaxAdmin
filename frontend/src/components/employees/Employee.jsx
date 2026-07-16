@@ -635,7 +635,7 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                                         )}
                                     </div>
                                     <div className="filings-ledger-cell">
-                                        <StatusPill tone={item.is_active ? 'success' : 'neutral'}>
+                                        <StatusPill tone={item.is_active ? 'success' : 'danger'}>
                                             {item.is_active ? 'Active' : 'Inactive'}
                                         </StatusPill>
                                     </div>

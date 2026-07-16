@@ -156,14 +156,14 @@
 
 /* Phone column (3rd cell in both grids) reads as an aligned numeric value */
 .cs-leads-grid .filings-ledger-cell:nth-child(3) {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
 }
 
 .cs-leads-grid .customer-id-green-v4 {
     color: var(--text-primary);
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 
@@ -173,11 +173,12 @@
     padding: 3px 9px;
     border-radius: var(--radius-pill);
     border: 1px solid transparent;
-    font-family: var(--font-accent);
+    font-family: var(--font-body);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.05em;
     text-transform: uppercase;
+    color: var(--text-primary);
 }
 
 .cs-status-pill.resolved {
@@ -378,8 +379,11 @@
     margin-left: 6px;
 }
 
+/* Static chips render inside the inline-preview table row: label at full contrast.
+   The interactive .cs-chip-tag button (edit/create drawer) keeps its own tone. */
 .cs-chip-tag.static {
     cursor: default;
+    color: var(--text-primary);
 }
 
 .cs-chip-empty {

@@ -188,7 +188,7 @@
 .dropdown-item .item-sub {
     color: var(--text-primary);
     font-size: 11px;
-    font-family: monospace;
+    font-family: var(--font-body);
 }
 
 .dropdown-item.loading, .dropdown-item.no-results {

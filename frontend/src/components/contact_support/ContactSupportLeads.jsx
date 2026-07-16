@@ -628,8 +628,8 @@ const ContactSupportLeads = () => {
             />
 
             {editRow && (
-                <div className="premium-filter-overlay show" onClick={closeEdit}>
-                    <div className="premium-edit-modal-v4" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                <div className="premium-filter-overlay app-side-drawer-mode show" onClick={closeEdit}>
+                    <div className="premium-edit-modal-v4" onClick={(e) => e.stopPropagation()}>
                         <button type="button" className="btn-close-modal-v4" onClick={closeEdit} aria-label="Close">
                             <X size={20} />
                         </button>
@@ -757,8 +757,8 @@ const ContactSupportLeads = () => {
             )}
 
             {createOpen && (
-                <div className="premium-filter-overlay show" onClick={closeCreate}>
-                    <div className="premium-edit-modal-v4" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                <div className="premium-filter-overlay app-side-drawer-mode show" onClick={closeCreate}>
+                    <div className="premium-edit-modal-v4" onClick={(e) => e.stopPropagation()}>
                         <button type="button" className="btn-close-modal-v4" onClick={closeCreate} aria-label="Close">
                             <X size={20} />
                         </button>

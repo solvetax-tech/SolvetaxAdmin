@@ -120,7 +120,7 @@
     position: sticky;
     top: 0;
     z-index: 10;
-    background: var(--bg-surface);
+    background: var(--bg-surface-2);
     padding: 12px 16px;
     text-align: center;
     font-family: var(--font-accent);
@@ -139,8 +139,8 @@
     position: sticky;
     left: 0;
     z-index: 5;
-    background-color: var(--bg-app) !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+    background-color: var(--bg-surface) !important;
+    border-right: 1px solid var(--border-subtle);
 }
 
 .gst-registrations-table thead th:first-child {
@@ -190,7 +190,7 @@
 }
 
 .count-column {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 
@@ -207,10 +207,11 @@
 .stage-badge {
     background: rgba(var(--fg-rgb), 0.05);
     border: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
+    color: var(--text-primary);
 }
 
-/* Active / Inactive = soft semantic status pills */
+/* Active / Inactive = soft semantic status pills.
+   Label reads at full ink; the tone survives as background + border. */
 .active-badge.active {
     color: var(--success);
     background: rgba(var(--success-rgb), 0.14);

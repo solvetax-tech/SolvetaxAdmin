@@ -152,11 +152,14 @@
 }
 
 /* ============================================================
- * LIGHT THEME — "cockpit by day": a warm-neutral green-grey canvas
- * with white cards, deep-ink text and soft layered shadows. Only
+ * LIGHT THEME — "cockpit by day": a clean neutral white canvas with
+ * white cards, deep-ink text and soft layered shadows. Only
  * surfaces/text/borders/shadows/accent-lightness flip.
+ *
+ * This block is shared: the selector matches BOTH light themes, and
+ * [data-theme="violet"] below re-tints just the neutrals on top of it.
  * ============================================================ */
-:root[data-theme="light"] {
+:root:is([data-theme="light"], [data-theme="violet"]) {
   --fg-rgb: 24, 26, 38;
   --bg-rgb: 255, 255, 255;
 
@@ -222,6 +225,39 @@
   --text-main: var(--text-primary);
   --border-light: var(--border);
   --bg-dark: var(--bg-app);
+}
+
+/* ============================================================
+ * VIOLET THEME — the light cockpit with a violet cast. It inherits every
+ * token from the light block above (that selector matches Violet too), so
+ * only the neutrals are re-tinted here: the canvas, and the ink channel
+ * that drives every rgba(var(--fg-rgb), a) hairline and chip tint.
+ * Cards stay pure white so data still sits on a clean surface, and the
+ * accent/semantic colours are untouched — status must read the same in
+ * all three themes.
+ * ============================================================ */
+:root[data-theme="violet"] {
+  /* Violet-leaning ink: every fg-based border/tint picks this up for free. */
+  --fg-rgb: 46, 40, 104;
+
+  /* The canvas has to carry the theme on its own — cards stay white, so if
+     the violet is timid here the whole app just reads as White mode. */
+  --bg-app: #e7e2fb;
+  --bg-app-2: #dbd4f7;
+  --bg-surface-2: #f1eefc;
+  --bg-hover: rgba(46, 40, 104, 0.05);
+
+  --border: rgba(46, 40, 104, 0.13);
+  --border-strong: rgba(46, 40, 104, 0.2);
+  --border-subtle: rgba(46, 40, 104, 0.08);
+
+  /* Shadows carry the same cast, so they read as designed, not dirty. */
+  --shadow-sm: 0 1px 2px rgba(46, 40, 104, 0.07), 0 1px 3px rgba(46, 40, 104, 0.05);
+  --shadow-md: 0 4px 12px rgba(46, 40, 104, 0.09), 0 2px 4px rgba(46, 40, 104, 0.05);
+  --shadow-lg: 0 16px 40px rgba(46, 40, 104, 0.13);
+  --shadow-xl: 0 32px 64px rgba(46, 40, 104, 0.17);
+  --shadow-rgb: 46, 40, 104;
+  --scrollbar-thumb: rgba(46, 40, 104, 0.18);
 }
 
 *,
@@ -706,37 +742,37 @@ h1, h2, h3, h4, h5, h6 {
  * solid mint/green backgrounds, so their label must stay white
  * (not the deep-green --text-primary the codemod applied).
  * ============================================================ */
-:root[data-theme="light"] .btn-primary,
-:root[data-theme="light"] .btn-primary-v3,
-:root[data-theme="light"] .btn-primary-v4,
-:root[data-theme="light"] .btn-primary-glow,
-:root[data-theme="light"] .btn-action-primary,
-:root[data-theme="light"] .btn-save-v4,
-:root[data-theme="light"] .btn-apply-v4,
-:root[data-theme="light"] .btn-submit-v4,
-:root[data-theme="light"] .btn-confirm-activate,
-:root[data-theme="light"] .btn-confirmation-confirm,
-:root[data-theme="light"] .btn-create-filing,
-:root[data-theme="light"] .btn-create-team,
-:root[data-theme="light"] .gst-btn-primary,
-:root[data-theme="light"] .cp-btn-primary,
-:root[data-theme="light"] .btn-add-employee-minimal,
-:root[data-theme="light"] .pay-btn,
-:root[data-theme="light"] .btn-pay,
-:root[data-theme="light"] .premium-pay-btn {
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-primary,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-primary-v3,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-primary-v4,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-primary-glow,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-action-primary,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-save-v4,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-apply-v4,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-submit-v4,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-confirm-activate,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-confirmation-confirm,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-create-filing,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-create-team,
+:root:is([data-theme="light"], [data-theme="violet"]) .gst-btn-primary,
+:root:is([data-theme="light"], [data-theme="violet"]) .cp-btn-primary,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-add-employee-minimal,
+:root:is([data-theme="light"], [data-theme="violet"]) .pay-btn,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-pay,
+:root:is([data-theme="light"], [data-theme="violet"]) .premium-pay-btn {
   color: #ffffff;
 }
 
-:root[data-theme="light"] .btn-primary svg,
-:root[data-theme="light"] .btn-primary-glow svg,
-:root[data-theme="light"] .btn-action-primary svg,
-:root[data-theme="light"] .btn-save-v4 svg,
-:root[data-theme="light"] .btn-apply-v4 svg,
-:root[data-theme="light"] .btn-submit-v4 svg,
-:root[data-theme="light"] .btn-confirm-activate svg,
-:root[data-theme="light"] .btn-confirmation-confirm svg,
-:root[data-theme="light"] .gst-btn-primary svg,
-:root[data-theme="light"] .cp-btn-primary svg {
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-primary svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-primary-glow svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-action-primary svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-save-v4 svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-apply-v4 svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-submit-v4 svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-confirm-activate svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .btn-confirmation-confirm svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .gst-btn-primary svg,
+:root:is([data-theme="light"], [data-theme="violet"]) .cp-btn-primary svg {
   color: #ffffff;
 }
 
@@ -748,26 +784,26 @@ h1, h2, h3, h4, h5, h6 {
  * ============================================================ */
 
 /* Dashboard / follow-up KPI stat cards (were charcoal gradient) */
-:root[data-theme="light"] .stat-card-premium {
+:root:is([data-theme="light"], [data-theme="violet"]) .stat-card-premium {
   background: linear-gradient(135deg, #ffffff 0%, #f2efe8 100%);
   border-color: rgba(17, 17, 17, 0.1);
   box-shadow: 0 6px 18px rgba(17, 17, 17, 0.06);
 }
-:root[data-theme="light"] .stat-card-premium:hover {
+:root:is([data-theme="light"], [data-theme="violet"]) .stat-card-premium:hover {
   background: linear-gradient(135deg, #ffffff 0%, #ecefec 100%);
   border-color: rgba(17, 17, 17, 0.16);
 }
 
 /* CRM knowledge glass panels (were dark navy) */
-:root[data-theme="light"] {
+:root:is([data-theme="light"], [data-theme="violet"]) {
   --crm-bg-glass: rgba(255, 255, 255, 0.88);
 }
 
-/* Marketing-style mint -> white gradient backdrop for the app shells
-   (matches the solvetax.in light look). Cards/panels keep white surfaces. */
-:root[data-theme="light"] .dashboard-layout-wrapper,
-:root[data-theme="light"] .dashboard-main,
-:root[data-theme="light"] .crm-layout-wrapper,
-:root[data-theme="light"] .crm-main {
-  background: linear-gradient(135deg, #dff1ea 0%, #e9f6f0 30%, #f4fbf8 65%, #ffffff 100%);
+/* App shells take the theme's own canvas — no tinted gradient of their own.
+   White stays white and Violet stays violet, on both the main system and CRM. */
+:root:is([data-theme="light"], [data-theme="violet"]) .dashboard-layout-wrapper,
+:root:is([data-theme="light"], [data-theme="violet"]) .dashboard-main,
+:root:is([data-theme="light"], [data-theme="violet"]) .crm-layout-wrapper,
+:root:is([data-theme="light"], [data-theme="violet"]) .crm-main {
+  background: var(--bg-app);
 }

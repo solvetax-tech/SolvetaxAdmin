@@ -379,7 +379,7 @@ body {
     position: sticky;
     top: 0;
     z-index: 10;
-    background: var(--bg-surface);
+    background: var(--bg-surface-2);
     padding: 12px 16px;
     text-align: left;
     font-weight: 700;
@@ -398,8 +398,8 @@ body {
     position: sticky;
     left: 0;
     z-index: 5;
-    background-color: var(--bg-app) !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+    background-color: var(--bg-surface) !important;
+    border-right: 1px solid var(--border-subtle);
 }
 
 .gst-registrations-table thead th:first-child {
@@ -427,10 +427,10 @@ body {
 }
 
 /* Specialized Cell Styles */
-.id-cell { width: 60px; min-width: 60px; text-align: center; color: var(--text-primary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.id-cell { width: 60px; min-width: 60px; text-align: center; color: var(--text-primary); font-family: var(--font-body); font-variant-numeric: tabular-nums; }
 .period-cell { width: 100px; min-width: 100px; text-align: center; }
 .period-tag { background: rgba(var(--fg-rgb), 0.05); padding: 4px 10px; border-radius: 6px; font-weight: 700; color: var(--text-primary); }
-.gstin-cell { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-primary); letter-spacing: 0.05em; font-size: 12px; }
+.gstin-cell { font-family: var(--font-body); font-variant-numeric: tabular-nums; color: var(--text-primary); letter-spacing: 0.05em; font-size: 12px; }
 
 .customer-info-box {
     display: flex;
@@ -1212,8 +1212,8 @@ body {
 }
 
 .priority-tag.low { background: rgba(var(--fg-rgb), 0.05); color: var(--text-muted); border-color: rgba(var(--fg-rgb), 0.05); }
-.priority-tag.normal { background: rgba(var(--info-rgb), 0.14); color: var(--info); border-color: rgba(var(--info-rgb), 0.32); }
-.priority-tag.high { background: rgba(var(--danger-rgb), 0.14); color: var(--danger); border-color: rgba(var(--danger-rgb), 0.32); animation: pulse-border 2s infinite; }
+.priority-tag.normal { background: rgba(var(--info-rgb), 0.14); color: var(--text-primary); border-color: rgba(var(--info-rgb), 0.32); }
+.priority-tag.high { background: rgba(var(--danger-rgb), 0.14); color: var(--text-primary); border-color: rgba(var(--danger-rgb), 0.32); animation: pulse-border 2s infinite; }
 
 .type-tag { font-size: 10px; font-weight: 700; color: var(--text-primary); display: block; }
 .freq-subtext { font-size: 9px; color: var(--text-muted); display: block; }
@@ -1786,7 +1786,7 @@ body {
     font-size: 11px;
     font-weight: 600;
     color: var(--text-primary);
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 
@@ -2091,7 +2091,7 @@ body {
 }
 
 .filings-ledger-header {
-    background: var(--bg-surface);
+    background: var(--bg-surface-2);
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
@@ -2114,7 +2114,7 @@ body {
     align-items: center !important;
     justify-content: center !important;
     border-right: 1px solid var(--border-subtle);
-    background: var(--bg-surface);
+    background: var(--bg-surface-2);
     border-bottom: 1px solid var(--border);
 }
 
@@ -2160,7 +2160,7 @@ body {
 
 .filings-ledger-header .filings-ledger-sticky-id {
     z-index: 30 !important;
-    background-color: var(--bg-surface) !important;
+    background-color: var(--bg-surface-2) !important;
     flex: none !important;
 }
 
@@ -2187,8 +2187,8 @@ body {
     min-width: var(--filings-col-3) !important; 
     max-width: var(--filings-col-3) !important; 
     color: var(--text-primary) !important; /* White */
-    border-right: 1px solid rgba(var(--fg-rgb), 0.12) !important;
-    box-shadow: 2px 0 5px rgba(var(--shadow-rgb), 0.5); /* Stronger shadow to mask transition */
+    border-right: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 .filings-ledger-row:hover .filings-ledger-sticky-id {
@@ -2203,13 +2203,14 @@ body {
     left: auto !important;
     z-index: auto !important;
     box-shadow: none !important;
-    border-right: none !important;
+    /* Ordinary scrolling columns now, so they carry the ordinary hairline */
+    border-right: 1px solid var(--border-subtle) !important;
     background: transparent !important;
     background-color: transparent !important;
 }
 
 .filings-ledger-id-text {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     color: inherit !important; /* Use color from sticky-col class */
@@ -2249,8 +2250,8 @@ body {
     width: var(--docs-col-2) !important;
     min-width: var(--docs-col-2) !important; 
     max-width: var(--docs-col-2) !important; 
-    border-right: 1px solid rgba(var(--fg-rgb), 0.1) !important;
-    box-shadow: 1px 0 0 rgba(var(--fg-rgb), 0.08);
+    border-right: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 .filings-docs-col-3 { width: var(--docs-col-3) !important; min-width: var(--docs-col-3) !important; max-width: var(--docs-col-3) !important; }
@@ -2347,8 +2348,8 @@ body {
     min-width: 88px !important;
     max-width: 88px !important;
     background-color: var(--bg-surface) !important;
-    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
-    box-shadow: -4px 0 10px rgba(var(--shadow-rgb), 0.45);
+    border-left: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 .filings-ledger-header.filings-ledger-grid-template .gst-sticky-actions {

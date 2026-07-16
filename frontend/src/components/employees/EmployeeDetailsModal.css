@@ -276,8 +276,8 @@
     text-transform: uppercase;
 }
 
-.status-badge.active { background: rgba(var(--success-rgb), 0.14); border: 1px solid rgba(var(--success-rgb), 0.32); color: var(--success); }
-.status-badge.inactive { background: rgba(var(--danger-rgb), 0.14); border: 1px solid rgba(var(--danger-rgb), 0.32); color: var(--danger); }
+.status-badge.active { background: rgba(var(--success-rgb), 0.14); border: 1px solid rgba(var(--success-rgb), 0.32); color: var(--text-primary); }
+.status-badge.inactive { background: rgba(var(--danger-rgb), 0.14); border: 1px solid rgba(var(--danger-rgb), 0.32); color: var(--text-primary); }
 
 /* Footer */
 .modal-footer {

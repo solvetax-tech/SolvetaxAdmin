@@ -617,7 +617,7 @@ export const GSTDocuments = ({ handleLogout, isAdmin, profileData, onRenderToolb
                                     </span>
                                 </div>
                                 <div className="filings-ledger-cell">{item.verified_by_name || '-'}</div>
-                                <div className="filings-ledger-cell" style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>{formatDateTime(item.verified_at)}</div>
+                                <div className="filings-ledger-cell" style={{ fontSize: '11px', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontVariantNumeric: 'tabular-nums' }}>{formatDateTime(item.verified_at)}</div>
                                 <div className="filings-ledger-cell">
                                     <span className={`status-badge-v4 ${item.is_active ? 'completed' : 'overdue'}`}>
                                         {item.is_active ? 'ACTIVE' : 'INACTIVE'}
@@ -1147,7 +1147,7 @@ const GSTDocumentsDetailsModal = ({ isOpen, data, onClose, onUpdated, isAdmin, c
                                     </div>
                                     <div className="detail-item-v4">
                                         <span className="detail-label-v4">GSTIN</span>
-                                        <span className="detail-value-v4" style={{ fontFamily: 'monospace' }}>{currentItem.gstin || '-'}</span>
+                                        <span className="detail-value-v4">{currentItem.gstin || '-'}</span>
                                     </div>
                                     <div className="detail-item-v4">
                                         <span className="detail-label-v4">PERSON ID</span>

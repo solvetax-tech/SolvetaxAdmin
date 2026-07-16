@@ -164,10 +164,12 @@
     letter-spacing: 0.02em;
 }
 
+/* Label carries the tone, like every other status pill — and it matches its own
+   surface now (this used to paint accent-purple text on a success-green bg). */
 .status-badge-v4.verified,
 .status-badge-v4.active {
     background: rgba(var(--success-rgb), 0.1);
-    color: var(--accent);
+    color: var(--success);
 }
 
 .status-badge-v4.pending,

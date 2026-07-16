@@ -260,8 +260,10 @@
 .crm-filter-drawer.crm-call-action-drawer.crm-drawer-panel {
     display: flex;
     flex-direction: column;
-    height: 100vh;
-    max-height: 100dvh;
+    /* Zoom-compensated: raw 100vh/100dvh render at ~75% under the app's html
+       zoom, leaving the drawer short of the screen bottom. */
+    height: calc(100vh / var(--app-zoom));
+    max-height: calc(100vh / var(--app-zoom));
     overflow: hidden;
     width: clamp(360px, 50vw, calc(100vw - 16px));
     max-width: calc(100vw - 16px);

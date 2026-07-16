@@ -171,7 +171,7 @@
     left: 0;
     z-index: 15 !important;
     background: var(--bg-surface) !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.15) !important;
+    border-right: 1px solid var(--border-subtle) !important;
 }
 
 .audit-ledger-header .audit-ledger-sticky-id {
@@ -180,7 +180,7 @@
 }
 
 .audit-ledger-cell .id-text {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     color: var(--text-primary);
@@ -212,7 +212,7 @@
 .audit-ledger-cell .entity-type-badge {
     padding: 6px 14px;
     background: rgba(var(--fg-rgb), 0.05);
-    color: var(--text-secondary);
+    color: var(--text-primary);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-pill);
     font-size: 10px;
@@ -226,7 +226,7 @@
 }
 
 .audit-ledger-cell .mono-id {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 600;
     font-size: 12px;

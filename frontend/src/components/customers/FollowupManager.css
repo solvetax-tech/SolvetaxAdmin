@@ -126,7 +126,7 @@
     padding: 3px 10px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border-subtle);
-    font-family: var(--font-accent), ui-monospace, monospace;
+    font-family: var(--font-body);
     letter-spacing: 0.02em;
 }
 

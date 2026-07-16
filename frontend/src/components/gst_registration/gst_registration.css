@@ -91,7 +91,7 @@
 .gst-people-person-id-cell,
 .filings-ledger-row.gst-people-grid-template .filings-ledger-cell.gst-people-person-id-cell {
     color: var(--text-primary) !important;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 600 !important;
 }
@@ -99,17 +99,17 @@
 .gst-docs-document-id-cell,
 .filings-ledger-row.gst-docs-grid-template .filings-ledger-cell.gst-docs-document-id-cell {
     color: var(--text-primary) !important;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 600 !important;
 }
 
-/* Numeric id columns render as tabular mono */
+/* Numeric id columns: one table family, tabular figures for column alignment */
 .filings-ledger-row.gst-reg-grid-template .filings-ledger-cell:nth-child(2),
 .filings-ledger-row.gst-people-grid-template .filings-ledger-cell:nth-child(2),
 .filings-ledger-row.gst-people-grid-template .filings-ledger-cell:nth-child(3),
 .filings-ledger-row.gst-docs-grid-template .filings-ledger-cell:nth-child(2) {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     color: var(--text-primary);
 }
@@ -122,14 +122,14 @@
     color: var(--text-primary) !important;
 }
 
-/* GSTIN — monochrome monospace chip in ledger tables (Registrations, People, Documents) */
+/* GSTIN — an ordinary value column: same header ink, same family, same ink as
+   every other cell. It used to be a faint header over a bordered mono chip,
+   which made it the odd column out. */
 .filings-ledger-header-cell.gst-ledger-gstin-header {
-    color: var(--text-faint) !important;
     letter-spacing: 0.06em;
 }
 
 .filings-ledger-cell.gst-ledger-gstin-cell {
-    font-family: var(--font-mono) !important;
     font-weight: 500 !important;
     letter-spacing: 0.03em;
 }
@@ -138,14 +138,9 @@
     display: inline-flex;
     align-items: center;
     max-width: 100%;
-    padding: 4px 9px;
-    border-radius: 6px;
-    font-size: 11px;
     line-height: 1.35;
     text-transform: uppercase;
     color: var(--text-primary);
-    background: var(--border-subtle);
-    border: 1px solid var(--border-subtle);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -153,16 +148,6 @@
 
 .filings-ledger-cell.gst-ledger-gstin-cell .gst-ledger-gstin-value.is-empty {
     text-transform: none;
-    color: var(--text-muted);
-    background: rgba(var(--fg-rgb), 0.03);
-    border-color: rgba(var(--fg-rgb), 0.06);
-    box-shadow: none;
-}
-
-.filings-ledger-row:hover .filings-ledger-cell.gst-ledger-gstin-cell .gst-ledger-gstin-value:not(.is-empty) {
-    color: var(--text-primary);
-    border-color: rgba(var(--fg-rgb), 0.14);
-    background: rgba(var(--fg-rgb), 0.08);
 }
 
 .gst-main-content.gst-portal-page .gst-table-container--portal::-webkit-scrollbar {
@@ -246,7 +231,7 @@
 .filings-ledger-row.gst-reg-grid-template .filings-ledger-cell.gst-reg-id-cell,
 .gst-reg-grid-template .filings-ledger-cell.gst-reg-id-cell {
     color: var(--text-primary) !important;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 600 !important;
 }
@@ -945,14 +930,14 @@
     z-index: 5 !important;
     min-width: 90px !important;
     max-width: 90px !important;
-    background: var(--bg-app) !important;
+    background: var(--bg-surface) !important;
     border-right: 1px solid var(--border-subtle);
 }
 
 /* People: ONLY the first column (Person ID) is frozen-left — Customer ID and
    Registration ID scroll with the rest of the table. */
 .filings-ledger-row.gst-people-grid-template:hover > :nth-child(1) {
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-app)) !important;
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface)) !important;
 }
 
 .filings-ledger-header.gst-people-grid-template > :nth-child(1) {
@@ -964,7 +949,7 @@
 }
 
 .gst-table-row:hover .gst-people-grid-template > :nth-child(1) {
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-app)) !important;
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface)) !important;
 }
 
 .gst-docs-grid-template {
@@ -992,7 +977,7 @@
     z-index: 5 !important;
     min-width: 100px !important;
     max-width: 100px !important;
-    background: var(--bg-app) !important;
+    background: var(--bg-surface) !important;
     border-right: 1px solid var(--border-subtle);
 }
 
@@ -1006,7 +991,7 @@
 }
 
 .filings-ledger-row.gst-docs-grid-template:hover > :nth-child(1) {
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg-app)) !important;
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface)) !important;
 }
 
 .form-error-banner-v2 {
@@ -1051,7 +1036,7 @@
     min-width: 70px !important;
     max-width: 70px !important;
     border-right: 1px solid var(--border-subtle) !important;
-    background: var(--bg-app) !important;
+    background: var(--bg-surface) !important;
 }
 
 /* Customer ID is a normal scrolling column now — only the ID column stays frozen. */
@@ -1089,7 +1074,7 @@
 }
 
 .filings-ledger-row.gst-reg-grid-template > :nth-child(1) {
-    background-color: var(--bg-app) !important; /* Solid background for the sticky ID cell */
+    background-color: var(--bg-surface) !important; /* Solid background for the sticky ID cell */
 }
 
 .filings-ledger-row:hover > :nth-child(1),
@@ -1104,9 +1089,9 @@
     z-index: 6 !important;
     min-width: 88px !important;
     max-width: 88px !important;
-    background-color: var(--bg-app) !important;
-    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
-    box-shadow: -4px 0 10px rgba(var(--shadow-rgb), 0.18);
+    background-color: var(--bg-surface) !important;
+    border-left: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 .filings-ledger-header.gst-reg-grid-template .gst-sticky-actions {
@@ -1125,9 +1110,9 @@
     z-index: 6 !important;
     min-width: 88px !important;
     max-width: 88px !important;
-    background-color: var(--bg-app) !important;
-    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
-    box-shadow: -4px 0 10px rgba(var(--shadow-rgb), 0.18);
+    background-color: var(--bg-surface) !important;
+    border-left: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 .filings-ledger-header.gst-people-grid-template .gst-sticky-actions {
@@ -1146,9 +1131,9 @@
     z-index: 6 !important;
     min-width: 88px !important;
     max-width: 88px !important;
-    background-color: var(--bg-app) !important;
-    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
-    box-shadow: -4px 0 10px rgba(var(--shadow-rgb), 0.18);
+    background-color: var(--bg-surface) !important;
+    border-left: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 .filings-ledger-header.gst-docs-grid-template .gst-sticky-actions {
@@ -1465,7 +1450,9 @@
     right: -100%;
     width: var(--gst-reg-drawer-width, var(--app-side-drawer-width));
     max-width: calc(100vw - 24px);
-    height: 100vh;
+    /* Zoom-compensated (AppSideDrawer.css enforces the same value): a raw
+       100vh renders at ~75% under the app's html zoom. */
+    height: calc(100vh / var(--app-zoom));
     background: var(--bg-surface);
     border-left: 1px solid var(--border);
     box-shadow: var(--shadow-xl);
@@ -1625,7 +1612,7 @@
 }
 
 .info-item-v4 .mono-v4 {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-body);
     color: var(--text-primary);
 }
 

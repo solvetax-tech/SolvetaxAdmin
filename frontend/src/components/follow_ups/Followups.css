@@ -45,16 +45,22 @@
     gap: 16px;
 }
 
+/* Height comes from the calendar column, not from this panel's own content:
+   stretch fills the row (which aligns items to start), and size containment
+   keeps a full page of loaded cards from driving the row taller than the
+   calendar. min-height covers the wrapped single-column layout, where there
+   is no calendar alongside to supply a height. */
 .scheduled-followups-panel {
-    min-height: 0;
     display: flex;
     flex-direction: column;
+    align-self: stretch;
+    contain: size;
+    min-height: 560px;
 }
 
 .scheduled-followups-panel .activity-feed-timeline {
     flex: 1;
-    min-height: 480px;
-    max-height: min(72vh, 680px);
+    min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
     padding-right: 6px;
@@ -247,7 +253,7 @@
     position: sticky;
     top: 0;
     z-index: 10;
-    background: var(--bg-surface);
+    background: var(--bg-surface-2);
     padding: 12px 16px;
     text-align: left;
     font-weight: 700;
@@ -274,8 +280,8 @@
     position: sticky;
     left: 0;
     z-index: 5;
-    background: var(--bg-app) !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+    background: var(--bg-surface) !important;
+    border-right: 1px solid var(--border-subtle);
     width: 60px;
 }
 
@@ -293,12 +299,13 @@
     text-transform: uppercase;
 }
 
-.followup-status-badge.pending { background: rgba(var(--warning-rgb), 0.1); color: var(--warning); border: 1px solid rgba(var(--warning-rgb), 0.2); }
-.followup-status-badge.completed { background: rgba(var(--accent-rgb), 0.1); color: var(--accent); border: 1px solid rgba(var(--accent-rgb), 0.2); }
+.followup-status-badge.pending { background: rgba(var(--warning-rgb), 0.1); color: var(--text-primary); border: 1px solid rgba(var(--warning-rgb), 0.2); }
+.followup-status-badge.completed { background: rgba(var(--accent-rgb), 0.1); color: var(--text-primary); border: 1px solid rgba(var(--accent-rgb), 0.2); }
 .followup-status-badge.cancelled { background: rgba(var(--fg-rgb), 0.05); color: var(--text-muted); border: 1px solid rgba(var(--fg-rgb), 0.1); display: none !important; }
-.followup-status-badge.missed { background: rgba(var(--warning-rgb), 0.1); color: var(--warning); border: 1px solid rgba(var(--warning-rgb), 0.2); }
-.followup-status-badge.overdue { background: rgba(var(--danger-rgb), 0.1); color: var(--danger); border: 1px solid rgba(var(--danger-rgb), 0.2); }
-.followup-status-badge.late { background: rgba(var(--warning-rgb), 0.1); color: var(--warning); border: 1px solid rgba(var(--warning-rgb), 0.2); }
+.followup-status-badge.missed { background: rgba(var(--warning-rgb), 0.1); color: var(--text-primary); border: 1px solid rgba(var(--warning-rgb), 0.2); }
+.followup-status-badge.overdue { background: rgba(var(--danger-rgb), 0.1); color: var(--text-primary); border: 1px solid rgba(var(--danger-rgb), 0.2); }
+.followup-status-badge.late { background: rgba(var(--warning-rgb), 0.1); color: var(--text-primary); border: 1px solid rgba(var(--warning-rgb), 0.2); }
+
 
 /* --- Action Buttons (v26) --- */
 .btn-followup-action {
@@ -453,7 +460,7 @@
     color: var(--info);
     padding: 2px 6px;
     border-radius: 4px;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-size: 10px;
 }
 
@@ -783,10 +790,9 @@
 /* --- CALENDAR SIDE DRAWER (V9 - Restricted Blur) --- */
 .calendar-drawer-overlay, .alerts-drawer-overlay, .filter-drawer-overlay, .history-drawer-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
+    /* inset (not 100vw/100vh): those units shrink to ~75% under the
+       app html zoom, so the backdrop stopped short of the screen. */
+    inset: 0;
     background: var(--bg-overlay);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
@@ -798,7 +804,7 @@
     top: 0;
     right: 0;
     width: 480px;
-    height: 100vh;
+    height: calc(100vh / var(--app-zoom));
     background: var(--bg-elevated);
     border-left: 1px solid var(--border);
     box-shadow: var(--shadow-xl);
@@ -1439,7 +1445,7 @@
     top: 0;
     right: 0;
     width: 480px;
-    height: 100vh;
+    height: calc(100vh / var(--app-zoom));
     background: var(--bg-elevated);
     border-left: 1px solid var(--border);
     box-shadow: var(--shadow-xl);
@@ -1518,7 +1524,7 @@
 
 .task-id {
     font-size: 10px;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     color: var(--text-muted);
 }
 
@@ -2062,7 +2068,7 @@
     top: 0;
     right: 0;
     width: 480px;
-    height: 100vh;
+    height: calc(100vh / var(--app-zoom));
     background: var(--bg-elevated);
     border-left: 1px solid var(--border);
     z-index: 3000;
@@ -2166,9 +2172,9 @@
     color: var(--text-primary);
 }
 
-.status-pill.completed { background: rgba(var(--accent-rgb), 0.1); color: var(--accent); }
-.status-pill.missed { background: rgba(var(--danger-rgb), 0.2); color: var(--danger); border: 1px solid rgba(var(--danger-rgb), 0.3); }
-.status-pill.pending { background: rgba(var(--info-rgb), 0.1); color: var(--info); }
+.status-pill.completed { background: rgba(var(--accent-rgb), 0.1); color: var(--text-primary); }
+.status-pill.missed { background: rgba(var(--danger-rgb), 0.2); color: var(--text-primary); border: 1px solid rgba(var(--danger-rgb), 0.3); }
+.status-pill.pending { background: rgba(var(--info-rgb), 0.1); color: var(--text-primary); }
 
 .audit-remarks-box {
     background: rgba(var(--fg-rgb), 0.04);
@@ -2440,8 +2446,8 @@
     flex-shrink: 0;
 }
 
-.remark-tag.task { background: rgba(var(--info-rgb), 0.1); color: var(--info); }
-.remark-tag.done { background: rgba(var(--accent-rgb), 0.1); color: var(--accent); }
+.remark-tag.task { background: rgba(var(--info-rgb), 0.1); color: var(--text-primary); }
+.remark-tag.done { background: rgba(var(--accent-rgb), 0.1); color: var(--text-primary); }
 .remark-tag.pending { background: rgba(var(--fg-rgb), 0.1); color: var(--text-primary); }
 
 .remark-text-v4 {
@@ -3489,8 +3495,8 @@
     top: 0 !important;
     right: 0 !important;
     width: 450px;
-    height: 100vh !important;
-    min-height: 100vh !important;
+    height: calc(100vh / var(--app-zoom)) !important;
+    min-height: calc(100vh / var(--app-zoom)) !important;
     background: var(--bg-elevated);
     border-left: 1px solid var(--border);
     box-shadow: var(--shadow-xl);
@@ -3590,6 +3596,7 @@
     color: var(--danger) !important;
     border: 1px solid rgba(var(--danger-rgb), 0.25) !important;
 }
+
 
 /* Status dot indicators */
 .timeline-indicator-dot.ontime { background: var(--accent) !important; }

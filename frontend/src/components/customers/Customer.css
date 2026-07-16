@@ -43,7 +43,7 @@
 
 .filings-ledger-header {
     display: flex;
-    background: var(--bg-surface) !important;
+    background: var(--bg-surface-2) !important;
     border-bottom: 1px solid var(--border) !important;
     position: sticky !important;
     top: 0 !important;
@@ -57,6 +57,7 @@
     font-weight: 600 !important;
     text-transform: uppercase !important;
     letter-spacing: 0.06em !important;
+    background: var(--bg-surface-2) !important;
     color: var(--text-faint) !important;
     display: flex !important;
     align-items: center !important;
@@ -81,6 +82,12 @@
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
+/* Customers rows are not clickable — the eye button in Actions opens the view,
+   so the row must not advertise a click it no longer performs. */
+.filings-ledger-row.customer-grid-template {
+    cursor: default;
+}
+
 .filings-ledger-cell {
     padding: 13px 16px;
     font-size: 12px;
@@ -94,7 +101,7 @@
 
 .customer-id-green-v4 {
     color: var(--text-primary) !important;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 600;
 }
@@ -146,7 +153,7 @@
 }
 
 .filings-ledger-header.customer-grid-template > :first-child {
-    background: var(--bg-surface) !important;
+    background: var(--bg-surface-2) !important;
     z-index: 25;
 }
 
@@ -166,7 +173,7 @@
 }
 
 .filings-ledger-header.customer-grid-template > .customer-actions-sticky {
-    background: var(--bg-surface) !important;
+    background: var(--bg-surface-2) !important;
     z-index: 25;
 }
 
@@ -491,7 +498,8 @@
 .business-type-chip-v4 {
     background: rgba(var(--fg-rgb), 0.05);
     border: 1px solid var(--border-subtle);
-    color: var(--text-secondary); /* metadata → neutral chip */
+    color: var(--text-primary); /* value ink; tint stays the tone signal */
+    font-family: var(--font-body);
     padding: 3px 12px;
     border-radius: 100px;
     font-size: 10px;

@@ -165,7 +165,7 @@
     padding: 2px 8px;
     border-radius: var(--radius-pill);
     background: rgba(var(--fg-rgb), 0.05);
-    color: var(--text-secondary);
+    color: var(--text-primary);
     border: 1px solid var(--border-subtle);
 }
 
@@ -529,7 +529,7 @@
     border-radius: var(--radius-sm);
     background: rgba(var(--fg-rgb), 0.05);
     border: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
+    color: var(--text-primary);
     white-space: nowrap;
 }
 

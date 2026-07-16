@@ -100,6 +100,7 @@
 
 .ledger-header-cell {
     padding: 16px 12px;
+    background: var(--bg-surface-2);
     font-family: var(--font-accent);
     font-size: 10.5px;
     font-weight: 600;
@@ -111,7 +112,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-right: 1px solid var(--border-subtle);
     border-bottom: 1px solid rgba(var(--fg-rgb), 0.12);
 }
 
@@ -140,7 +141,7 @@
     white-space: nowrap;
     width: 100% !important;
     justify-self: stretch !important;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.08) !important;
+    border-right: 1px solid var(--border-subtle) !important;
     min-width: 0;
 }
 
@@ -167,7 +168,7 @@
     width: var(--returns-col-1) !important;
     color: var(--text-primary) !important;
     font-weight: 700 !important;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 .ledger-sticky-col-2,
@@ -176,10 +177,10 @@
     width: var(--returns-col-2) !important;
     color: var(--text-primary) !important;
     font-weight: 700 !important;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.12) !important;
-    box-shadow: 2px 0 5px rgba(var(--shadow-rgb), 0.3);
+    border-right: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 .ledger-row:hover .gst-filing-returns-id-cell {
@@ -195,8 +196,8 @@
     max-width: var(--returns-col-13) !important;
     width: var(--returns-col-13) !important;
     background-color: var(--bg-surface) !important;
-    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
-    box-shadow: -4px 0 10px rgba(var(--shadow-rgb), 0.45);
+    border-left: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 .ledger-header.ledger-grid-template .gst-sticky-actions {
@@ -228,7 +229,7 @@
 
 /* Sub-components */
 .ledger-id-text {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     color: var(--text-primary);
@@ -342,7 +343,7 @@
 /* 🔥 High-Visibility Date styles */
 .ledger-date-small {
     font-size: 10px;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     color: var(--text-primary); /* Near white for maximum readability */
@@ -360,8 +361,8 @@
     text-transform: uppercase;
 }
 
-.ledger-auto-tag.verified { background: rgba(var(--fg-rgb), 0.05); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
-.ledger-auto-tag.manual { background: rgba(var(--fg-rgb), 0.05); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+.ledger-auto-tag.verified { background: rgba(var(--fg-rgb), 0.05); color: var(--text-primary); border: 1px solid var(--border-subtle); }
+.ledger-auto-tag.manual { background: rgba(var(--fg-rgb), 0.05); color: var(--text-primary); border: 1px solid var(--border-subtle); }
 
 .ledger-action-btn {
     padding: 8px 12px;
@@ -415,7 +416,7 @@
     border: 1px solid var(--border-subtle);
     padding: 4px 10px;
     border-radius: 6px;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     font-size: 10px;

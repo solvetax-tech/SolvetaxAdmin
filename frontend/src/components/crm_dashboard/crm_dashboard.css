@@ -496,10 +496,9 @@
 
 .crm-drawer-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
+    /* inset (not 100vw/100vh): those units shrink to ~75% under the
+       app html zoom, so the backdrop stopped short of the screen. */
+    inset: 0;
     background: var(--bg-overlay);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
@@ -512,14 +511,19 @@
     top: 0;
     right: 0;
     width: 340px; /* Narrower drawer */
-    height: 100vh;
+    height: calc(100vh / var(--app-zoom));
     background: var(--bg-elevated);
     border-left: 1px solid var(--border);
     box-shadow: var(--shadow-xl);
-    z-index: 10600; /* Above overlay but under sidebar if they overlap */
+    /* Must clear .crm-drawer-overlay, which ui.css raises to 12000 to get above
+       the sidebar. The panel is a portal SIBLING of that overlay, so a lower
+       z-index puts the overlay on top and every click lands on it -> onClose. */
+    z-index: 12001;
     display: flex;
     flex-direction: column;
-    max-height: 100vh;
+    /* Zoom-compensated like the height above: a raw 100vh cap clamps the panel
+       back to ~75% of the screen and the drawer stops short of the bottom. */
+    max-height: calc(100vh / var(--app-zoom));
     overflow: hidden;
     animation: drawerSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -1849,7 +1853,7 @@
   background: rgba(var(--info-rgb), 0.08);
   border: 1px solid rgba(var(--info-rgb), 0.16);
   color: var(--info);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   flex-shrink: 0;

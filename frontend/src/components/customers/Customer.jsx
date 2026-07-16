@@ -671,13 +671,9 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                     ) : (
                         <div className="filings-ledger-body">
                             {data.map(item => (
-                                <div 
+                                <div
                                     key={item.customer_id}
                                     className={`filings-ledger-row customer-grid-template ${openPopover.customerId === item.customer_id ? 'customer-row-active' : ''}`}
-                                    onClick={(e) => {
-                                        if (e.target.closest('.service-popover-cell') || e.target.closest('button')) return;
-                                        openCustomerView(item, e);
-                                    }}
                                 >
                                     <div className="filings-ledger-cell">
                                         <span className="ui-num">{item.customer_id}</span>
@@ -699,7 +695,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                                     <div className="filings-ledger-cell" title={item.rm_name}>{item.rm_name || '-'}</div>
                                     <div className="filings-ledger-cell" title={item.op_name}>{item.op_name || '-'}</div>
                                     <div className="filings-ledger-cell" style={{ justifyContent: 'center' }}>
-                                        <StatusPill tone={item.is_active ? 'success' : 'neutral'}>
+                                        <StatusPill tone={item.is_active ? 'success' : 'danger'}>
                                             {item.is_active ? 'Active' : 'Inactive'}
                                         </StatusPill>
                                     </div>

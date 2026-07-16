@@ -103,9 +103,9 @@
     position: sticky;
     right: 0;
     z-index: 6;
-    background-color: var(--bg-app) !important;
-    border-left: 1px solid rgba(var(--fg-rgb), 0.1);
-    box-shadow: -6px 0 14px rgba(var(--shadow-rgb), 0.14);
+    background-color: var(--bg-surface) !important;
+    border-left: 1px solid var(--border-subtle);
+    box-shadow: none;
     min-width: 320px;
     width: 320px;
     max-width: 320px;
@@ -114,6 +114,11 @@
     text-align: center !important;
     vertical-align: middle;
     white-space: nowrap;
+}
+
+/* Sticky Actions header cell must match the header band, not the row surface. */
+.gst-registrations-table thead th.crm-col-sticky-details {
+    background-color: var(--bg-surface-2) !important;
 }
 
 .crm-leads-table .crm-col-sticky-details .crm-row-actions {
@@ -385,7 +390,7 @@
 .crm-view-field-accent {
     color: var(--text-primary);
     font-weight: 600;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 

@@ -90,10 +90,10 @@
 /* ── Premium Filter Modal (Standardized) ── */
 .premium-filter-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
+    /* inset, not 100vw/100vh: under the app's html zoom those units resolve to
+       75% of the screen, so the backdrop stopped short and its centred child
+       sat up-and-left of true centre. inset stretches to the real viewport. */
+    inset: 0;
     background: var(--bg-overlay);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);

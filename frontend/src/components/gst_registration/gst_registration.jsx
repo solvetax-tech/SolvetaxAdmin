@@ -711,7 +711,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                                 key={idx} 
                                                 className="filings-ledger-row gst-reg-grid-template gst-table-row gst-table-row--static"
                                             >
-                                                <div className="filings-ledger-cell gst-reg-id-cell" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{item.id}</div>
+                                                <div className="filings-ledger-cell gst-reg-id-cell">{item.id}</div>
                                                 <div className="filings-ledger-cell">
                                                     {item.customer_id ?? '-'}
                                                 </div>

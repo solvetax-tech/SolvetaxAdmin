@@ -791,9 +791,9 @@
   box-shadow: 0 8px 20px rgba(var(--shadow-rgb), 0.3);
 }
 
-/* Soft-pill role badges — tinted background + colored text derived from one
-   role token via color-mix, so they read cleanly in BOTH light and dark
-   (fixes the old solid-fill "blob": #8b0000 bg + theme-dependent text). */
+/* Soft-pill role badges — the label is a value and reads at full contrast;
+   the role tone survives as the color-mix tinted background + border only,
+   so they read cleanly in BOTH light and dark. */
 .mini-role-badge {
   font-size: 8px;
   font-weight: 700;
@@ -803,7 +803,7 @@
   letter-spacing: 0.06em;
   border: 1px solid rgba(var(--fg-rgb), 0.12);
   background: rgba(var(--fg-rgb), 0.05);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .mini-role-badge.admin {
@@ -1461,6 +1461,7 @@
   letter-spacing: 0.05em;
 }
 
+
 .profile-joined-text {
   display: flex;
   align-items: center;
@@ -1611,7 +1612,7 @@
 }
 
 .mono-text {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-body);
   color: var(--text-muted) !important;
 }
 
@@ -1651,6 +1652,7 @@
   font-size: 11px;
   font-weight: 700;
 }
+
 
 /* Heatmap Placeholder */
 .activity-section .section-header {
@@ -2512,9 +2514,9 @@ button.progress-badge-v4 {
   position: sticky !important;
   left: 0 !important;
   z-index: 5 !important;
-  background: var(--bg-app) !important;
-  border-right: 1px solid rgba(var(--fg-rgb), 0.1) !important;
-  box-shadow: 2px 0 10px rgba(var(--shadow-rgb), 0.3);
+  background: var(--bg-surface) !important;
+  border-right: 1px solid var(--border-subtle) !important;
+  box-shadow: none;
 }
 
 .filings-ledger-header.followups-ledger-grid-template > :nth-child(1),
@@ -2618,7 +2620,7 @@ button.progress-badge-v4 {
 /* required = plain count (neutral); provided = done (green); pending = to-do (amber) */
 .service-count-badge-v4.required {
   background: rgba(var(--fg-rgb), 0.05);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   border-color: var(--border-subtle);
 }
 
@@ -2704,9 +2706,9 @@ button.progress-badge-v4 {
   letter-spacing: 0.05em;
 }
 
-.overall-status-badge.not_started { background: rgba(var(--danger-rgb), 0.1); color: var(--danger); border: 1px solid rgba(var(--danger-rgb), 0.2); }
-.overall-status-badge.in_progress { background: rgba(var(--warning-rgb), 0.1); color: var(--warning); border: 1px solid rgba(var(--warning-rgb), 0.2); }
-.overall-status-badge.completed { background: rgba(var(--success-rgb), 0.1); color: var(--accent); border: 1px solid rgba(var(--success-rgb), 0.2); }
+.overall-status-badge.not_started { background: rgba(var(--danger-rgb), 0.1); color: var(--text-primary); border: 1px solid rgba(var(--danger-rgb), 0.2); }
+.overall-status-badge.in_progress { background: rgba(var(--warning-rgb), 0.1); color: var(--text-primary); border: 1px solid rgba(var(--warning-rgb), 0.2); }
+.overall-status-badge.completed { background: rgba(var(--success-rgb), 0.1); color: var(--text-primary); border: 1px solid rgba(var(--success-rgb), 0.2); }
 
 .completion-label {
   font-size: 24px;
@@ -3016,9 +3018,9 @@ button.progress-badge-v4 {
   position: sticky !important;
   left: 0 !important;
   z-index: 5 !important;
-  background: var(--bg-app) !important;
-  border-right: 1px solid rgba(var(--fg-rgb), 0.1) !important;
-  box-shadow: 2px 0 10px rgba(var(--shadow-rgb), 0.3);
+  background: var(--bg-surface) !important;
+  border-right: 1px solid var(--border-subtle) !important;
+  box-shadow: none;
 }
 
 .filings-ledger-header.payments-ledger-grid-template > :nth-child(1) {
@@ -3290,7 +3292,7 @@ button.progress-badge-v4 {
 
 .status-badge-mini.draft {
   background: rgba(var(--fg-rgb), 0.05);
-  color: var(--text-muted);
+  color: var(--text-primary);
 }
 
 .status-badge-mini.completed {
@@ -3578,7 +3580,7 @@ button.progress-badge-v4 {
 }
 
 .info-value-v4.mono {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--font-body);
   font-size: 13px;
   color: var(--role-hr);
 }
@@ -4098,7 +4100,7 @@ button.progress-badge-v4 {
   border-radius: 999px;
   border: 1px solid rgba(var(--fg-rgb), 0.16);
   background: rgba(var(--fg-rgb), 0.04);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 11px;
   font-weight: 700;
 }
@@ -4482,7 +4484,7 @@ button.progress-badge-v4 {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: var(--bg-surface);
+  background: var(--bg-surface-2);
   font-size: 10px;
   padding: 7px 8px;
   text-align: center;
@@ -4664,7 +4666,7 @@ button.progress-badge-v4 {
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 10px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--font-body);
 }
 
 .status-badge-compact {
@@ -4701,7 +4703,7 @@ button.progress-badge-v4 {
 
 .status-badge-compact.not_started {
   background: rgba(var(--fg-rgb), 0.12);
-  color: var(--text-muted);
+  color: var(--text-primary);
   border: 1px solid rgba(var(--fg-rgb), 0.24);
 }
 
@@ -5234,7 +5236,7 @@ button.progress-badge-v4 {
     color: var(--info);
     font-size: 11px;
     font-weight: 700;
-    font-family: monospace;
+    font-family: var(--font-body);
 }
 
 .progress-count-chip.provided {

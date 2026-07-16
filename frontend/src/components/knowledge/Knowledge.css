@@ -121,7 +121,7 @@
 .services-card .services-table th:nth-child(3),
 .services-card .services-table td:nth-child(3) {
     width: 20%;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: var(--font-body);
     white-space: nowrap;
 }
 
@@ -263,7 +263,7 @@
 
 .price-value {
     color: var(--text-primary);
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 600;
     text-align: right;
@@ -297,7 +297,7 @@
 .state-code {
     color: var(--text-primary);
     font-weight: 700;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 

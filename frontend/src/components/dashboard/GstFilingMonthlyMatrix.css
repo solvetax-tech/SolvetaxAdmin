@@ -133,7 +133,7 @@
     left: 0;
     z-index: 2;
     background: var(--bg-surface);
-    box-shadow: 4px 0 8px rgba(var(--shadow-rgb), 0.06);
+    box-shadow: none;
     padding: 10px 12px;
     text-align: left;
 }
@@ -235,7 +235,7 @@
     font-weight: 800;
     white-space: nowrap;
     color: var(--text-primary);
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 
@@ -1238,6 +1238,7 @@
     flex-shrink: 0;
 }
 
+
 .gfm-form-followup {
     display: flex;
     flex-direction: row;
@@ -1440,8 +1441,8 @@
     opacity: 0.92;
 }
 
-/* Soft status pills — collapsed to the app's semantic palette (label text
-   distinguishes statuses that share a hue). Tinted bg + colored text + hairline. */
+/* Soft status pills — the label is a VALUE, so it reads at full contrast in the
+   row's font; the tone lives in the tinted bg + hairline border. */
 .gfm-form-chip--green,
 .gfm-form-chip--filed {
     background: rgba(var(--success-rgb), 0.14);

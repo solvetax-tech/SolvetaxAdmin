@@ -11,7 +11,7 @@
 }
 
 .id-stack .main-id {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-weight: 700;
     color: var(--text-primary);
@@ -19,7 +19,7 @@
 }
 
 .id-stack .sub-id {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
     font-size: 10px;
     color: var(--text-muted);
@@ -36,7 +36,7 @@
 }
 
 .filings-ledger-header-cell {
-    background: var(--bg-surface) !important;
+    background: var(--bg-surface-2) !important;
     color: var(--text-faint) !important;
     font-family: var(--font-accent);
     font-size: 10.5px !important;
@@ -87,7 +87,7 @@
 /* Document Specific Badges */
 .doc-type-badge {
     background: rgba(var(--fg-rgb), 0.05);
-    color: var(--text-secondary);
+    color: var(--text-primary);
     padding: 4px 10px;
     border-radius: 6px;
     font-size: 10px;
@@ -380,7 +380,7 @@ input[type="number"] {
 /* Enhanced Sticky Visuals */
 .filings-docs-ledger-sticky-col-1,
 .filings-docs-ledger-sticky-col-2 {
-    background: var(--bg-app) !important;
+    background: var(--bg-surface) !important;
     z-index: 5;
 }
 
@@ -391,8 +391,8 @@ input[type="number"] {
 }
 
 .filings-docs-ledger-sticky-col-2 {
-    border-right: 1px solid rgba(var(--fg-rgb), 0.08) !important;
-    box-shadow: 4px 0 10px rgba(var(--shadow-rgb), 0.3);
+    border-right: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
 
 /* Only the FIRST column (Document ID) stays frozen-left — Filing ID scrolls. */
