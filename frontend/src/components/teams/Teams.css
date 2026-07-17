@@ -14,10 +14,9 @@
 }
 
 .teams-metric-card {
-    background: rgba(var(--fg-rgb), 0.03);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(var(--fg-rgb), 0.08);
-    border-radius: 20px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 24px;
     display: flex;
     align-items: center;
@@ -25,13 +24,13 @@
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+    box-shadow: var(--shadow-sm);
 }
 
 .teams-metric-card:hover {
     transform: translateY(-4px);
-    background: rgba(var(--fg-rgb), 0.05);
-    border-color: rgba(var(--fg-rgb), 0.15);
-    box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.3);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
 }
 
 .teams-metric-card::after {
@@ -52,18 +51,18 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(46, 184, 122, 0.1);
-    color: #2eb87a;
+    background: rgba(var(--accent-rgb), 0.1);
+    color: var(--accent);
 }
 
 .teams-icon-box.blue {
-    background: rgba(59, 130, 246, 0.1);
-    color: #3b82f6;
+    background: rgba(var(--info-rgb), 0.1);
+    color: var(--info);
 }
 
 .teams-icon-box.purple {
-    background: rgba(139, 92, 246, 0.1);
-    color: #8b5cf6;
+    background: rgba(var(--accent-rgb), 0.1);
+    color: var(--accent);
 }
 
 .teams-metric-info .label {
@@ -82,12 +81,12 @@
 
 /* Teams Table Container */
 .teams-table-block {
-    background: rgba(var(--fg-rgb), 0.02);
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(var(--fg-rgb), 0.06);
-    border-radius: 24px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     overflow: hidden;
     margin-bottom: 24px;
+    box-shadow: var(--shadow-sm);
 }
 
 .teams-table-header {
@@ -95,7 +94,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 .teams-table-header h3 {
@@ -114,18 +113,19 @@
 .teams-table th {
     text-align: left;
     padding: 16px 32px;
-    font-size: 12px;
+    font-family: var(--font-accent);
+    font-size: 10.5px;
     font-weight: 600;
     text-transform: uppercase;
-    color: var(--text-muted);
-    letter-spacing: 1px;
-    background: rgba(0, 0, 0, 0.2);
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+    background: var(--bg-surface-2);
 }
 
 .teams-table td {
     padding: 20px 32px;
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
-    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
     font-size: 14px;
 }
 
@@ -133,17 +133,20 @@
     border-bottom: none;
 }
 
-.teams-table tr:hover {
-    background: rgba(var(--fg-rgb), 0.02);
+.teams-table tbody tr:hover {
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover));
+    box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .team-code-cell {
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: var(--font-body);
+    font-variant-numeric: tabular-nums;
     font-size: 13px;
-    color: #3b82f6;
-    background: rgba(59, 130, 246, 0.05);
+    color: var(--text-primary);
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
     padding: 4px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
 }
 
 .team-name-cell {
@@ -165,7 +168,7 @@
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    background: #444;
+    background: rgba(var(--fg-rgb), 0.1);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -175,11 +178,13 @@
 
 .member-count-badge {
     padding: 2px 10px;
-    background: rgba(46, 184, 122, 0.1);
-    color: #2eb87a;
-    border-radius: 12px;
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
     font-size: 12px;
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Actions Button */
@@ -188,31 +193,31 @@
     align-items: center;
     gap: 8px;
     padding: 10px 20px;
-    background: var(--accent-color, #2eb87a);
-    color: var(--text-primary);
-    border-radius: 12px;
+    background: var(--accent);
+    color: var(--text-inverse);
+    border-radius: var(--radius-md);
     border: none;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
-    box-shadow: 0 4px 12px rgba(46, 184, 122, 0.2);
+    box-shadow: var(--shadow-sm);
 }
 
 .btn-create-team:hover {
+    background: var(--accent-hover);
     transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(46, 184, 122, 0.3);
-    filter: brightness(1.1);
+    box-shadow: var(--shadow-md);
 }
 
 .btn-edit-team {
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(var(--fg-rgb), 0.05);
+    background: transparent;
     color: var(--text-muted);
     border: none;
     cursor: pointer;
@@ -220,13 +225,13 @@
 }
 
 .btn-edit-team:hover {
-    background: rgba(59, 130, 246, 0.1);
-    color: #3b82f6;
+    background: rgba(var(--fg-rgb), 0.08);
+    color: var(--text-primary);
 }
 
 /* Expandable Members Area */
 .team-members-expanded {
-    background: rgba(0, 0, 0, 0.15);
+    background: var(--bg-surface-2);
     padding: 20px 32px;
     animation: slideDown 0.3s ease-out;
 }
@@ -286,7 +291,7 @@
     display: block;
     font-size: 13px;
     font-weight: 600;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -302,12 +307,13 @@
 
 .member-emp-id-badge {
     font-size: 11px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    color: #3b82f6;
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.2);
+    font-family: var(--font-body);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
     padding: 3px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     flex-shrink: 0;
     font-weight: 600;
 }
@@ -317,40 +323,14 @@
     font-size: 11px;
     font-weight: 600;
     padding: 3px 9px;
-    border-radius: 20px;
+    border-radius: var(--radius-pill);
     flex-shrink: 0;
     text-transform: capitalize;
     letter-spacing: 0.3px;
-    /* default */
-    background: rgba(107, 114, 128, 0.1);
-    border: 1px solid rgba(107, 114, 128, 0.2);
-    color: var(--text-muted);
-}
-
-.member-role-badge.role-admin,
-.member-role-badge.role-administrator {
-    background: rgba(139, 92, 246, 0.12);
-    border-color: rgba(139, 92, 246, 0.25);
-    color: #8b5cf6;
-}
-
-.member-role-badge.role-manager {
-    background: rgba(59, 130, 246, 0.12);
-    border-color: rgba(59, 130, 246, 0.25);
-    color: #3b82f6;
-}
-
-.member-role-badge.role-employee,
-.member-role-badge.role-member {
-    background: rgba(46, 184, 122, 0.1);
-    border-color: rgba(46, 184, 122, 0.2);
-    color: #4ade80;
-}
-
-.member-role-badge.role-hr {
-    background: rgba(245, 158, 11, 0.1);
-    border-color: rgba(245, 158, 11, 0.2);
-    color: #f59e0b;
+    /* neutral metadata chip — role name is not a status */
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
 }
 
 .member-list-actions {
@@ -411,10 +391,10 @@
     align-items: center;
     gap: 8px;
     padding: 6px 14px;
-    background: rgba(139, 92, 246, 0.1);
-    border: 1px solid rgba(139, 92, 246, 0.2);
-    border-radius: 30px;
-    color: #8b5cf6;
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    color: var(--text-primary);
     font-size: 12px;
 }
 
@@ -438,9 +418,9 @@
 
 .search-input-wrapper input {
     width: 100%;
-    background: rgba(var(--fg-rgb), 0.05);
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
-    border-radius: 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: 8px 36px 8px 34px;
     color: var(--text-primary);
     font-size: 13px;
@@ -448,8 +428,9 @@
 }
 
 .search-input-wrapper input:focus {
-    background: rgba(var(--fg-rgb), 0.08);
-    border-color: rgba(59, 130, 246, 0.4);
+    background: var(--bg-input);
+    border-color: var(--accent);
+    box-shadow: var(--ring);
     outline: none;
 }
 
@@ -469,10 +450,10 @@
     top: calc(100% + 8px);
     right: 0;
     width: 100%;
-    background: var(--bg-surface-2);
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
-    border-radius: 12px;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
     z-index: 100;
     overflow: hidden;
     animation: fadeIn 0.15s ease-out;
@@ -527,10 +508,10 @@
 }
 
 .member-mini-card.interactive:hover {
-    background: rgba(var(--fg-rgb), 0.06);
-    border-color: rgba(var(--fg-rgb), 0.12);
+    background: var(--bg-hover);
+    border-color: var(--border);
     transform: translateY(-2px);
-    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-sm);
 }
 
 .member-card-actions {
@@ -548,9 +529,9 @@
 .action-btn {
     width: 28px;
     height: 28px;
-    border-radius: 8px;
-    background: rgba(var(--fg-rgb), 0.06);
-    border: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid transparent;
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
@@ -560,15 +541,15 @@
 }
 
 .action-btn:hover {
-    background: rgba(59, 130, 246, 0.15);
-    border-color: rgba(59, 130, 246, 0.3);
-    color: #3b82f6;
+    background: rgba(var(--fg-rgb), 0.08);
+    border-color: var(--border-subtle);
+    color: var(--text-primary);
 }
 
 .action-btn.delete:hover {
-    background: rgba(244, 63, 94, 0.15);
-    border-color: rgba(244, 63, 94, 0.3);
-    color: #ef4444;
+    background: rgba(var(--danger-rgb), 0.15);
+    border-color: rgba(var(--danger-rgb), 0.3);
+    color: var(--danger);
 }
 
 /* Processing item in search dropdown */
@@ -576,5 +557,5 @@
     opacity: 0.6;
     cursor: not-allowed;
     pointer-events: none;
-    background: rgba(59, 130, 246, 0.05);
+    background: rgba(var(--info-rgb), 0.05);
 }

@@ -978,7 +978,7 @@ const BulkAssign = ({ onSuccess, entityType = 'GST_REGISTRATION', onEntityTypeCh
                     <button 
                       className="logic-dropdown-box filter-trigger-btn"
                       onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', background: 'rgba(46, 184, 122, 0.1)', borderColor: 'rgba(46, 184, 122, 0.3)', color: '#2eb87a' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', background: 'rgba(var(--accent-rgb), 0.1)', borderColor: 'rgba(var(--accent-rgb), 0.3)', color: 'var(--accent)' }}
                     >
                       <Filter size={14} />
                       <span>Filters</span>
@@ -990,13 +990,13 @@ const BulkAssign = ({ onSuccess, entityType = 'GST_REGISTRATION', onEntityTypeCh
                         position: 'absolute', 
                         top: '100%', 
                         left: 0, 
-                        width: '220px', 
-                        background: '#15181a', 
-                        border: '1px solid rgba(var(--fg-rgb),0.1)', 
-                        borderRadius: '12px', 
-                        marginTop: '8px', 
-                        zIndex: 1000, 
-                        boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                        width: '220px',
+                        background: 'var(--bg-elevated)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-lg)',
+                        marginTop: '8px',
+                        zIndex: 1000,
+                        boxShadow: 'var(--shadow-lg)',
                         padding: '8px'
                       }}>
                         {availableFilterOptions.map(opt => (
@@ -1014,8 +1014,8 @@ const BulkAssign = ({ onSuccess, entityType = 'GST_REGISTRATION', onEntityTypeCh
                               alignItems: 'center',
                               justifyContent: 'space-between',
                               fontSize: '13px',
-                              color: activeFilterKeys.includes(opt.key) ? '#2eb87a' : 'rgba(var(--fg-rgb),0.6)',
-                              background: activeFilterKeys.includes(opt.key) ? 'rgba(46, 184, 122, 0.05)' : 'transparent',
+                              color: activeFilterKeys.includes(opt.key) ? 'var(--accent)' : 'rgba(var(--fg-rgb),0.6)',
+                              background: activeFilterKeys.includes(opt.key) ? 'rgba(var(--accent-rgb), 0.05)' : 'transparent',
                               transition: 'all 0.2s'
                             }}
                           >

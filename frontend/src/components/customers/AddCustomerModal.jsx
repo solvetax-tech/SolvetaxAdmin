@@ -415,7 +415,7 @@ const AddCustomerModal = ({ isOpen, onClose, onSuccess, profileData }) => {
                                     <h3 className="section-title">1. Customer Details</h3>
                                     <div className="form-grid-3">
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps" style={{ color: '#3b82f6' }}>Full Name *</label>
+                                            <label className="modal-label-caps" style={{ color: 'var(--text-primary)' }}>Full Name *</label>
                                             <input
                                                 type="text"
                                                 name="full_name"
@@ -539,7 +539,7 @@ const AddCustomerModal = ({ isOpen, onClose, onSuccess, profileData }) => {
                                                     {isLocationSelected && (
                                                         <X 
                                                             size={14} 
-                                                            style={{ color: '#ef4444', cursor: 'pointer' }} 
+                                                            style={{ color: 'var(--danger)', cursor: 'pointer' }} 
                                                             onClick={() => {
                                                                 setFormData(prev => ({ ...prev, city: '', state: '' }));
                                                                 setIsLocationSelected(false);
@@ -549,7 +549,7 @@ const AddCustomerModal = ({ isOpen, onClose, onSuccess, profileData }) => {
                                                     {locationLoading ? (
                                                         <RotateCcw size={14} className="refresh-spin" style={{ color: 'rgba(var(--fg-rgb),0.2)' }} />
                                                     ) : (
-                                                        <Search size={14} style={{ color: isLocationSelected ? 'rgba(var(--fg-rgb),0.2)' : '#2eb87a' }} />
+                                                        <Search size={14} style={{ color: isLocationSelected ? 'rgba(var(--fg-rgb),0.2)' : 'var(--accent)' }} />
                                                     )}
                                                 </div>
                                                 {showLocationResults && (

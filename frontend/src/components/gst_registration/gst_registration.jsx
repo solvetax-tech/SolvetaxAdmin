@@ -21,6 +21,7 @@ import {
 import {
     fetchActiveRmUsernames,
     fetchActiveOpUsernames,
+    fetchActiveRmEmployees,
     buildRmOpSelectOptions,
     withAssignmentFormFields,
 } from '../../utils/activeEmployees';
@@ -29,6 +30,7 @@ import Pagination from '../common/Pagination';
 import '../common/Filters.css';
 import FilterDateInput from '../common/FilterDateInput';
 import { Filter, X, RotateCcw, Plus, AlertCircle, CheckCircle2, Users, FileText, LayoutDashboard, Eye, Pencil, CalendarClock, CreditCard } from 'lucide-react';
+import Button from '../ui/Button';
 import {
     buildGstCrmLeadActionSearchParams,
     getCrmLeadByGstRegistrationId,
@@ -104,7 +106,8 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
         turnoverDetailsList: [],
         registrationStatuses: [],
         activeRMs: [],
-        activeOps: []
+        activeOps: [],
+        activeRmEmployees: []
     });
 
     const [filterInputs, setFilterInputs] = useState({
@@ -222,12 +225,14 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 } catch (err) { /* Silently fail config fetch */ }
             }));
             try {
-                const [activeRMs, activeOps] = await Promise.all([
+                const [activeRMs, activeOps, activeRmEmployees] = await Promise.all([
                     fetchActiveRmUsernames(),
                     fetchActiveOpUsernames(),
+                    fetchActiveRmEmployees(),
                 ]);
                 newConfigs.activeRMs = activeRMs;
                 newConfigs.activeOps = activeOps;
+                newConfigs.activeRmEmployees = activeRmEmployees;
             } catch (err) { /* Silently fail */ }
             setConfigs(newConfigs);
         };
@@ -345,7 +350,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
     const renderFilterFields = () => (
         <div className="drawer-content">
             <div className="filter-section-v4">
-                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Account Identifiers</h4>
+                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Account Identifiers</h4>
                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                     <div className="filter-group-v4">
                         <label>GSTIN</label>
@@ -362,10 +367,10 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 </div>
             </div>
 
-            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
             <div className="filter-section-v4">
-                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Registration Profile</h4>
+                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Registration Profile</h4>
                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px', marginBottom: '12px' }}>
                     <div className="filter-group-v4">
                         <label>Reg Status</label>
@@ -416,10 +421,10 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 </div>
             </div>
 
-            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
             <div className="filter-section-v4">
-                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Assignment & Ownership</h4>
+                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Assignment & Ownership</h4>
                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                     <div className="filter-group-v4">
                         <label>Assignee (RM)</label>
@@ -427,7 +432,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                             name="rm_id"
                             value={filterInputs.rm_id}
                             onChange={handleFilterChange}
-                            options={optionsFromPairs(buildRmOpSelectOptions(configs.activeRMs), 'Any RM')}
+                            options={optionsFromPairs(buildRmOpSelectOptions(configs.activeRmEmployees), 'Any RM')}
                             placeholder="Any RM"
                             ariaLabel="Assignee RM"
                         />
@@ -450,10 +455,10 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 </div>
             </div>
 
-            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
             <div className="filter-section-v4">
-                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Contact Details</h4>
+                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Contact Details</h4>
                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                     <div className="filter-group-v4">
                         <label>Mobile</label>
@@ -466,10 +471,10 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 </div>
             </div>
 
-            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
             <div className="filter-section-v4">
-                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>System Attributes</h4>
+                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>System Attributes</h4>
                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px', marginBottom: '12px' }}>
                     <div className="filter-group-v4">
                         <label>Service Status</label>
@@ -516,10 +521,10 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 </div>
             </div>
 
-            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
             <div className="filter-section-v4">
-                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px' }}>Audit Timeline</h4>
+                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px' }}>Audit Timeline</h4>
                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                     <div className="filter-group-v4">
                         <label>From Date</label>
@@ -621,10 +626,9 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                             </button>
                         )}
                         {canManageRmOpRecords(profileData, isAdmin) && (
-                            <button type="button" className="btn-primary-action" onClick={() => setShowCreateModal(true)}>
-                                <Plus size={13} />
-                                <span>Create GST</span>
-                            </button>
+                            <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setShowCreateModal(true)}>
+                                Create GST
+                            </Button>
                         )}
                     </>
                     )}
@@ -707,14 +711,14 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                                 key={idx} 
                                                 className="filings-ledger-row gst-reg-grid-template gst-table-row gst-table-row--static"
                                             >
-                                                <div className="filings-ledger-cell gst-reg-id-cell" style={{ color: '#2eb87a', fontWeight: 700 }}>{item.id}</div>
+                                                <div className="filings-ledger-cell gst-reg-id-cell">{item.id}</div>
                                                 <div className="filings-ledger-cell">
                                                     {item.customer_id ?? '-'}
                                                 </div>
                                                 <div className="filings-ledger-cell" title={item.username || ''}>{item.username || '-'}</div>
                                                 <div className="filings-ledger-cell" title={item.password || ''}>{item.password || '-'}</div>
                                                 <div className="filings-ledger-cell" style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{item.gstin}</div>
-                                                <div className="filings-ledger-cell" style={{ fontWeight: '600' }} title={item.business_name || item.legal_name || item.username || ''}>{item.business_name || item.legal_name || item.username || '-'}</div>
+                                                <div className="filings-ledger-cell ledger-cell-longtext" style={{ fontWeight: '600' }} title={item.business_name || item.legal_name || item.username || ''}>{item.business_name || item.legal_name || item.username || '-'}</div>
                                                 <div className="filings-ledger-cell" title={item.registration_type || ''}>{item.registration_type || '-'}</div>
                                                 <div className="filings-ledger-cell" title={item.ownership_category || ''}>{item.ownership_category || '-'}</div>
                                                 <div className="filings-ledger-cell" title={item.business_type || ''}>{item.business_type || '-'}</div>
@@ -790,7 +794,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 <div className="gst-confirm-overlay">
                     <div className="gst-confirm-content">
                         <div className="gst-confirm-icon">
-                            <AlertCircle size={32} color="#f59e0b" />
+                            <AlertCircle size={32} color="var(--warning)" />
                         </div>
                         <h2>GST Inactive</h2>
                         <p>This GST registration is inactive. Please activate it before editing details.</p>
@@ -1340,7 +1344,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
             >
                 <div className="drawer-header gst-reg-details-header">
                     <div className="header-content-v4">
-                        <div className="header-icon-box-v4" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}>
+                        <div className="header-icon-box-v4" style={{ background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)' }}>
                             <FileText size={20} />
                         </div>
                         <div className="modal-title-box">
@@ -1396,9 +1400,9 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                         <div className="form-group-v4" style={{ gridColumn: 'span 2' }}>
                                             <label className="modal-label-caps">GSTIN</label>
                                             {editMode ? (
-                                                <input name="gstin" value={formData.gstin || ''} onChange={handleChange} className={`modal-input-v4 mono-v4 ${fieldErrors.gstin ? 'error' : ''}`} style={{ color: '#2eb87a' }} />
+                                                <input name="gstin" value={formData.gstin || ''} onChange={handleChange} className={`modal-input-v4 mono-v4 ${fieldErrors.gstin ? 'error' : ''}`} style={{ color: 'var(--text-primary)' }} />
                                             ) : (
-                                                <div className="gst-form-value-box mono-v4" style={{ color: '#2eb87a' }}>{item.gstin || '-'}</div>
+                                                <div className="gst-form-value-box mono-v4" style={{ color: 'var(--text-primary)' }}>{item.gstin || '-'}</div>
                                             )}
                                             {fieldErrors.gstin && <span className="field-error-msg">{fieldErrors.gstin}</span>}
                                         </div>
@@ -1602,13 +1606,13 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                             {item.suspension_reason && (
                                                 <div className="form-group-v4" style={{ gridColumn: 'span 3' }}>
                                                     <label className="modal-label-caps">Suspension Reason</label>
-                                                    <div className="gst-form-value-box" style={{ background: 'rgba(244, 67, 54, 0.05)', color: '#f44336' }}>{item.suspension_reason}</div>
+                                                    <div className="gst-form-value-box" style={{ background: 'rgba(var(--danger-rgb), 0.05)', color: 'var(--danger)' }}>{item.suspension_reason}</div>
                                                 </div>
                                             )}
                                             {item.cancellation_reason && (
                                                 <div className="form-group-v4" style={{ gridColumn: 'span 3' }}>
                                                     <label className="modal-label-caps">Cancellation Reason</label>
-                                                    <div className="gst-form-value-box" style={{ background: 'rgba(244, 67, 54, 0.05)', color: '#f44336' }}>{item.cancellation_reason}</div>
+                                                    <div className="gst-form-value-box" style={{ background: 'rgba(var(--danger-rgb), 0.05)', color: 'var(--danger)' }}>{item.cancellation_reason}</div>
                                                 </div>
                                             )}
                                         </div>
@@ -1804,7 +1808,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                     <div className="gst-confirm-overlay gst-reg-details-confirm" role="presentation">
                         <div className="gst-confirm-content" onClick={(e) => e.stopPropagation()}>
                             <div className="gst-confirm-icon">
-                                <AlertCircle size={32} color={confirmAction === 'delete' ? '#f44336' : '#2eb87a'} />
+                                <AlertCircle size={32} color={confirmAction === 'delete' ? 'var(--danger)' : 'var(--accent)'} />
                             </div>
                             <h2>{confirmAction === 'delete' ? 'Confirm Delete' : 'Confirm Activation'}</h2>
                             <p>

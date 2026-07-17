@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta, timezone
-import random
+import secrets
 import logging
 import os
 
@@ -27,7 +27,8 @@ class EmailVerificationResponse(BaseModel):
 
 
 def generate_otp():
-    return f"{random.randint(100000,999999)}"
+    # Cryptographically secure 6-digit OTP (100000-999999).
+    return f"{secrets.randbelow(900000) + 100000}"
 
 
 # --------------------------------------------------

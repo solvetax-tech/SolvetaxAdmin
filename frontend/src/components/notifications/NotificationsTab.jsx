@@ -88,21 +88,9 @@ const NotificationsTab = () => {
             }));
         }
 
-        const gstFocus = action.gstFocus || (() => {
-            const query = String(action.path || '').split('?')[1] || '';
-            const parsed = parseGstFilingFocusFromSearch(query);
-            if (!parsed?.customerId) return null;
-            return {
-                customerId: parsed.customerId,
-                returnDetailId: parsed.returnDetailId,
-                formKey: parsed.formKey,
-                period: parsed.period,
-            };
-        })();
+        const gstFocus = resolveGstFocusFromAction(action);
         if (gstFocus) {
-            window.dispatchEvent(new CustomEvent('st_open_gst_filing_followup', {
-                detail: gstFocus,
-            }));
+            dispatchGstFilingFocusOpen(gstFocus);
         }
 
         // Use navigate to change routes/tabs

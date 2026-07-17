@@ -888,17 +888,17 @@ const IncomeTaxFormModal = ({
                                     onChange={handleChange} 
                                     placeholder="Add any specific instructions or notes for this filing..." 
                                     rows={4} 
-                                    style={{ 
-                                        width: '100%', 
-                                        padding: '16px', 
-                                        background: 'rgba(var(--fg-rgb),0.02)', 
-                                        border: '1px solid rgba(var(--fg-rgb),0.08)', 
-                                        borderRadius: '16px', 
-                                        color: 'var(--text-primary)', 
+                                    style={{
+                                        width: '100%',
+                                        padding: '16px',
+                                        background: 'var(--bg-input)',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: 'var(--radius-lg)',
+                                        color: 'var(--text-primary)',
                                         fontSize: '13px',
                                         resize: 'none',
                                         minHeight: '120px'
-                                    }} 
+                                    }}
                                 />
                             </div>
                         </div>

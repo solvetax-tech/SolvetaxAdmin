@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from backend.common.status_constants import SERVICE_STATUSES
 from backend.customer_service.bulk_lead_assignment import (
     _invalidate_customer_services_index_caches,
     svc_bulk_assign_candidates,
@@ -18,6 +19,8 @@ from backend.customer_service.bulk_lead_assignment import (
 from backend.customer_service.schemas import (
     CustomerServiceBulkAssignCandidatesOut,
     CustomerServiceBulkAssignExecuteIn,
+    CustomerServiceCreateIn,
+    CustomerServiceCreateOut,
     CustomerServiceDetailOut,
     CustomerServiceListItemOut,
     CustomerServicePatchIn,
@@ -143,8 +146,8 @@ async def filter_customer_services_staff(
     _require_emp(role, emp_id)
 
     status_u = service_status.strip().upper() if isinstance(service_status, str) and service_status.strip() else None
-    if status_u and status_u not in {"PENDING", "PROVIDED"}:
-        _raise_validation({"service_status": "Must be PENDING or PROVIDED."})
+    if status_u and status_u not in SERVICE_STATUSES:
+        _raise_validation({"service_status": f"Must be {' or '.join(SERVICE_STATUSES)}."})
 
     code_u = service_code.strip().upper() if isinstance(service_code, str) and service_code.strip() else None
     mobile_q = mobile.strip() if isinstance(mobile, str) and mobile.strip() else None
@@ -229,7 +232,7 @@ async def filter_customer_services_staff(
                 c.mobile,
                 sc.service_name
             FROM {DB_SCHEMA}.customer_services cs
-            JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+            LEFT JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
             LEFT JOIN LATERAL (
                 SELECT sc.service_name
                 FROM {DB_SCHEMA}.service_config sc
@@ -244,7 +247,7 @@ async def filter_customer_services_staff(
         cnt_sql = f"""
             SELECT COUNT(*)::bigint
               FROM {DB_SCHEMA}.customer_services cs
-              JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+              LEFT JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
             {where_sql}
         """
         try:
@@ -337,6 +340,110 @@ async def bulk_assign_execute(
     return await svc_bulk_assign_execute(payload, current_user)
 
 
+@router.post(
+    "/create",
+    response_model=CustomerServiceCreateOut,
+    status_code=201,
+    summary="Create one customer service directly",
+    description=(
+        "Creates a single customer_services row. `customer_id` is OPTIONAL -- omit it "
+        "to record a service that is not yet attached to a customer. All other "
+        "creation paths go through customer registration; this is the direct route."
+    ),
+    responses={
+        400: {"description": "Unknown service_code, or customer_id/rm_id/op_id does not exist"},
+        409: {"description": "This service_code already exists for that customer (or already exists unattached)"},
+    },
+)
+async def create_customer_service(
+    payload: CustomerServiceCreateIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    role, emp_id = _ctx(current_user)
+    _require_emp(role, emp_id)
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        # service_code must exist and be active. Matched the same unsargable-safe
+        # way the rest of the module does (upper(btrim(...))), which the
+        # idx_customer_services_service_code_norm expression index mirrors.
+        svc = await conn.fetchrow(
+            f"""
+            SELECT service_code
+            FROM {DB_SCHEMA}.service_config
+            WHERE upper(btrim(service_code)) = upper(btrim($1))
+              AND is_active IS NOT DISTINCT FROM TRUE
+            """,
+            payload.service_code,
+        )
+        if not svc:
+            _raise_validation({"service_code": "Unknown or inactive service_code."})
+
+        # Validate the optional FKs up front so the client gets a 400 naming the
+        # bad field, rather than a raw ForeignKeyViolation.
+        if payload.customer_id is not None:
+            ok = await conn.fetchval(
+                f"SELECT 1 FROM {DB_SCHEMA}.customers WHERE customer_id = $1", payload.customer_id
+            )
+            if not ok:
+                _raise_validation({"customer_id": "Customer does not exist."})
+
+        for field, value in (("rm_id", payload.rm_id), ("op_id", payload.op_id)):
+            if value is None:
+                continue
+            ok = await conn.fetchval(
+                f"SELECT 1 FROM {DB_SCHEMA}.employees WHERE emp_id = $1 AND is_active IS TRUE",
+                value,
+            )
+            if not ok:
+                _raise_validation({field: "Employee does not exist or is inactive."})
+
+        try:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {DB_SCHEMA}.customer_services (
+                    customer_id, service_code, service_status,
+                    rm_id, op_id, followup_at, followup_remarks, is_active
+                )
+                VALUES ($1, $2, COALESCE($3, 'PENDING'), $4, $5, $6, $7, COALESCE($8, TRUE))
+                RETURNING id, customer_id, service_code, service_status,
+                          rm_id, op_id, followup_at, is_active, created_at
+                """,
+                payload.customer_id,
+                svc["service_code"],
+                payload.service_status,
+                payload.rm_id,
+                payload.op_id,
+                payload.followup_at,
+                payload.followup_remarks,
+                payload.is_active,
+            )
+        except asyncpg.UniqueViolationError:
+            # uq_customer_services_customer_service_code (customer_id, service_code).
+            # It is NULLS NOT DISTINCT, so this also fires for a second unattached
+            # row with the same service_code -- which is what stops a retried
+            # request from silently duplicating.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Service '{svc['service_code']}' already exists for "
+                    + (f"customer {payload.customer_id}." if payload.customer_id is not None
+                       else "an unattached record.")
+                ),
+            )
+        except asyncpg.ForeignKeyViolationError:
+            _raise_validation({"customer_id": "Referenced row no longer exists."})
+
+    # Lists/counts are Redis-cached; without this the new row is invisible until TTL.
+    await _invalidate_customer_services_index_caches()
+
+    logger.info(
+        "customer_service_created id=%s customer_id=%s service_code=%s by emp_id=%s",
+        row["id"], row["customer_id"], row["service_code"], emp_id,
+    )
+    return CustomerServiceCreateOut(**dict(row))
+
+
 @router.get(
     "/{customer_service_id}",
     response_model=CustomerServiceDetailOut,
@@ -390,7 +497,7 @@ async def get_customer_service_detail(
                 rm.first_name AS rm_first_name,
                 op.first_name AS op_first_name
             FROM {DB_SCHEMA}.customer_services cs
-            JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
+            LEFT JOIN {DB_SCHEMA}.customers c ON c.customer_id = cs.customer_id
             LEFT JOIN {DB_SCHEMA}.service_config sc
               ON upper(trim(sc.service_code)) = upper(trim(cs.service_code))
              AND sc.is_active IS NOT DISTINCT FROM TRUE
@@ -557,16 +664,16 @@ async def soft_delete_customer_service(
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
 
-        except asyncpg.exceptions.CheckViolationError as e:
+        except asyncpg.exceptions.CheckViolationError:
             log.exception("CHECK constraint error")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail="Operation violates a data constraint.")
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(status_code=400, detail="Invalid data format.")
 
-        except asyncpg.PostgresError as e:
+        except asyncpg.PostgresError:
             log.exception("Postgres error during customer service soft delete")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="A database error occurred.")
 
         except HTTPException:
             raise
@@ -714,16 +821,16 @@ async def activate_customer_service_row(
         except asyncpg.exceptions.ForeignKeyViolationError:
             raise HTTPException(status_code=400, detail="Foreign key constraint violation.")
 
-        except asyncpg.exceptions.CheckViolationError as e:
+        except asyncpg.exceptions.CheckViolationError:
             log.exception("CHECK ERROR")
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail="Operation violates a data constraint.")
 
         except asyncpg.exceptions.DataError:
             raise HTTPException(status_code=400, detail="Invalid data format.")
 
-        except asyncpg.PostgresError as e:
+        except asyncpg.PostgresError:
             log.exception("Database error during customer service activate")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="A database error occurred.")
 
         except HTTPException:
             raise
@@ -1228,8 +1335,7 @@ async def filter_customer_services_extended(
             detail="Use either service_code or service_codes, not both",
         )
 
-    valid_service_status = {"PENDING", "PROVIDED"}
-    if service_status_u and service_status_u not in valid_service_status:
+    if service_status_u and service_status_u not in SERVICE_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid service_status")
 
     valid_status = {"ACTIVE", "INACTIVE"}
@@ -1376,7 +1482,7 @@ async def filter_customer_services_extended(
                 ON op.emp_id = cs.op_id
 
             {where_clause}
-            ORDER BY cs.created_at DESC
+            ORDER BY cs.created_at DESC, cs.id DESC
             {pagination_sql}
         """
 

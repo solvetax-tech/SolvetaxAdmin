@@ -9,33 +9,38 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    background: rgba(var(--fg-rgb), 0.06);
-    border: 1px solid rgba(var(--fg-rgb), 0.12);
-    border-radius: 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: 10px 12px;
     min-height: 42px;
     color: var(--text-primary);
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
     font-family: inherit;
     text-align: left;
 }
 
-.custom-select-trigger:hover:not(:disabled),
+.custom-select-trigger:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+}
+
 .custom-select.is-open .custom-select-trigger {
-    background: rgba(var(--fg-rgb), 0.1);
-    border-color: rgba(46, 184, 122, 0.45);
+    background: var(--bg-input);
+    border-color: var(--accent);
+    box-shadow: var(--ring);
 }
 
 .custom-select--placeholder .custom-select-label {
-    color: var(--text-primary);
+    color: var(--text-faint);
     font-weight: 500;
 }
 
 .custom-select--error .custom-select-trigger {
-    border-color: rgba(248, 113, 113, 0.6);
+    border-color: rgba(var(--danger-rgb), 0.6);
 }
 
 .custom-select.is-disabled .custom-select-trigger {
@@ -69,14 +74,14 @@
     margin: 0;
     padding: 4px;
     list-style: none;
-    background: var(--bg-surface-2);
-    border: 1px solid rgba(var(--fg-rgb), 0.12);
-    border-radius: 10px;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
     overflow-y: auto;
     z-index: 13000;
     scrollbar-width: thin;
-    scrollbar-color: rgba(46, 184, 122, 0.4) transparent;
+    scrollbar-color: rgba(var(--accent-rgb), 0.4) transparent;
 }
 
 .custom-select-menu::-webkit-scrollbar {
@@ -84,7 +89,7 @@
 }
 
 .custom-select-menu::-webkit-scrollbar-thumb {
-    background: rgba(46, 184, 122, 0.35);
+    background: rgba(var(--accent-rgb), 0.35);
     border-radius: 4px;
 }
 
@@ -97,19 +102,19 @@
     font-size: 13px;
     font-weight: 600;
     padding: 10px 12px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     font-family: inherit;
 }
 
 .custom-select-option:hover {
-    background: rgba(var(--fg-rgb), 0.08);
+    background: var(--bg-hover);
     color: var(--text-primary);
 }
 
 .custom-select-option.selected {
-    background: rgba(46, 184, 122, 0.2);
-    color: #2eb87a;
+    background: var(--accent-soft);
+    color: var(--accent);
     font-weight: 700;
 }
 

@@ -29,7 +29,6 @@ const AY_FILTER_PRESETS = buildFinancialYearPresetOptions({ yearsBack: 8 });
 const FOLLOW_UP_STATUS_OPTIONS = [
     { value: '', label: 'Any status' },
     { value: 'PENDING', label: 'Pending' },
-    { value: 'OVERDUE', label: 'Overdue' },
     { value: 'COMPLETED', label: 'Completed' },
     { value: 'MISSED', label: 'Missed' },
 ];

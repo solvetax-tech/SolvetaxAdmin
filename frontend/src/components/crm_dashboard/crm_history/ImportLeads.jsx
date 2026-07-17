@@ -98,15 +98,15 @@ const ImportLeads = ({ entityType = 'GST_REGISTRATION' }) => {
           {!status?.stats ? (
             <div 
               style={{ 
-                border: '2px dashed rgba(46, 184, 122, 0.2)', 
-                borderRadius: '20px', 
-                padding: '60px 40px', 
+                border: '2px dashed rgba(var(--accent-rgb), 0.35)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '60px 40px',
                 textAlign: 'center',
-                background: 'rgba(var(--fg-rgb), 0.01)',
+                background: 'var(--bg-surface-2)',
                 transition: 'all 0.3s ease'
               }}
-              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = '#2eb87a'; }}
-              onDragLeave={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'rgba(46, 184, 122, 0.2)'; }}
+              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent)'; }}
+              onDragLeave={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.2)'; }}
               onDrop={(e) => {
                 e.preventDefault();
                 const droppedFile = e.dataTransfer.files[0];
@@ -118,13 +118,13 @@ const ImportLeads = ({ entityType = 'GST_REGISTRATION' }) => {
                   width: '80px', 
                   height: '80px', 
                   borderRadius: '50%', 
-                  background: 'rgba(46, 184, 122, 0.1)', 
+                  background: 'rgba(var(--accent-rgb), 0.1)', 
                   display: 'flex', 
                   alignItems: 'center', 
                   justifyContent: 'center', 
                   margin: '0 auto' 
                 }}>
-                  <Upload size={32} color="#2eb87a" />
+                  <Upload size={32} color="var(--accent)" />
                 </div>
               </div>
 
@@ -139,7 +139,7 @@ const ImportLeads = ({ entityType = 'GST_REGISTRATION' }) => {
                       className="btn-fetch" 
                       onClick={handleUpload} 
                       disabled={loading}
-                      style={{ background: '#2eb87a', color: 'var(--text-primary)' }}
+                      style={{ background: 'var(--accent)', color: 'var(--text-primary)' }}
                     >
                       {loading ? <Loader2 className="spin" size={18} /> : <Check size={18} />}
                       Confirm Upload
@@ -172,29 +172,29 @@ const ImportLeads = ({ entityType = 'GST_REGISTRATION' }) => {
           ) : (
              <div style={{ animation: 'slideUp 0.4s ease' }}>
                 <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-                  <div style={{ width: '64px', height: '64px', background: 'rgba(46, 184, 122, 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
-                    <CheckCircle2 size={32} color="#2eb87a" />
+                  <div style={{ width: '64px', height: '64px', background: 'rgba(var(--accent-rgb), 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                    <CheckCircle2 size={32} color="var(--accent)" />
                   </div>
                   <h2 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>Import Complete!</h2>
                   <p style={{ color: 'var(--text-primary)' }}>{status.message}</p>
                 </div>
 
-                <div style={{ background: 'rgba(var(--fg-rgb),0.02)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(var(--fg-rgb),0.05)' }}>
+                <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', padding: '24px', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
                   <h4 style={{ color: 'var(--text-primary)', marginBottom: '20px', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Import Statistics</h4>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
                     <div className="stat-item">
                       <div style={{ color: 'var(--text-primary)', fontSize: '12px', marginBottom: '4px' }}>New Leads</div>
-                      <div style={{ color: '#2eb87a', fontSize: '24px', fontWeight: '700' }}>{status.stats?.newLeads ?? 0}</div>
+                      <div style={{ color: 'var(--accent)', fontSize: '24px', fontWeight: '700' }}>{status.stats?.newLeads ?? 0}</div>
                     </div>
                     <div className="stat-item">
                       <div style={{ color: 'var(--text-primary)', fontSize: '12px', marginBottom: '4px' }}>Duplicates Found</div>
-                      <div style={{ color: '#f59e0b', fontSize: '24px', fontWeight: '700' }}>{status.stats?.duplicatesFound ?? 0}</div>
+                      <div style={{ color: 'var(--warning)', fontSize: '24px', fontWeight: '700' }}>{status.stats?.duplicatesFound ?? 0}</div>
                     </div>
                   </div>
                   {status.stats?.failedCount > 0 && (
-                    <div className="stat-item" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid rgba(var(--fg-rgb),0.06)' }}>
+                    <div className="stat-item" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)' }}>
                       <div style={{ color: 'var(--text-primary)', fontSize: '12px', marginBottom: '4px' }}>Failed Rows</div>
-                      <div style={{ color: '#ef4444', fontSize: '24px', fontWeight: '700' }}>{status.stats.failedCount}</div>
+                      <div style={{ color: 'var(--danger)', fontSize: '24px', fontWeight: '700' }}>{status.stats.failedCount}</div>
                     </div>
                   )}
                 </div>
@@ -211,14 +211,14 @@ const ImportLeads = ({ entityType = 'GST_REGISTRATION' }) => {
 
           {status && status.type === 'error' && (
             <div style={{ 
-              marginTop: '24px', 
-              padding: '16px', 
-              background: 'rgba(248, 113, 113, 0.1)', 
-              border: '1px solid rgba(248, 113, 113, 0.2)', 
+              marginTop: '24px',
+              padding: '16px',
+              background: 'rgba(var(--danger-rgb), 0.1)',
+              border: '1px solid rgba(var(--danger-rgb), 0.2)',
               borderRadius: '12px',
               display: 'flex',
               gap: '12px',
-              color: '#ef4444',
+              color: 'var(--danger)',
               fontSize: '14px',
               alignItems: 'center'
             }}>
@@ -227,9 +227,9 @@ const ImportLeads = ({ entityType = 'GST_REGISTRATION' }) => {
             </div>
           )}
 
-          <div style={{ marginTop: '40px', padding: '24px', background: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.1)', borderRadius: '16px' }}>
+          <div style={{ marginTop: '40px', padding: '24px', background: 'rgba(var(--info-rgb), 0.05)', border: '1px solid rgba(var(--info-rgb), 0.1)', borderRadius: '16px' }}>
             <div style={{ display: 'flex', gap: '12px' }}>
-              <Info size={18} color="#3b82f6" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <Info size={18} color="var(--info)" style={{ flexShrink: 0, marginTop: '2px' }} />
               <div>
                 <h5 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>Instructions</h5>
                 <ul style={{ color: 'var(--text-primary)', fontSize: '13px', paddingLeft: '16px', margin: 0, lineHeight: '1.6' }}>

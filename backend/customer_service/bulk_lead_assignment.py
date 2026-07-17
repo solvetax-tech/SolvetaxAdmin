@@ -7,6 +7,7 @@ from typing import List, Optional
 import asyncpg
 from fastapi import HTTPException
 
+from backend.common.status_constants import SERVICE_STATUSES
 from backend.customer_service.schemas import CustomerServiceBulkAssignExecuteIn
 from backend.redis_cache import invalidate_tag as redis_invalidate_tag
 from backend.utils import DB_SCHEMA, build_customer_service_visibility, get_db_pool
@@ -78,6 +79,12 @@ async def _invalidate_customer_services_index_caches() -> None:
         "customer_service_followups:alerts:index",
     ):
         await redis_invalidate_tag(tag)
+    # A customer_services write can flip service_status into/out of a "done" state,
+    # which changes what qualifies for the service-done-payment-pending dashboard.
+    from backend.Dashboard.service_done_payment_pending import (
+        invalidate_service_done_payment_pending_cache,
+    )
+    await invalidate_service_done_payment_pending_cache()
 
 
 async def svc_bulk_assign_candidates(
@@ -113,7 +120,7 @@ async def svc_bulk_assign_candidates(
     codes_n = _norm_str_list(service_codes)
     status_n = _norm_str_list(service_statuses)
     for s in status_n:
-        if s not in {"PENDING", "PROVIDED"}:
+        if s not in SERVICE_STATUSES:
             raise HTTPException(
                 status_code=400,
                 detail={"service_statuses": f"Invalid status: {s}"},

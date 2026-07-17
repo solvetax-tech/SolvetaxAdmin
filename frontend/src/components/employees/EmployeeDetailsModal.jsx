@@ -437,7 +437,7 @@ const EmployeeDetailsModal = ({ isOpen, onClose, empId, isAdmin, initialEditMode
                     <div className="confirm-modal-overlay">
                         <div className="confirm-modal-content">
                             <div className="confirm-icon-wrapper">
-                                <AlertCircle size={32} color={confirmStatus.action ? "#2eb87a" : "#ef4444"} />
+                                <AlertCircle size={32} color={confirmStatus.action ? "var(--accent)" : "var(--danger)"} />
                             </div>
                             <h2 style={{ color: 'var(--text-primary)', marginBottom: '12px' }}>Confirm Action</h2>
                             <p style={{ color: 'var(--text-primary)', marginBottom: '32px' }}>
@@ -450,7 +450,7 @@ const EmployeeDetailsModal = ({ isOpen, onClose, empId, isAdmin, initialEditMode
                                     onClick={executeToggleStatus}
                                     disabled={subLoading}
                                 >
-                                    {subLoading ? <RotateCcw size={16} className="refresh-spin" color={confirmStatus.action ? "var(--text-primary)" : "#ef4444"} /> : null}
+                                    {subLoading ? <RotateCcw size={16} className="refresh-spin" color={confirmStatus.action ? "var(--text-inverse)" : "var(--danger)"} /> : null}
                                     <span>{subLoading ? 'Processing...' : 'Confirm Action'}</span>
                                 </button>
                             </div>

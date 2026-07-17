@@ -65,7 +65,7 @@ export default function CrmLeadRemarksField({
                     onChange={(e) => handleChange(e.target.value)}
                 />
                 {error && (
-                    <span style={{ color: '#ff4d4d', fontSize: '11px', marginTop: '4px' }}>{error}</span>
+                    <span style={{ color: 'var(--danger)', fontSize: '11px', marginTop: '4px' }}>{error}</span>
                 )}
             </>
         );

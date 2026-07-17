@@ -20,7 +20,7 @@
 .assignment-history-filter-label {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(var(--fg-rgb), 0.55);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -31,19 +31,19 @@
 }
 
 .history-scope-toggle button {
-  border: 1px solid rgba(var(--fg-rgb), 0.12);
+  border: 1px solid var(--border);
   background: transparent;
-  color: rgba(var(--fg-rgb), 0.6);
+  color: var(--text-muted);
   font-size: 11px;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
 }
 
 .history-scope-toggle button.active {
-  border-color: rgba(46, 184, 122, 0.45);
-  background: rgba(46, 184, 122, 0.12);
-  color: #2eb87a;
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
 }
 
 .history-scope-toggle button:disabled {

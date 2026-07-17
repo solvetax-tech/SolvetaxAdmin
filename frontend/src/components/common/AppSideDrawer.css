@@ -34,9 +34,11 @@
     max-width: calc(100vw - 24px) !important;
 }
 
-/* ── Filter / edit drawers (GST reg edit, Income Tax edit, filters) ── */
+/* ── Filter / edit drawers (GST reg edit, Income Tax edit, filters) ──
+   z-index must clear the sidebar (11000) so the backdrop dims the WHOLE page
+   (sidebar included) — otherwise the sidebar pokes through the overlay. */
 .gst-filters-drawer-overlay {
-    z-index: 10000;
+    z-index: 12000;
 }
 
 .gst-filters-drawer-overlay.app-side-drawer-mode {
@@ -46,10 +48,10 @@
     align-items: stretch !important;
     justify-content: flex-end !important;
     padding: 0 !important;
-    background: rgba(0, 0, 0, 0.6) !important;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    z-index: 10000 !important;
+    background: var(--bg-overlay) !important;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 12000 !important;
 }
 
 /* View + edit GST panels: full width from first paint (no 450px → 50vw jump) */
@@ -69,11 +71,12 @@
 
 /* ── Centered modals → right drawer when `app-side-drawer-mode` is on overlay ── */
 .modal-overlay.app-side-drawer-mode,
-.gst-modal-overlay-v4.app-side-drawer-mode {
+.gst-modal-overlay-v4.app-side-drawer-mode,
+.premium-filter-overlay.app-side-drawer-mode {
     align-items: stretch !important;
     justify-content: flex-end !important;
     padding: 0 !important;
-    z-index: 10000;
+    z-index: 12000;
 }
 
 .modal-overlay.app-side-drawer-mode > .modal-content-glass,
@@ -82,13 +85,17 @@
 .modal-overlay.app-side-drawer-mode > .customer-details-modal,
 .modal-overlay.app-side-drawer-mode > .employee-modal,
 .modal-overlay.app-side-drawer-mode > .customer-modal,
+.premium-filter-overlay.app-side-drawer-mode > .premium-edit-modal-v4,
 .gst-modal-overlay-v4.app-side-drawer-mode > .gst-modal-card-v4,
 .gst-modal-overlay-v4.app-side-drawer-mode > .gst-modal-card-v4.wide-modal,
 .gst-modal-overlay-v4.app-side-drawer-mode > .gst-modal-card-v4.returns-status-modal {
     width: var(--app-side-drawer-width) !important;
     max-width: calc(100vw - 24px) !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    /* Compensate the global html { zoom: 0.75 }: a raw 100vh renders at only
+       ~75% of the real viewport, leaving the drawer short with dead space below.
+       Dividing by --app-zoom makes the panel fill the full screen height. */
+    height: calc(100vh / var(--app-zoom)) !important;
+    max-height: calc(100vh / var(--app-zoom)) !important;
     margin: 0 !important;
     border-radius: 0 !important;
     animation: appSideDrawerSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
@@ -99,6 +106,7 @@
 
 .modal-overlay.app-side-drawer-mode .card-scroll,
 .modal-overlay.app-side-drawer-mode .modal-form-wrapper,
+.premium-filter-overlay.app-side-drawer-mode > .premium-edit-modal-v4 > .edit-modal-body-v4,
 .gst-modal-overlay-v4.app-side-drawer-mode .modal-form-v4,
 .gst-modal-overlay-v4.app-side-drawer-mode .form-scroll-container {
     flex: 1;
@@ -108,6 +116,7 @@
 
 .modal-overlay.app-side-drawer-mode .modal-header,
 .modal-overlay.app-side-drawer-mode .modal-footer-v4,
+.premium-filter-overlay.app-side-drawer-mode > .premium-edit-modal-v4 > .edit-modal-header-v4,
 .gst-modal-overlay-v4.app-side-drawer-mode .modal-header-v4,
 .gst-modal-overlay-v4.app-side-drawer-mode .modal-footer-v4,
 .gst-modal-overlay-v4.app-side-drawer-mode .drawer-footer {
@@ -125,8 +134,8 @@
     align-items: stretch;
     padding: 16px 24px 20px !important;
     gap: 0;
-    border-top: 1px solid rgba(var(--fg-rgb), 0.05);
-    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-surface-2);
     display: flex;
 }
 
@@ -146,10 +155,10 @@
 .gst-reg-details-footer .gst-btn-schedule-payment {
     margin-right: auto;
     padding: 8px 18px;
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.28), rgba(255, 152, 0, 0.22));
-    color: #ffca28;
-    border: 1px solid rgba(255, 193, 7, 0.65);
-    border-radius: 14px;
+    background: var(--warning-soft);
+    color: var(--warning);
+    border: 1px solid rgba(var(--warning-rgb), 0.35);
+    border-radius: var(--radius-md);
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
@@ -157,18 +166,17 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    box-shadow: 0 0 22px rgba(255, 193, 7, 0.2), inset 0 0 14px rgba(255, 193, 7, 0.1);
     transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease;
     font-family: inherit;
 }
 
 .app-drawer-edit-footer .gst-btn-schedule-payment:hover:not(:disabled),
 .gst-reg-details-footer .gst-btn-schedule-payment:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.45), rgba(255, 152, 0, 0.38));
-    color: var(--text-primary);
-    border-color: #ffc107;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 28px rgba(255, 193, 7, 0.4);
+    background: rgba(var(--warning-rgb), 0.2);
+    color: var(--warning);
+    border-color: rgba(var(--warning-rgb), 0.5);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
 }
 
 .app-drawer-edit-footer .gst-btn-schedule-payment:disabled,
@@ -181,11 +189,11 @@
 .app-drawer-btn-cancel {
     background: transparent;
     border: none;
-    color: var(--text-primary);
+    color: var(--text-secondary);
     font-size: 13px;
     font-weight: 600;
     padding: 10px 20px;
-    border-radius: 30px;
+    border-radius: var(--radius-pill);
     cursor: pointer;
     transition: color 0.2s ease;
     display: inline-flex;
@@ -203,35 +211,36 @@
 }
 
 .app-drawer-btn-delete {
-    color: #f44336 !important;
+    color: var(--danger) !important;
 }
 
 .app-drawer-btn-delete:hover:not(:disabled) {
-    color: #ff6b6b !important;
+    color: var(--danger) !important;
 }
 
 .glow-green,
 .app-drawer-btn-save {
-    background: #2eb87a;
-    color: var(--text-primary);
+    background: var(--accent);
+    color: var(--text-inverse);
     border: none;
     padding: 10px 24px;
-    border-radius: 30px;
+    border-radius: var(--radius-pill);
     font-weight: 700;
     font-size: 13px;
     display: inline-flex;
     align-items: center;
     gap: 10px;
     cursor: pointer;
-    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
+    box-shadow: 0 1px 2px rgba(var(--accent-rgb), 0.24);
     transition: all 0.2s ease;
     white-space: nowrap;
 }
 
 .glow-green:hover:not(:disabled),
 .app-drawer-btn-save:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 30px rgba(16, 185, 129, 0.4);
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.28);
 }
 
 .glow-green:disabled,
@@ -269,8 +278,9 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    height: 100vh !important;
-    max-height: 100vh !important;
+    /* Zoom-compensated full height (see note above). */
+    height: calc(100vh / var(--app-zoom)) !important;
+    max-height: calc(100vh / var(--app-zoom)) !important;
     border-radius: 0 !important;
     animation: appSideDrawerSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -343,9 +353,9 @@
 .gst-filters-drawer.gst-reg-details-drawer .form-section-group {
     width: 100%;
     box-sizing: border-box;
-    background: rgba(var(--fg-rgb), 0.02);
-    border: 1px solid rgba(var(--fg-rgb), 0.04);
-    border-radius: 16px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
     padding: 20px;
     margin-top: 0 !important;
     gap: 16px;
@@ -355,11 +365,11 @@
     font-size: 11px !important;
     font-weight: 800 !important;
     text-transform: uppercase !important;
-    color: #2eb87a !important;
+    color: var(--accent) !important;
     letter-spacing: 0.1em !important;
     margin: 0 0 16px !important;
     padding-bottom: 10px;
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-bottom: 1px solid var(--border-subtle);
     width: 100%;
 }
 
@@ -381,11 +391,12 @@
     max-width: 100%;
 }
 
-/* View drawers — always half screen (override legacy 480px in gst_registration.css) */
+/* View drawers — always half screen (override legacy 480px in gst_registration.css).
+   Overlay + panel sit above the sidebar (11000) so the drawer is a true full-page panel. */
 .gst-details-drawer-overlay {
     position: fixed !important;
     inset: 0 !important;
-    z-index: 10000 !important;
+    z-index: 12000 !important;
 }
 
 .gst-details-drawer-overlay.open {
@@ -398,7 +409,9 @@
     position: fixed !important;
     top: 0 !important;
     right: 0 !important;
-    height: 100vh !important;
+    /* Zoom-compensated full height (see note above). */
+    height: calc(100vh / var(--app-zoom)) !important;
+    z-index: 12001 !important;
     transform: none !important;
     transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }

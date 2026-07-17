@@ -1,31 +1,22 @@
-"""Canonical GST filing and return-detail status values (aligned with DB CHECK constraints)."""
+"""GST return-form column plumbing, plus re-exports of the shared status vocabularies.
 
-from typing import List, Literal, Optional, Tuple
+The status/type value lists and their normalizers live in ``backend.common.status_constants``
+(the single source of truth); they are re-exported here so existing importers keep working.
+Everything defined below is GST-specific column mapping, which is deliberately NOT in the
+generic constants module.
+"""
 
-GST_FILING_STATUSES: Tuple[str, ...] = (
-    "DATA_PENDING",
-    "DATA_RECEIVED",
-    "IN_PREPARATION",
-    "PENDING_OTP",
-    "READY_TO_FILE",
-    "FILED",
-    "OVERDUE",
+from typing import List, Optional, Tuple
+
+from backend.common.status_constants import (
+    GST_FILING_STATUSES,
+    GST_RETURN_DETAIL_STATUSES,
+    GST_RETURN_DETAIL_SYSTEM_ONLY_STATUSES,
+    GstFilingStatusLiteral,
+    GstReturnDetailStatusLiteral,
+    normalize_gst_filing_status,
+    normalize_return_detail_status,
 )
-
-GST_RETURN_DETAIL_STATUSES: Tuple[str, ...] = GST_FILING_STATUSES + ("NOT_FILED", "MISSED")
-
-# Manual PATCH / UI only — MISSED & OVERDUE are system-assigned (due dates, scheduler).
-GST_RETURN_DETAIL_EDITABLE_STATUSES: Tuple[str, ...] = (
-    "DATA_PENDING",
-    "DATA_RECEIVED",
-    "IN_PREPARATION",
-    "PENDING_OTP",
-    "READY_TO_FILE",
-    "FILED",
-    "NOT_FILED",
-)
-
-GST_RETURN_DETAIL_SYSTEM_ONLY_STATUSES = frozenset({"MISSED", "OVERDUE"})
 
 GST_RETURN_STATUS_COLUMNS: Tuple[str, ...] = (
     "gstr1_status",
@@ -65,47 +56,24 @@ RETURN_FORM_TO_DUE_DATE_COLUMN: dict[str, str] = {
 
 GST_RETURN_FOLLOWUP_COLUMNS: Tuple[str, ...] = tuple(RETURN_FORM_TO_FOLLOWUP_COLUMN.values())
 
-GstFilingStatusLiteral = Literal[
-    "DATA_PENDING",
-    "DATA_RECEIVED",
-    "IN_PREPARATION",
-    "PENDING_OTP",
-    "READY_TO_FILE",
-    "FILED",
-    "OVERDUE",
+__all__ = [
+    # Re-exported from backend.common.status_constants
+    "GST_FILING_STATUSES",
+    "GST_RETURN_DETAIL_STATUSES",
+    "GST_RETURN_DETAIL_SYSTEM_ONLY_STATUSES",
+    "GstFilingStatusLiteral",
+    "GstReturnDetailStatusLiteral",
+    "normalize_gst_filing_status",
+    "normalize_return_detail_status",
+    # GST-specific column plumbing
+    "GST_RETURN_STATUS_COLUMNS",
+    "RETURN_FORM_TO_STATUS_COLUMN",
+    "RETURN_FORM_TO_FOLLOWUP_COLUMN",
+    "RETURN_FORM_TO_DUE_DATE_COLUMN",
+    "GST_RETURN_FOLLOWUP_COLUMNS",
+    "normalize_return_form_key",
+    "parse_return_status_rules",
 ]
-
-GstReturnDetailStatusLiteral = Literal[
-    "DATA_PENDING",
-    "DATA_RECEIVED",
-    "IN_PREPARATION",
-    "PENDING_OTP",
-    "READY_TO_FILE",
-    "FILED",
-    "OVERDUE",
-    "NOT_FILED",
-    "MISSED",
-]
-
-
-def normalize_gst_filing_status(value: Optional[str]) -> Optional[str]:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    normalized = value.strip().upper()
-    if normalized not in GST_FILING_STATUSES:
-        allowed = ", ".join(GST_FILING_STATUSES)
-        raise ValueError(f"Invalid filing status '{normalized}'. Allowed: {allowed}")
-    return normalized
-
-
-def normalize_return_detail_status(value: Optional[str]) -> Optional[str]:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    normalized = value.strip().upper()
-    if normalized not in GST_RETURN_DETAIL_STATUSES:
-        allowed = ", ".join(GST_RETURN_DETAIL_STATUSES)
-        raise ValueError(f"Invalid return status '{normalized}'. Allowed: {allowed}")
-    return normalized
 
 
 def normalize_return_form_key(value: Optional[str]) -> Optional[str]:

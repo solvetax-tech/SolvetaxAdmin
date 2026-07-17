@@ -16,7 +16,7 @@
     justify-content: space-between;
     align-items: flex-end;
     padding-bottom: 24px;
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
+    border-bottom: 1px solid var(--border);
 }
 
 .nt-header-title {
@@ -47,9 +47,9 @@
 }
 
 .nt-clear-btn {
-    background: rgba(244, 67, 54, 0.05);
-    border: 1px solid rgba(244, 67, 54, 0.1);
-    color: #f44336;
+    background: rgba(var(--danger-rgb), 0.05);
+    border: 1px solid rgba(var(--danger-rgb), 0.1);
+    color: var(--danger);
     padding: 8px 16px;
     border-radius: 10px;
     font-size: 12px;
@@ -62,7 +62,7 @@
 }
 
 .nt-clear-btn:hover {
-    background: rgba(244, 67, 54, 0.1);
+    background: rgba(var(--danger-rgb), 0.1);
     transform: translateY(-1px);
 }
 
@@ -76,22 +76,23 @@
     display: flex;
     align-items: flex-start;
     gap: 16px;
-    background: rgba(var(--fg-rgb), 0.02);
-    border: 1px solid rgba(var(--fg-rgb), 0.05);
-    border-radius: 16px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 20px;
-    transition: all 0.2s ease;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .nt-card:hover {
-    background: rgba(var(--fg-rgb), 0.04);
-    border-color: rgba(46, 184, 122, 0.2);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    box-shadow: var(--shadow-md);
 }
 
 .nt-card-icon-wrapper {
     width: 40px;
     height: 40px;
-    background: rgba(46, 184, 122, 0.1);
+    background: rgba(var(--accent-rgb), 0.1);
     border-radius: 12px;
     display: flex;
     align-items: center;
@@ -136,8 +137,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(46, 184, 122, 0.08);
-    border: 1px solid rgba(46, 184, 122, 0.15);
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.15);
     color: var(--text-primary);
     padding: 4px 12px;
     border-radius: 6px;
@@ -149,8 +150,8 @@
 }
 
 .nt-action-btn-v2:hover:not(.disabled) {
-    background: #2eb87a;
-    color: var(--text-primary);
+    background: var(--accent);
+    color: var(--text-inverse);
 }
 
 .nt-loading, .nt-empty {
@@ -158,6 +159,6 @@
     padding: 60px;
     color: var(--text-muted);
     font-size: 14px;
-    border: 1px dashed rgba(var(--fg-rgb), 0.05);
-    border-radius: 20px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
 }

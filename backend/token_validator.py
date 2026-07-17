@@ -4,9 +4,14 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import jwt
 import os
-from backend.utils import get_db_pool, DB_SCHEMA
+from backend.utils import get_db_pool, DB_SCHEMA, hash_session_token
+from backend.security.rate_limit import enforce_rate_limit
 from dotenv import load_dotenv
 from datetime import datetime, timezone
+
+# Per-employee global cap on authenticated API calls (fleet-wide via Redis).
+# Generous enough for interactive dashboards; caps runaway/abusive clients.
+_API_RATE_LIMIT_PER_MIN = int(os.getenv("API_RATE_LIMIT_PER_MIN", "600"))
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -21,6 +26,7 @@ PUBLIC_PATHS = [
     "/redoc/",
     "/favicon.ico",
     "/health",
+    "/ready",
     "/app/v1/login",
     "/app/v1/refresh",
     "/app/v1/forgot-password/request",
@@ -65,6 +71,10 @@ async def validate_token(token: str, request: Request | None = None):
 
         pool = await get_db_pool()
 
+        # Sessions are stored as a SHA-256 hash of the access token, so hash
+        # the incoming bearer token before every lookup / audit write.
+        token_hash = hash_session_token(token)
+
         async with pool.acquire() as conn:
 
             # --------------------------------------------------
@@ -79,7 +89,7 @@ async def validate_token(token: str, request: Request | None = None):
                 AND is_active=true
                 """,
                 emp_id,
-                token
+                token_hash
             )
 
             if not session:
@@ -93,7 +103,7 @@ async def validate_token(token: str, request: Request | None = None):
                         VALUES ($1,$2,$3,$4,$5)
                         """,
                         emp_id,
-                        token,
+                        token_hash,
                         "VALIDATION_FAILED",
                         "Session not active",
                         request.client.host if request.client else None
@@ -125,7 +135,7 @@ async def validate_token(token: str, request: Request | None = None):
                         VALUES ($1,$2,$3,$4,$5)
                         """,
                         emp_id,
-                        token,
+                        token_hash,
                         "VALIDATION_FAILED",
                         "Session expired",
                         request.client.host if request.client else None
@@ -160,7 +170,7 @@ async def validate_token(token: str, request: Request | None = None):
                         VALUES ($1,$2,$3,$4,$5)
                         """,
                         emp_id,
-                        token,
+                        token_hash,
                         "VALIDATION_FAILED",
                         "Employee account inactive",
                         request.client.host if request.client else None
@@ -218,4 +228,22 @@ class TokenValidatorMiddleware(BaseHTTPMiddleware):
         if not valid:
             # Show the actual reason for session invalidity to the user
             return JSONResponse(status_code=403, content={"detail": reason})
+
+        # Global per-employee API rate limit (fleet-wide via Redis; fails open
+        # on Redis outage). Middleware isn't a route context, so translate the
+        # limiter's 429 into a JSONResponse rather than letting it propagate.
+        try:
+            await enforce_rate_limit(
+                f"emp:{token_id}",
+                bucket="api",
+                max_requests=_API_RATE_LIMIT_PER_MIN,
+                window_seconds=60,
+            )
+        except HTTPException as rl_exc:
+            return JSONResponse(
+                status_code=rl_exc.status_code,
+                content={"detail": rl_exc.detail},
+                headers=getattr(rl_exc, "headers", None) or {},
+            )
+
         return await call_next(request)

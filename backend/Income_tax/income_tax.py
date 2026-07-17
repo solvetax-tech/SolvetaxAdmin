@@ -21,6 +21,7 @@ from backend.Income_tax.income_tax_helpers import (
     income_tax_select_columns,
     normalize_query_str_list,
 )
+from backend.common.status_constants import normalize_filed_status, normalize_priority
 from backend.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
 from backend.logger import logger
 from backend.text_search_filters import append_fuzzy_name_filter, append_ilike_contains
@@ -47,6 +48,12 @@ async def _invalidate_income_tax_cache(income_tax_id: Optional[int] = None) -> N
     await redis_invalidate_tag(_income_tax_filter_tag())
     if income_tax_id is not None:
         await redis_invalidate_tag(_income_tax_detail_tag(income_tax_id))
+    # filed_status can transition into/out of FILED ("service done"), which
+    # changes the service-done-payment-pending dashboard.
+    from backend.Dashboard.service_done_payment_pending import (
+        invalidate_service_done_payment_pending_cache,
+    )
+    await invalidate_service_done_payment_pending_cache()
 
 
 def _income_tax_returning_sql() -> str:
@@ -448,14 +455,16 @@ async def create_income_tax_lead(
                 crm_lead_row = None
 
                 if link_existing_lead:
-                    crm_lead_row = await conn.fetchrow(
-                        f"""
-                        SELECT *
-                        FROM {DB_SCHEMA}.crm_leads
-                        WHERE id = $1
-                        FOR UPDATE
-                        """,
+                    # IDOR guard: only link a CRM lead the caller can actually
+                    # see (same visibility as CRM list/detail). Without this an
+                    # RM/OP could hijack another owner's unlinked lead by id.
+                    from backend.crm.crm_leads_common import _fetch_crm_lead_visible
+                    crm_lead_row = await _fetch_crm_lead_visible(
+                        conn,
+                        role_norm,
+                        emp_id or 0,
                         payload.crm_lead_id,
+                        for_update=True,
                     )
                     if not crm_lead_row:
                         raise HTTPException(status_code=404, detail="CRM lead not found.")
@@ -792,6 +801,12 @@ async def filter_income_tax(
     if created_from and created_to and created_from > created_to:
         raise HTTPException(status_code=400, detail="created_from must be <= created_to.")
 
+    try:
+        filed_status_u = normalize_filed_status(filed_status)
+        priority_u = normalize_priority(priority)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     cache_key = build_cache_key(
         "income_tax_filter",
         ver=income_tax_cache_ver(),
@@ -801,8 +816,8 @@ async def filter_income_tax(
         client_name=client_name.strip() if client_name else None,
         email_id=email_id.strip().lower() if email_id else None,
         financial_year=normalize_query_str_list(financial_year) or None,
-        filed_status=filed_status.strip().upper() if filed_status else None,
-        priority=priority.strip().upper() if priority else None,
+        filed_status=filed_status_u,
+        priority=priority_u,
         language=language.strip().upper() if language else None,
         state=state.strip().upper() if state else None,
         source_of_income=[s.strip().upper() for s in normalize_query_str_list(source_of_income)] or None,
@@ -844,14 +859,15 @@ async def filter_income_tax(
         conditions.append(f"i.financial_year && ${idx}::varchar[]")
         values.append(fy_filters)
         idx += 1
-    if filed_status:
-        add_eq("i.filed_status", filed_status.strip().upper())
-    if priority:
-        add_eq("i.priority", priority.strip().upper())
+    if filed_status_u:
+        add_eq("i.filed_status", filed_status_u)
+    if priority_u:
+        add_eq("i.priority", priority_u)
     if language:
         add_eq("i.language", language.strip().upper())
     if state:
-        idx = append_fuzzy_name_filter(conditions, values, idx, "i.state", state)
+        # Dropdown enum — exact match (fuzzy over-matched the "PRADESH" family).
+        add_eq("upper(trim(i.state))", state.strip().upper())
     src_filters = [s.strip().upper() for s in normalize_query_str_list(source_of_income)]
     if src_filters:
         conditions.append(
@@ -1005,12 +1021,17 @@ async def edit_income_tax(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role_norm = (current_user.get("role") or "").strip().upper()
 
     update_data = {
         k: v
         for k, v in payload.model_dump(exclude_unset=True).items()
         if k in INCOME_TAX_EDITABLE_FIELDS
     }
+    # Mass-assignment guard: only an admin may reassign ownership (rm_id/op_id).
+    if role_norm != "ADMIN":
+        update_data.pop("rm_id", None)
+        update_data.pop("op_id", None)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields provided for update.")
 
@@ -1018,9 +1039,24 @@ async def edit_income_tax(
         pool = await get_db_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
+                # IDOR guard: a WRITE holder may only mutate income-tax records
+                # they can see. ADMIN unrestricted; RM/OP/managers limited to
+                # their own assignments — matching get-by-id read scope.
+                visibility_sql, visibility_values, _vidx = build_income_tax_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["i.id = $1"]
+                fetch_args = [income_tax_id]
+                if visibility_sql:
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_args.extend(visibility_values)
                 old = await conn.fetchrow(
-                    f"SELECT * FROM {DB_SCHEMA}.income_tax WHERE id = $1 FOR UPDATE",
-                    income_tax_id,
+                    f"""
+                    SELECT i.* FROM {DB_SCHEMA}.income_tax i
+                    WHERE {' AND '.join(fetch_conditions)}
+                    FOR UPDATE
+                    """,
+                    *fetch_args,
                 )
                 if not old:
                     raise HTTPException(status_code=404, detail="Income tax record not found.")

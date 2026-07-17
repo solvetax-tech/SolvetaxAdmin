@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, CreditCard, RotateCcw, Search } from 'lucide-react';
 import { fetchGstFilingMonthlyMatrix, parseGstFilingFocusFromSearch } from '../../utils/dashboardApi';
 import { patchReturnDetailStatus, resolveReturnDetailIdForForm } from '../../utils/gstFilingReturnApi';
+import { getAnchorRect, getViewportSize } from '../../utils/zoom';
 import {
     GST_FILING_STATUS_LABELS,
     GST_RETURN_DETAIL_STATUSES,
@@ -536,11 +537,23 @@ function FollowupEditorPopover({
         const handleEscape = (event) => {
             if (event.key === 'Escape') onClose();
         };
+        // The popover is position:fixed at coordinates captured when it opened, so
+        // it doesn't track its anchor once the matrix scrolls. Close it on any
+        // scroll or resize (capture phase so scrolling a nested table container is
+        // caught too), but ignore scrolls inside the popover's own options list.
+        const handleDismissOnScroll = (event) => {
+            if (event.type === 'scroll' && popoverRef.current && popoverRef.current.contains(event.target)) return;
+            onClose();
+        };
         document.addEventListener('mousedown', handlePointerDown);
         document.addEventListener('keydown', handleEscape);
+        window.addEventListener('scroll', handleDismissOnScroll, true);
+        window.addEventListener('resize', handleDismissOnScroll);
         return () => {
             document.removeEventListener('mousedown', handlePointerDown);
             document.removeEventListener('keydown', handleEscape);
+            window.removeEventListener('scroll', handleDismissOnScroll, true);
+            window.removeEventListener('resize', handleDismissOnScroll);
         };
     }, [onClose]);
 
@@ -634,11 +647,23 @@ function StatusEditorPopover({
         const handleEscape = (event) => {
             if (event.key === 'Escape') onClose();
         };
+        // The popover is position:fixed at coordinates captured when it opened, so
+        // it doesn't track its anchor once the matrix scrolls. Close it on any
+        // scroll or resize (capture phase so scrolling a nested table container is
+        // caught too), but ignore scrolls inside the popover's own options list.
+        const handleDismissOnScroll = (event) => {
+            if (event.type === 'scroll' && popoverRef.current && popoverRef.current.contains(event.target)) return;
+            onClose();
+        };
         document.addEventListener('mousedown', handlePointerDown);
         document.addEventListener('keydown', handleEscape);
+        window.addEventListener('scroll', handleDismissOnScroll, true);
+        window.addEventListener('resize', handleDismissOnScroll);
         return () => {
             document.removeEventListener('mousedown', handlePointerDown);
             document.removeEventListener('keydown', handleEscape);
+            window.removeEventListener('scroll', handleDismissOnScroll, true);
+            window.removeEventListener('resize', handleDismissOnScroll);
         };
     }, [onClose]);
 
@@ -901,15 +926,17 @@ const GstFilingMonthlyMatrix = () => {
     }), [months.length]);
 
     const openStatusEditor = useCallback((event, context) => {
-        const rect = event.currentTarget.getBoundingClientRect();
+        // Zoom-corrected so the popover lands on its cell (see utils/zoom).
+        const rect = getAnchorRect(event.currentTarget);
+        const viewport = getViewportSize();
         const popoverWidth = 260;
         const popoverHeight = 320;
         let left = rect.left;
         let top = rect.bottom + 6;
-        if (left + popoverWidth > window.innerWidth - 12) {
-            left = Math.max(12, window.innerWidth - popoverWidth - 12);
+        if (left + popoverWidth > viewport.width - 12) {
+            left = Math.max(12, viewport.width - popoverWidth - 12);
         }
-        if (top + popoverHeight > window.innerHeight - 12) {
+        if (top + popoverHeight > viewport.height - 12) {
             top = Math.max(12, rect.top - popoverHeight - 6);
         }
         setStatusSaveError('');
@@ -927,15 +954,17 @@ const GstFilingMonthlyMatrix = () => {
     }, [statusSaving]);
 
     const openFollowupEditor = useCallback((event, context) => {
-        const rect = event.currentTarget.getBoundingClientRect();
+        // Zoom-corrected so the popover lands on its cell (see utils/zoom).
+        const rect = getAnchorRect(event.currentTarget);
+        const viewport = getViewportSize();
         const popoverWidth = 280;
         const popoverHeight = 220;
         let left = rect.left;
         let top = rect.bottom + 6;
-        if (left + popoverWidth > window.innerWidth - 12) {
-            left = Math.max(12, window.innerWidth - popoverWidth - 12);
+        if (left + popoverWidth > viewport.width - 12) {
+            left = Math.max(12, viewport.width - popoverWidth - 12);
         }
-        if (top + popoverHeight > window.innerHeight - 12) {
+        if (top + popoverHeight > viewport.height - 12) {
             top = Math.max(12, rect.top - popoverHeight - 6);
         }
         setFollowupSaveError('');

@@ -429,7 +429,7 @@ const AddEmployeeModal = ({ isOpen, onClose, onSuccess }) => {
                                         {!isEmailVerified && showOTPInput && (
                                             <div className="otp-verification-container">
                                                 <div className="otp-header">
-                                                    <Shield size={14} style={{ color: '#2eb87a' }} />
+                                                    <Shield size={14} style={{ color: 'var(--accent)' }} />
                                                     <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)' }}>Enter 6-digit OTP</span>
                                                 </div>
                                                 <div className="otp-input-group" style={{ display: 'flex', gap: '12px' }}>

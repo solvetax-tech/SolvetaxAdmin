@@ -537,6 +537,7 @@ const Dashboard = ({ onLogout }) => {
 
   // Fetch logged-in user profile
   const fetchUserProfile = useCallback(async () => {
+    let payload = null;
     try {
       const token = localStorage.getItem('session_token');
       if (!token) return;
@@ -546,7 +547,7 @@ const Dashboard = ({ onLogout }) => {
 
       const base64Url = parts[1];
       const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const payload = JSON.parse(window.atob(base64));
+      payload = JSON.parse(window.atob(base64));
       const empId = payload.sub;
 
       if (empId) {
@@ -555,6 +556,12 @@ const Dashboard = ({ onLogout }) => {
       }
     } catch (err) {
       console.error("Failed to fetch profile:", err);
+      // Fallback so a transient profile-fetch failure doesn't silently downgrade
+      // an admin to the non-admin toolset: the signed JWT already carries the
+      // role, so seed a minimal profile from it rather than leaving it null.
+      if (payload?.role) {
+        setProfileData((prev) => prev || { emp_id: payload.sub, role: payload.role });
+      }
     }
   }, []);
 
@@ -847,7 +854,7 @@ const Dashboard = ({ onLogout }) => {
           <>
             <div className="drawer-header">
               <div className="drawer-title">
-                <ShieldCheck size={24} color="#2eb87a" />
+                <ShieldCheck size={24} color="var(--accent)" />
                 <div>
                   <h3>{row.customer_name}</h3>
                   <p>Customer ID {row.customer_id}</p>
@@ -878,11 +885,11 @@ const Dashboard = ({ onLogout }) => {
                   </div>
                   <div className="kpi-item-premium">
                     <span className="kpi-label-v2">Provided</span>
-                    <span className="kpi-value-v2" style={{ color: '#2eb87a' }}>{row.provided_count}</span>
+                    <span className="kpi-value-v2" style={{ color: 'var(--accent)' }}>{row.provided_count}</span>
                   </div>
                   <div className="kpi-item-premium">
                     <span className="kpi-label-v2">Pending</span>
-                    <span className="kpi-value-v2" style={{ color: '#f59e0b' }}>{row.pending_count}</span>
+                    <span className="kpi-value-v2" style={{ color: 'var(--warning)' }}>{row.pending_count}</span>
                   </div>
                 </div>
               </div>
@@ -927,7 +934,7 @@ const Dashboard = ({ onLogout }) => {
 
                 <div className="service-type-group">
                   <div className="group-header">
-                    <div className="group-title"><CheckCircle2 size={14} color="#2eb87a" /> Provided Services</div>
+                    <div className="group-title"><CheckCircle2 size={14} color="var(--accent)" /> Provided Services</div>
                     <div className="group-count">{row.provided_count}</div>
                   </div>
                   <div className="service-items-grid">
@@ -941,7 +948,7 @@ const Dashboard = ({ onLogout }) => {
 
                 <div className="service-type-group">
                   <div className="group-header">
-                    <div className="group-title"><Clock size={14} color="#f59e0b" /> Pending Services</div>
+                    <div className="group-title"><Clock size={14} color="var(--warning)" /> Pending Services</div>
                     <div className="group-count">{row.pending_count}</div>
                   </div>
                   <div className="service-items-grid">
@@ -1239,7 +1246,7 @@ const Dashboard = ({ onLogout }) => {
               {profileData?.employee_image_url ? (
                 <img src={profileData.employee_image_url} alt="Profile" />
               ) : (
-                <UserCircle size={80} strokeWidth={1} color="#666" />
+                <UserCircle size={80} strokeWidth={1} color="var(--text-muted)" />
               )}
               <div className="avatar-edit-overlay">
                 <Camera size={24} />
@@ -1699,9 +1706,9 @@ const Dashboard = ({ onLogout }) => {
                   display: 'flex', 
                   alignItems: 'center', 
                   gap: '8px', 
-                  backgroundColor: 'rgba(46, 184, 122, 0.08)', 
-                  color: '#2eb87a',
-                  border: '1px solid rgba(46, 184, 122, 0.2)',
+                  backgroundColor: 'rgba(var(--accent-rgb), 0.08)', 
+                  color: 'var(--accent)',
+                  border: '1px solid rgba(var(--accent-rgb), 0.2)',
                   height: '38px',
                   transition: 'all 0.2s ease',
                   cursor: 'pointer'

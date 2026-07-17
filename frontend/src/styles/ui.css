@@ -1,0 +1,531 @@
+/* ============================================================
+ * SOLVETAX SHARED UI PRIMITIVES  —  "compliance cockpit"
+ * One premium, token-driven system for buttons, pills, tables,
+ * cards and inputs. Adopt these classes (or the matching React
+ * components in components/ui/) to replace the ~100 button /
+ * ~112 pill / ~15 table variants scattered across features.
+ * Everything reads design tokens, so it flips cleanly light/dark.
+ * ============================================================ */
+
+/* ---------------- Buttons ---------------- */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-accent);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  padding: 9px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background var(--transition), border-color var(--transition),
+    transform var(--transition), box-shadow var(--transition), color var(--transition);
+}
+.ui-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.ui-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+.ui-btn svg { width: 15px; height: 15px; }
+
+.ui-btn--primary {
+  background: var(--accent);
+  color: var(--text-inverse);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+.ui-btn--primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.ui-btn--primary:active { transform: translateY(0); }
+
+.ui-btn--secondary {
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+.ui-btn--secondary:hover { background: var(--bg-elevated); border-color: var(--border-strong); }
+
+.ui-btn--ghost { background: transparent; color: var(--text-secondary); }
+.ui-btn--ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.ui-btn--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.ui-btn--danger:hover { background: color-mix(in srgb, var(--danger) 18%, transparent); }
+
+.ui-btn--sm { padding: 6px 12px; font-size: 12px; border-radius: var(--radius-sm); }
+.ui-btn--icon {
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+.ui-btn--icon svg { width: 14px; height: 14px; }
+.ui-btn--icon:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border); }
+/* compact icon action in dense table rows */
+.ui-btn--icon.ui-btn--sm { width: 28px; height: 28px; }
+
+/* ---------------- Pills / status badges ----------------
+   Two kinds of pill, and the difference is deliberate:
+   - TONED (success/warning/danger/info/accent) = a status. The tone owns the
+     whole pill: tinted background, border, dot AND label, so OPEN reads amber
+     and RESOLVED green at a glance.
+   - NEUTRAL = metadata (Category, Type, Business Type). No status to signal,
+     so the label is a plain value at full contrast.
+   Either way the family matches every other value in the row. */
+.ui-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+.ui-pill__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--pill-tone, currentColor); flex: none; }
+
+/* Neutral = metadata: label stays the full-contrast ink from .ui-pill above. */
+.ui-pill--neutral { --pill-tone: var(--text-muted); background: rgba(var(--fg-rgb), 0.06); border-color: rgba(var(--fg-rgb), 0.12); }
+/* Toned = status: the label carries the tone too. */
+.ui-pill--accent  { --pill-tone: var(--accent);  color: var(--accent);  background: var(--accent-soft);  border-color: color-mix(in srgb, var(--accent) 28%, transparent); }
+.ui-pill--success { --pill-tone: var(--success); color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 28%, transparent); }
+.ui-pill--warning { --pill-tone: var(--warning); color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 28%, transparent); }
+.ui-pill--danger  { --pill-tone: var(--danger);  color: var(--danger);  background: var(--danger-soft);  border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
+.ui-pill--info    { --pill-tone: var(--info);    color: var(--info);    background: var(--info-soft);    border-color: color-mix(in srgb, var(--info) 28%, transparent); }
+
+/* ---------------- Data table ---------------- */
+.ui-table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: var(--font-body); }
+.ui-table thead th {
+  text-align: left;
+  font-family: var(--font-accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+  padding: 12px 16px;
+  background: var(--bg-surface-2);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+}
+.ui-table tbody td {
+  padding: 13px 16px;
+  font-size: 13px;
+  /* Full-contrast table text — pure white on dark, pure black on light.
+     Use .ui-cell-meta on a cell to intentionally de-emphasise metadata. */
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+.ui-table tbody td.ui-cell-meta { color: var(--text-muted); }
+.ui-table tbody tr { transition: background var(--transition); }
+.ui-table tbody tr:hover td { background: var(--bg-hover); }
+.ui-table tbody tr:last-child td { border-bottom: none; }
+/* Numeric / identifier cells — tabular monospace, the data signature. */
+/* Numeric values (IDs, GSTINs, periods, amounts) read in the SAME family as
+   every other value — tabular-nums keeps the digits column-aligned without a
+   second typeface in the row. */
+.ui-num, .ui-table .ui-num {
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.ui-num--right { text-align: right; display: block; }
+
+/* ---------------- Card / panel ---------------- */
+.ui-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.ui-card--pad { padding: var(--space-5); }
+
+/* ---------------- Inputs ---------------- */
+.ui-input, .ui-select, .ui-textarea {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+.ui-input:focus, .ui-select:focus, .ui-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.ui-input::placeholder, .ui-textarea::placeholder { color: var(--text-faint); }
+.ui-label {
+  display: block;
+  font-family: var(--font-accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+/* ============================================================
+   VISIBLE HORIZONTAL SCROLLBARS FOR DATA TABLES
+   Feature CSS kept overriding the global 8px bar with a faint
+   6px (or width:0) one that users couldn't see or grab — a real
+   usability blocker on wide tables. This authoritative layer
+   (loaded globally, !important) restores a bold, grabbable bar
+   on every table scroll region, in both themes.
+   ============================================================ */
+.payments-ledger-container,
+.gst-table-container,
+.gst-table-container--portal,
+.gst-table-card-scroll,
+.gst-people-table-card-scroll,
+.gst-docs-table-card-scroll,
+.gst-table-wrapper,
+.gst-documents-container,
+.employee-table-container,
+.customer-tab-container,
+.followups-table-container,
+.insights-table-container-v4,
+.progress-tracker-container-v4,
+.progress-table-wrap,
+.services-table-wrap-v5,
+.gfm-table-wrap,
+.crm-leads-table,
+.assignment-history-table-wrap,
+.bulk-assign-logs-table-wrap,
+.scheduler-overview-table-wrap,
+.audit-ledger-scroll-root,
+.sdpp-page,
+.stats-cards-scroll {
+  scrollbar-width: thin !important;               /* Firefox: thin, consistent across tables */
+  scrollbar-color: rgba(var(--fg-rgb), 0.32) transparent !important;
+  scrollbar-gutter: stable;
+}
+
+.payments-ledger-container::-webkit-scrollbar,
+.gst-table-container::-webkit-scrollbar,
+.gst-table-container--portal::-webkit-scrollbar,
+.gst-table-card-scroll::-webkit-scrollbar,
+.gst-people-table-card-scroll::-webkit-scrollbar,
+.gst-docs-table-card-scroll::-webkit-scrollbar,
+.gst-table-wrapper::-webkit-scrollbar,
+.gst-documents-container::-webkit-scrollbar,
+.employee-table-container::-webkit-scrollbar,
+.customer-tab-container::-webkit-scrollbar,
+.followups-table-container::-webkit-scrollbar,
+.insights-table-container-v4::-webkit-scrollbar,
+.progress-tracker-container-v4::-webkit-scrollbar,
+.progress-table-wrap::-webkit-scrollbar,
+.services-table-wrap-v5::-webkit-scrollbar,
+.gfm-table-wrap::-webkit-scrollbar,
+.crm-leads-table::-webkit-scrollbar,
+.assignment-history-table-wrap::-webkit-scrollbar,
+.bulk-assign-logs-table-wrap::-webkit-scrollbar,
+.scheduler-overview-table-wrap::-webkit-scrollbar,
+.audit-ledger-scroll-root::-webkit-scrollbar,
+.sdpp-page::-webkit-scrollbar,
+.stats-cards-scroll::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;                            /* thin bar, consistent on both axes */
+}
+
+.payments-ledger-container::-webkit-scrollbar-track,
+.gst-table-container::-webkit-scrollbar-track,
+.gst-table-container--portal::-webkit-scrollbar-track,
+.gst-table-card-scroll::-webkit-scrollbar-track,
+.gst-people-table-card-scroll::-webkit-scrollbar-track,
+.gst-docs-table-card-scroll::-webkit-scrollbar-track,
+.gst-table-wrapper::-webkit-scrollbar-track,
+.gst-documents-container::-webkit-scrollbar-track,
+.employee-table-container::-webkit-scrollbar-track,
+.customer-tab-container::-webkit-scrollbar-track,
+.followups-table-container::-webkit-scrollbar-track,
+.insights-table-container-v4::-webkit-scrollbar-track,
+.progress-tracker-container-v4::-webkit-scrollbar-track,
+.progress-table-wrap::-webkit-scrollbar-track,
+.services-table-wrap-v5::-webkit-scrollbar-track,
+.gfm-table-wrap::-webkit-scrollbar-track,
+.crm-leads-table::-webkit-scrollbar-track,
+.assignment-history-table-wrap::-webkit-scrollbar-track,
+.bulk-assign-logs-table-wrap::-webkit-scrollbar-track,
+.scheduler-overview-table-wrap::-webkit-scrollbar-track,
+.audit-ledger-scroll-root::-webkit-scrollbar-track,
+.sdpp-page::-webkit-scrollbar-track,
+.stats-cards-scroll::-webkit-scrollbar-track {
+  background: transparent !important;
+  border-radius: 10px !important;
+}
+
+.payments-ledger-container::-webkit-scrollbar-thumb,
+.gst-table-container::-webkit-scrollbar-thumb,
+.gst-table-container--portal::-webkit-scrollbar-thumb,
+.gst-table-card-scroll::-webkit-scrollbar-thumb,
+.gst-people-table-card-scroll::-webkit-scrollbar-thumb,
+.gst-docs-table-card-scroll::-webkit-scrollbar-thumb,
+.gst-table-wrapper::-webkit-scrollbar-thumb,
+.gst-documents-container::-webkit-scrollbar-thumb,
+.employee-table-container::-webkit-scrollbar-thumb,
+.customer-tab-container::-webkit-scrollbar-thumb,
+.followups-table-container::-webkit-scrollbar-thumb,
+.insights-table-container-v4::-webkit-scrollbar-thumb,
+.progress-tracker-container-v4::-webkit-scrollbar-thumb,
+.progress-table-wrap::-webkit-scrollbar-thumb,
+.services-table-wrap-v5::-webkit-scrollbar-thumb,
+.gfm-table-wrap::-webkit-scrollbar-thumb,
+.crm-leads-table::-webkit-scrollbar-thumb,
+.assignment-history-table-wrap::-webkit-scrollbar-thumb,
+.bulk-assign-logs-table-wrap::-webkit-scrollbar-thumb,
+.scheduler-overview-table-wrap::-webkit-scrollbar-thumb,
+.audit-ledger-scroll-root::-webkit-scrollbar-thumb,
+.sdpp-page::-webkit-scrollbar-thumb,
+.stats-cards-scroll::-webkit-scrollbar-thumb {
+  background: rgba(var(--fg-rgb), 0.1) !important;
+  border-radius: 10px !important;
+}
+
+.payments-ledger-container::-webkit-scrollbar-thumb:hover,
+.gst-table-container::-webkit-scrollbar-thumb:hover,
+.gst-table-container--portal::-webkit-scrollbar-thumb:hover,
+.gst-table-card-scroll::-webkit-scrollbar-thumb:hover,
+.gst-people-table-card-scroll::-webkit-scrollbar-thumb:hover,
+.gst-docs-table-card-scroll::-webkit-scrollbar-thumb:hover,
+.gst-table-wrapper::-webkit-scrollbar-thumb:hover,
+.gst-documents-container::-webkit-scrollbar-thumb:hover,
+.employee-table-container::-webkit-scrollbar-thumb:hover,
+.customer-tab-container::-webkit-scrollbar-thumb:hover,
+.followups-table-container::-webkit-scrollbar-thumb:hover,
+.insights-table-container-v4::-webkit-scrollbar-thumb:hover,
+.progress-tracker-container-v4::-webkit-scrollbar-thumb:hover,
+.progress-table-wrap::-webkit-scrollbar-thumb:hover,
+.services-table-wrap-v5::-webkit-scrollbar-thumb:hover,
+.gfm-table-wrap::-webkit-scrollbar-thumb:hover,
+.crm-leads-table::-webkit-scrollbar-thumb:hover,
+.assignment-history-table-wrap::-webkit-scrollbar-thumb:hover,
+.bulk-assign-logs-table-wrap::-webkit-scrollbar-thumb:hover,
+.scheduler-overview-table-wrap::-webkit-scrollbar-thumb:hover,
+.audit-ledger-scroll-root::-webkit-scrollbar-thumb:hover,
+.sdpp-page::-webkit-scrollbar-thumb:hover,
+.stats-cards-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--accent-rgb), 0.3) !important;
+}
+
+/* Income Tax ledger — same thin unified scrollbar as every other table (its
+   scroll element .itr-ledger-body isn't in the lists above). */
+.itr-ledger-body {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(var(--fg-rgb), 0.32) transparent !important;
+  scrollbar-gutter: stable;
+}
+.itr-ledger-body::-webkit-scrollbar { width: 6px !important; height: 6px !important; }
+.itr-ledger-body::-webkit-scrollbar-track { background: transparent !important; }
+.itr-ledger-body::-webkit-scrollbar-thumb { background: rgba(var(--fg-rgb), 0.1) !important; border-radius: 10px !important; }
+.itr-ledger-body::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.3) !important; }
+
+/* ============================================================
+   COMPACT ROW ACTION BUTTONS
+   Row edit/view actions were 34px with wide gaps in some tables,
+   making the Actions column feel bulky. One uniform compact size
+   (28px, tight gap) across every table.
+   ============================================================ */
+.gst-action-buttons,
+.table-actions-combined {
+  gap: 6px !important;
+}
+.btn-view-action,
+.btn-edit-action {
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+}
+.btn-view-action svg,
+.btn-edit-action svg,
+.gst-action-buttons svg,
+.table-actions-combined svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+/* ============================================================
+   MODAL / DRAWER OVERLAYS ABOVE THE SIDEBAR
+   The sidebar sits at z-index 11000. Every full-page modal or
+   side-drawer backdrop must clear it, otherwise the sidebar
+   pokes through the dimmed overlay (bright + clickable) and the
+   drawer no longer reads as a full-page panel. Authoritative,
+   global, wins over the per-component 10000 definitions.
+   Toasts/tooltips live at 13000+ and stay above these.
+   ============================================================ */
+.modal-overlay,
+.modal-overlay.app-side-drawer-mode,
+.gst-modal-overlay-v4,
+.gst-modal-overlay-v4.app-side-drawer-mode,
+.gst-filters-drawer-overlay,
+.gst-filters-drawer-overlay.app-side-drawer-mode,
+.gst-details-drawer-overlay,
+.customer-activation-overlay,
+.activation-confirm-overlay,
+.change-password-overlay,
+.side-panel-overlay,
+.premium-filter-overlay {
+  z-index: 12000 !important;
+}
+/* Drawer panels that are positioned siblings (not children) of their overlay.
+   Their overlay is raised to 12000 above, so a panel left below that gets
+   covered by its own backdrop: the drawer looks dimmed, every click lands on
+   the overlay, and because the overlay's handler is onClose the drawer shuts
+   instead of accepting input. Any sibling panel MUST out-rank its overlay.
+   (Panels nested INSIDE their overlay -- e.g. .premium-drawer-right,
+   .crm-lead-details-drawer -- are safe and deliberately not listed.) */
+.gst-details-drawer,
+.gst-details-drawer.itr-details-drawer,
+.side-panel-drawer,
+.crm-drawer-panel,
+.followups-calendar-drawer,
+.followups-alerts-drawer,
+.followups-filter-drawer,
+.followups-history-drawer {
+  z-index: 12001 !important;
+}
+
+/* Toasts / notification stacks must sit above drawers (12000) so success/error
+   messages stay visible while a drawer or modal is open. */
+.toast-container-glass,
+.toast-container,
+.toast-notification,
+.st-toast-stack-container {
+  z-index: 25000 !important;
+}
+
+/* Remaining drawer/detail/filter overlays -> above sidebar (12000). */
+.gst-modal-overlay,
+.crm-drawer-overlay,
+.crm-lead-details-drawer-overlay,
+.filter-drawer-overlay,
+.followup-drawer-overlay,
+.followups-detail-drawer-overlay,
+.history-drawer-overlay,
+.alerts-drawer-overlay,
+.calendar-drawer-overlay,
+.premium-drawer-overlay {
+  z-index: 12000 !important;
+}
+/* Confirmation / delete / activation dialogs -> above drawers (13000) so they
+   remain visible when triggered from inside an open drawer. */
+.confirm-modal-overlay,
+.confirmation-overlay,
+.gst-confirm-overlay,
+.payment-delete-confirm-overlay,
+.customer-activation-overlay,
+.activation-confirm-overlay,
+.change-password-overlay {
+  z-index: 13000 !important;
+}
+
+/* ============================================================
+   FULL-CONTRAST TABLE COLUMN HEADERS
+   User direction: column names must read at FULL contrast — pure
+   white on dark, pure black on light — not the dim --text-faint
+   caps that every table system defaulted to. Each table feature
+   defines its own header rule (a couple are themselves !important),
+   so this authoritative layer uses doubled-class specificity +
+   !important to win regardless of CSS load order. Headers keep
+   their uppercase caps styling; only the ink goes to full strength.
+   ============================================================ */
+.filings-ledger-header-cell.filings-ledger-header-cell,
+.ledger-header-cell.ledger-header-cell,
+.audit-ledger-header-cell.audit-ledger-header-cell,
+.payments-ledger-header.payments-ledger-header .payments-ledger-cell,
+.itr-ledger-header.itr-ledger-header .itr-ledger-cell,
+.gfm-table-head.gfm-table-head,
+.gfm-table-head.gfm-table-head .gfm-table-cell,
+.gst-registrations-table.gst-registrations-table thead th,
+.followups-table.followups-table thead th,
+.cs-services-table.cs-services-table thead th,
+.crm-leads-table.crm-leads-table thead th {
+  color: var(--text-primary) !important;
+}
+
+/* ============================================================
+   OPAQUE STICKY COLUMNS ON HOVER
+   Sticky action / ID columns must fully hide the columns scrolling
+   behind them. Their per-feature :hover rules tint with --bg-hover
+   (which is transparent), so cells behind bled through on a hovered
+   row (e.g. "MONTHLY" from Filing Pref showing under the Actions
+   column). Force an OPAQUE accent-tinted background. The row class is
+   tripled so this out-specifies the per-feature :hover rules whatever
+   the CSS load order; sticky cells keep their normal opaque bg at rest.
+   The tint mixes over --bg-surface because that is what the rows sit
+   on; mixing over --bg-app left the frozen cells a different tone than
+   the row they belong to.
+   ============================================================ */
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .gst-sticky-actions,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .customer-actions-sticky,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .cs-actions-sticky,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .employee-actions-sticky,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .filings-ledger-sticky-id,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover .sticky-id-column,
+.filings-ledger-row.filings-ledger-row.filings-ledger-row:hover > :nth-child(1),
+.payments-ledger-row.payments-ledger-row.payments-ledger-row:hover .pay-ledger-actions-sticky,
+.payments-ledger-row.payments-ledger-row.payments-ledger-row:hover .pay-ledger-sticky-id,
+.itr-ledger-row.itr-ledger-row.itr-ledger-row:hover .itr-ledger-sticky-actions,
+.itr-ledger-row.itr-ledger-row.itr-ledger-row:hover .itr-ledger-sticky-id,
+.ledger-row.ledger-row.ledger-row:hover .gst-sticky-actions,
+.ledger-row.ledger-row.ledger-row:hover .ledger-sticky-id {
+  background-color: color-mix(in srgb, var(--accent) 8%, var(--bg-surface)) !important;
+}
+
+/* ============================================================================
+   Long-text ledger cells
+   ----------------------------------------------------------------------------
+   THE TRAP: every ledger cell is `display: flex` AND sets
+   `text-overflow: ellipsis`. Those two cannot work together. On a flex
+   container a bare text child becomes an *anonymous flex item*, which cannot be
+   styled -- so the ellipsis never renders and an overflowing value is simply
+   hard-clipped. Where the cell is also centred (`justify-content: center`) the
+   overflow spills equally off BOTH sides, so the value loses its head and its
+   tail with no visual cue at all:
+
+       TILES ORGANIZATION KRISHNA ENTERPRISES  ->  S ORGANIZATION KRISHNA ENTERPR
+
+   which reads as a real -- but wrong -- business name rather than a truncation.
+
+   THE FIX: long free-text columns wrap instead of clipping, and left-align so
+   the first character is always the first character. Pair with a `title`
+   attribute on the cell so the full value is still available on hover.
+
+   gst_filings.css solved this for its own table with `.business-name-cell`;
+   this is that same fix, shared, so every table can use it.
+
+   Specificity note: gst_filings.css declares a GLOBAL `.filings-ledger-cell`
+   with `justify-content/text-align: center !important`, and being a component
+   stylesheet it loads after this file -- so a single-class selector here loses
+   the tie even with !important. Hence the doubled class: (0,0,2,0) beats
+   (0,0,1,0) outright and no longer depends on import order.
+   ========================================================================== */
+.ledger-cell-longtext.ledger-cell-longtext {
+  justify-content: flex-start !important;
+  text-align: left !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}

@@ -7,6 +7,10 @@ from typing import Callable, List, Optional, Tuple
 
 from fastapi import HTTPException
 
+from backend.common.status_constants import (
+    FILING_FREQUENCIES,
+    TAXPAYER_TYPES,
+)
 from backend.gst_registration_filing.status_constants import (
     normalize_gst_filing_status,
     normalize_return_detail_status,
@@ -39,8 +43,8 @@ DOCUMENT_FILTER_FIELDS = {
 
 PRIORITY_VALUES = frozenset({"LOW", "NORMAL", "HIGH"})
 CATEGORY_VALUES = frozenset({"RETURN", "ANNUAL"})
-FREQUENCY_VALUES = frozenset({"MONTHLY", "QUARTERLY", "YEARLY"})
-TAXPAYER_VALUES = frozenset({"REGULAR", "COMPOSITION"})
+FREQUENCY_VALUES = frozenset(FILING_FREQUENCIES)
+TAXPAYER_VALUES = frozenset(TAXPAYER_TYPES)
 DOCUMENT_TYPE_VALUES = frozenset({
     "WORKING_SHEET",
     "SUMMARY_SHEET",

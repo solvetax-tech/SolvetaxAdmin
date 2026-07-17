@@ -17,9 +17,9 @@ const ConfirmationModal = ({
 
     const getIcon = () => {
         switch (type) {
-            case 'danger': return <AlertCircle size={40} color="#ef4444" />;
-            case 'warning': return <AlertCircle size={40} color="#f59e0b" />;
-            default: return <AlertCircle size={40} color="#3b82f6" />;
+            case 'danger': return <AlertCircle size={40} color="var(--danger)" />;
+            case 'warning': return <AlertCircle size={40} color="var(--warning)" />;
+            default: return <AlertCircle size={40} color="var(--info)" />;
         }
     };
 

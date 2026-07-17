@@ -401,9 +401,9 @@ const CustomerServiceBulkAssign = ({ setToastMessage }) => {
                                                     alignItems: 'center',
                                                     gap: '8px',
                                                     cursor: 'pointer',
-                                                    background: 'rgba(46, 184, 122, 0.1)',
-                                                    borderColor: 'rgba(46, 184, 122, 0.3)',
-                                                    color: '#2eb87a',
+                                                    background: 'rgba(var(--accent-rgb), 0.1)',
+                                                    borderColor: 'rgba(var(--accent-rgb), 0.3)',
+                                                    color: 'var(--accent)',
                                                 }}
                                             >
                                                 <Filter size={14} />

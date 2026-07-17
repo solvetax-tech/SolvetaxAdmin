@@ -87,7 +87,7 @@ class CrmDashboardErrorBoundary extends React.Component {
         <div className="crm-layout-wrapper">
           <div className="crm-main" style={{ padding: 32 }}>
             <div className="crm-dashboard-empty">
-              <AlertCircle size={40} style={{ color: '#ef4444', marginBottom: 16 }} />
+              <AlertCircle size={40} style={{ color: 'var(--danger)', marginBottom: 16 }} />
               <h2 style={{ color: 'var(--text-primary)', marginBottom: 8 }}>CRM dashboard failed to load</h2>
               <p style={{ color: 'var(--text-muted)', maxWidth: 480, marginBottom: 16 }}>
                 {this.state.error?.message || 'An unexpected error occurred. Try a hard refresh (Ctrl+Shift+R).'}
@@ -183,7 +183,10 @@ const CrmDashboard = ({ onLogout }) => {
     });
   }, [profileData]);
 
-  const isAdmin = useMemo(() => profileData?.role === 'ADMIN', [profileData]);
+  const isAdmin = useMemo(
+    () => String(profileData?.role || '').toUpperCase() === 'ADMIN',
+    [profileData]
+  );
   const isIncomeTaxCrm = activeEntityType === 'INCOME_TAX';
   const isTodayAssignedRole = useMemo(() => {
     const role = String(profileData?.role || '').toUpperCase();
@@ -570,7 +573,7 @@ const CrmDashboard = ({ onLogout }) => {
               {profileData?.employee_image_url ? (
                 <img src={profileData.employee_image_url} alt="Profile" />
               ) : (
-                <UserCircle size={80} strokeWidth={1} color="#666" />
+                <UserCircle size={80} strokeWidth={1} color="var(--text-muted)" />
               )}
               <div className="avatar-edit-overlay">
                 <Camera size={24} />
@@ -1046,10 +1049,10 @@ const CrmDashboard = ({ onLogout }) => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  background: 'rgba(var(--fg-rgb),0.03)',
-                  border: '1px solid rgba(var(--fg-rgb),0.08)',
+                  background: 'var(--bg-surface-2)',
+                  border: '1px solid var(--border)',
                   padding: '8px 16px',
-                  borderRadius: '12px',
+                  borderRadius: 'var(--radius-md)',
                   color: 'var(--text-primary)',
                   fontSize: '11px',
                   fontWeight: '800',

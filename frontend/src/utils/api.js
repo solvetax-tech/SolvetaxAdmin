@@ -37,6 +37,25 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
+// A single shared refresh call so that when many requests 401 at once (e.g. the
+// laptop wakes and the dashboard fires several parallel requests against an
+// expired token), they all await ONE /refresh instead of each firing its own.
+// Concurrent refreshes would race the rotating refresh-token cookie and spuriously
+// log the user out.
+let refreshPromise = null;
+function performTokenRefresh() {
+    if (!refreshPromise) {
+        refreshPromise = api
+            .post('/app/v1/refresh', {}, {
+                headers: { 'Content-Type': 'application/json' },
+                withCredentials: true,
+            })
+            .then((rs) => rs.data?.access_token || null)
+            .finally(() => { refreshPromise = null; });
+    }
+    return refreshPromise;
+}
+
 // Response interceptor to handle 401s and standardize error messages
 api.interceptors.response.use(
     (response) => response,
@@ -56,17 +75,14 @@ api.interceptors.response.use(
         if ((isAuthError || isTokenExpiredError) && !originalRequest._retry && originalRequest.url !== '/app/v1/refresh') {
             originalRequest._retry = true;
             try {
-                const rs = await api.post('/app/v1/refresh', {}, {
-                    headers: { 'Content-Type': 'application/json' },
-                    withCredentials: true
-                });
-                const { access_token } = rs.data;
+                const access_token = await performTokenRefresh();
                 if (access_token) {
                     localStorage.setItem('session_token', access_token);
+                    originalRequest.headers = originalRequest.headers || {};
                     originalRequest.headers['Authorization'] = `Bearer ${access_token}`;
                     return api(originalRequest);
                 }
-            } catch (refreshError) {
+            } catch {
                 localStorage.removeItem('session_token');
                 if (window.location.pathname !== '/login') {
                     window.location.href = '/login';

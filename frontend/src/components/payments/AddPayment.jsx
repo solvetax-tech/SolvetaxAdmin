@@ -51,7 +51,7 @@ const buildPaymentTargetLabel = (targetCode, customerName, businessName, entityI
     return segments.join(' – ');
 };
 
-const AddPayment = ({ onBack, isAdmin, initialEntityId, initialServiceType }) => {
+const AddPayment = ({ onBack, initialEntityId, initialServiceType }) => {
     const [step, setStep] = useState(1);
     const [serviceType, setServiceType] = useState(
         SERVICE_TYPES.includes(initialServiceType) ? initialServiceType : 'GST_REGISTRATION'
@@ -408,7 +408,7 @@ const AddPayment = ({ onBack, isAdmin, initialEntityId, initialServiceType }) =>
                 {success ? (
                     <div className="modal-success-state" style={{ padding: '60px 40px', textAlign: 'center' }}>
                         <div className="success-icon-wrapper" style={{ marginBottom: '24px' }}>
-                            <CheckCircle2 size={64} className="success-tick" color="#2eb87a" />
+                            <CheckCircle2 size={64} className="success-tick" color="var(--success)" />
                         </div>
                         <h2 style={{ fontSize: '28px', color: 'var(--text-primary)', marginBottom: '12px' }}>
                             {paymentStatus === "PAID" ? "Payment Completed!" : "Payment Recorded"}
@@ -496,7 +496,7 @@ const AddPayment = ({ onBack, isAdmin, initialEntityId, initialServiceType }) =>
                                             autoFocus
                                         />
                                     </div>
-                                    {error && <span className="input-error-text" style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}><AlertCircle size={12} /> {error}</span>}
+                                    {error && <span className="input-error-text" style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}><AlertCircle size={12} /> {error}</span>}
                                 </div>
                             </form>
                         </div>
@@ -527,7 +527,7 @@ const AddPayment = ({ onBack, isAdmin, initialEntityId, initialServiceType }) =>
                         <div className="edit-modal-body-v4">
                             <form id="paymentStep2" onSubmit={handleSubmit} className="premium-edit-grid-v4">
                                 <div className="input-group-v4 full">
-                                    <div className="selected-badge-v2" style={{ margin: '0 0 16px 0', background: 'rgba(46, 184, 122, 0.1)', color: '#2eb87a', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
+                                    <div className="selected-badge-v2" style={{ margin: '0 0 16px 0', background: 'rgba(var(--accent-rgb), 0.1)', color: 'var(--accent)', borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700' }}>
                                             <CheckCircle2 size={14} />
                                             <span>Type: {
@@ -606,7 +606,7 @@ const AddPayment = ({ onBack, isAdmin, initialEntityId, initialServiceType }) =>
                                             type="text"
                                             value={remaining_amount.toFixed(2)}
                                             disabled
-                                            style={{ color: '#ef4444', fontWeight: '800', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}
+                                            style={{ color: 'var(--danger)', fontWeight: '800', border: '1px solid rgba(var(--danger-rgb), 0.3)', background: 'rgba(var(--danger-rgb), 0.05)' }}
                                         />
                                     </div>
                                 </div>
@@ -648,7 +648,7 @@ const AddPayment = ({ onBack, isAdmin, initialEntityId, initialServiceType }) =>
                                 <div className="input-group-v4">
                                     <label><IndianRupee size={14} /> Due after discount</label>
                                     <div className="input-wrapper-v4">
-                                        <input type="text" value={payable.toFixed(2)} disabled style={{ color: '#2eb87a', fontWeight: '700', background: 'rgba(46, 184, 122, 0.05)' }} />
+                                        <input type="text" value={payable.toFixed(2)} disabled style={{ color: 'var(--text-primary)', fontWeight: '700', background: 'rgba(var(--accent-rgb), 0.05)' }} />
                                     </div>
                                     <span className="input-hint-text" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                                         Set discount and/or cash; full waiver: discount = remaining, cash = 0
@@ -671,7 +671,7 @@ const AddPayment = ({ onBack, isAdmin, initialEntityId, initialServiceType }) =>
                                             disabled={isFormDisabled}
                                         ></textarea>
                                     </div>
-                                    {error && <span className="input-error-text" style={{ color: '#ef4444', fontSize: '13px', marginTop: '12px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px' }}><AlertCircle size={14} /> {error}</span>}
+                                    {error && <span className="input-error-text" style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '12px', display: 'flex', alignItems: 'center', gap: '6px', padding: '10px', background: 'rgba(var(--danger-rgb), 0.1)', borderRadius: '8px' }}><AlertCircle size={14} /> {error}</span>}
                                 </div>
                             </form>
                         </div>

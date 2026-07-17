@@ -105,7 +105,7 @@ const GSTDocumentsViewPanel = ({ isOpen, onClose, documentId, documentData, onUp
                 aria-modal="true"
             >
                 <div className="drawer-header gst-reg-details-header">
-                    <div className="header-icon-v4" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#2eb87a', borderColor: 'rgba(16, 185, 129, 0.2)' }}>
+                    <div className="header-icon-v4" style={{ background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--accent)', borderColor: 'rgba(var(--success-rgb), 0.2)' }}>
                         <FileText size={24} />
                     </div>
                     <div className="header-text-v4">
@@ -132,7 +132,7 @@ const GSTDocumentsViewPanel = ({ isOpen, onClose, documentId, documentData, onUp
                     ) : details ? (
                         <div className="details-container-v4">
                             <div className="details-section-v4">
-                                <h4 className="section-title-v4" style={{ color: '#2eb87a' }}>Core Metadata</h4>
+                                <h4 className="section-title-v4" style={{ color: 'var(--accent)' }}>Core Metadata</h4>
                                 <div className="info-grid-v4">
                                     <div className="info-item-v4">
                                         <label>Document Type</label>
@@ -182,11 +182,11 @@ const GSTDocumentsViewPanel = ({ isOpen, onClose, documentId, documentData, onUp
                             <div className="details-section-v4">
                                 <h4 className="section-title-v4">File Actions</h4>
                                 <div style={{ display: 'flex', gap: '12px' }}>
-                                    <button onClick={handleViewFile} className="btn-primary-action" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                                    <button onClick={handleViewFile} className="btn-primary-action" style={{ background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)', border: '1px solid rgba(var(--info-rgb), 0.2)' }}>
                                         <ExternalLink size={14} />
                                         <span>Open Secure Link</span>
                                     </button>
-                                    <button onClick={handleDownloadFile} className="btn-primary-action" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#2eb87a', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                    <button onClick={handleDownloadFile} className="btn-primary-action" style={{ background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--accent)', border: '1px solid rgba(var(--success-rgb), 0.2)' }}>
                                         <Download size={14} />
                                         <span>Download File</span>
                                     </button>

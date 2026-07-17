@@ -1,26 +1,16 @@
 """Pydantic schemas for GST CRM lead routes (admin edit, call / follow-up payloads)."""
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import Field, field_validator, model_validator
 
+from backend.common.status_constants import CrmStageGstLiteral, FollowupStatusLiteral
 from backend.crm.schemas_common import CRMBaseSchema
 
 
 class CRMLeadEditIn(CRMBaseSchema):
-    stage: Optional[
-        Literal[
-            "FRESH_LEAD",
-            "PENDING_REGISTRATION_DATA",
-            "FOLLOW_UP",
-            "INTERESTED",
-            "GST_REGISTRATION_DONE",
-            "SCHEDULED_PAYMENTS",
-            "SUBSCRIBED",
-            "NOT_INTERESTED",
-        ]
-    ] = None
+    stage: Optional[CrmStageGstLiteral] = None
     followup_at: Optional[datetime] = None
     rm_id: Optional[int] = Field(default=None, gt=0)
     op_id: Optional[int] = Field(default=None, gt=0)
@@ -88,6 +78,6 @@ class CRMCallUpdateIn(CRMBaseSchema):
 
 
 class CRMFollowupStatusUpdateIn(CRMBaseSchema):
-    follow_up_status: Literal["PENDING", "COMPLETED", "MISSED"]
+    follow_up_status: FollowupStatusLiteral
     followup_at: Optional[datetime] = None
     remarks: Optional[str] = Field(default=None, max_length=2000)

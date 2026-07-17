@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Clock, Calendar as CalendarIcon, X } from 'lucide-react';
 import CustomSelect from './CustomSelect';
+import { getAnchorRect, getViewportSize } from '../../utils/zoom';
 import './ModernDateTimePicker.css';
 
 function parseDateValue(value) {
@@ -86,10 +87,14 @@ const ModernDateTimePicker = ({
         const popover = popoverRef.current;
         if (!anchor || !popover) return;
 
-        const rect = anchor.getBoundingClientRect();
+        // Anchor rect and viewport are converted out of visual pixels so they
+        // share one space with offsetHeight/popoverWidth and the fixed offsets
+        // written below — otherwise the app's html zoom shifts the popover.
+        const rect = getAnchorRect(anchor);
+        const viewport = getViewportSize();
         const popHeight = popover.offsetHeight || 400;
         const gap = 8;
-        const spaceBelow = window.innerHeight - rect.bottom - gap;
+        const spaceBelow = viewport.height - rect.bottom - gap;
         const spaceAbove = rect.top - gap;
         const preferBottom = placement === 'bottom';
         const openAbove = preferBottom
@@ -97,10 +102,10 @@ const ModernDateTimePicker = ({
             : spaceAbove >= spaceBelow || spaceBelow < popHeight;
 
         let top = openAbove ? rect.top - gap - popHeight : rect.bottom + gap;
-        top = Math.max(8, Math.min(top, window.innerHeight - popHeight - 8));
+        top = Math.max(8, Math.min(top, viewport.height - popHeight - 8));
 
         let left = isCrmPicker ? rect.right - popoverWidth : rect.left;
-        left = Math.max(8, Math.min(left, window.innerWidth - popoverWidth - 8));
+        left = Math.max(8, Math.min(left, viewport.width - popoverWidth - 8));
 
         popover.style.width = `${popoverWidth}px`;
         popover.style.top = `${top}px`;

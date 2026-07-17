@@ -253,6 +253,30 @@ async def signup(
             )
 
         # --------------------------------------------------
+        # PRIVILEGE GUARD — only an admin may create a privileged (ADMIN)
+        # account. Without this any USER_ACCESS:WRITE holder (e.g. a manager)
+        # could sign up a brand-new ADMIN and escalate. Mirrors the role guard
+        # in edit_employee. (Broader manager-role assignment policy TBD.)
+        # --------------------------------------------------
+        ADMIN_ONLY_ROLES = {"ADMIN"}
+        actor_role = (current_user.get("role") or "").strip().upper()
+        if role_code.strip().upper() in ADMIN_ONLY_ROLES and actor_role != "ADMIN":
+            log.warning(
+                "[signup] Non-admin (role=%s) attempted to create privileged role=%s",
+                actor_role, role_code,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "type": "authorization_error",
+                        "message": "Only an admin can create an account with this role.",
+                        "fields": {"role": "You are not permitted to assign this role."},
+                    }
+                },
+            )
+
+        # --------------------------------------------------
         # Validate Manager Role
         # --------------------------------------------------
 

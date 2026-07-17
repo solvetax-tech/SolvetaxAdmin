@@ -3,6 +3,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from backend.security.rbac import require_permission
+from backend.common.status_constants import VERSION_ACTIONS
 from backend.utils import (
     build_customer_visibility,
     get_db_pool,
@@ -91,16 +92,14 @@ async def list_versions(
         )
 
     # --------------------------------------------------
-    # Action Validation (DB CHECK aligned)
+    # Action Validation (vocabulary owned by backend.common.status_constants)
     # --------------------------------------------------
-    ALLOWED_ACTIONS = {"CREATE", "UPDATE", "DELETE", "ACTIVATE"}
-
     if action:
         action = action.strip().upper()
-        if action not in ALLOWED_ACTIONS:
+        if action not in VERSION_ACTIONS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid action. Allowed: {', '.join(ALLOWED_ACTIONS)}",
+                detail=f"Invalid action. Allowed: {', '.join(VERSION_ACTIONS)}",
             )
 
     # --------------------------------------------------

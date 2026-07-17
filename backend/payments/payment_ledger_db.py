@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import asyncpg
+from fastapi import HTTPException
 
 from backend.payments.payment_ledger import (
     PaymentLedgerError,
@@ -14,6 +15,7 @@ from backend.payments.payment_ledger import (
     ledger_error_to_http,
     money,
 )
+from backend.utils import DB_SCHEMA, build_registration_payments_visibility
 
 __all__ = [
     "EntityPaymentTotals",
@@ -23,7 +25,53 @@ __all__ = [
     "insert_payment_from_ledger",
     "resolve_ledger_for_create",
     "ledger_error_to_http",
+    "assert_payment_visible",
 ]
+
+
+async def assert_payment_visible(
+    conn: asyncpg.Connection,
+    role_norm: Optional[str],
+    emp_id: Optional[int],
+    payment_id: int,
+    not_found_detail: str = "Payment not found.",
+) -> None:
+    """IDOR guard for by-id payment mutations.
+
+    Verifies the caller can see the payment using the SAME COALESCE(customer →
+    entity) rm/op ownership as the unified payments list. ADMIN bypasses;
+    raises 404 when the payment isn't visible to the caller.
+    """
+    visibility_sql, visibility_values, _ = build_registration_payments_visibility(
+        role_norm or "", emp_id, 2, DB_SCHEMA,
+    )
+    if not visibility_sql:
+        return  # ADMIN → unrestricted
+    visible = await conn.fetchval(
+        f"""
+        SELECT 1
+        FROM {DB_SCHEMA}.payments rp
+        LEFT JOIN {DB_SCHEMA}.customers c
+               ON rp.customer_id = c.customer_id
+        LEFT JOIN {DB_SCHEMA}.gst_registration g
+               ON rp.entity_type = 'GST_REGISTRATION' AND rp.entity_id = g.id
+        LEFT JOIN {DB_SCHEMA}.income_tax i
+               ON rp.entity_type = 'INCOME_TAX' AND rp.entity_id = i.id
+        LEFT JOIN {DB_SCHEMA}.gst_filings f
+               ON rp.entity_type = 'GST_FILING' AND rp.entity_id = f.id
+        LEFT JOIN {DB_SCHEMA}.gst_filing_return_details rd
+               ON rp.entity_type = 'GST_FILING_RETURN_DETAILS' AND rp.entity_id = rd.id
+        LEFT JOIN {DB_SCHEMA}.gst_filings f_rd
+               ON f_rd.id = rd.gst_filing_id
+        LEFT JOIN {DB_SCHEMA}.customer_services cs
+               ON rp.entity_type = 'CUSTOMER_SERVICE' AND rp.entity_id = cs.id
+        WHERE rp.id = $1 AND ({visibility_sql})
+        LIMIT 1
+        """,
+        payment_id, *visibility_values,
+    )
+    if not visible:
+        raise HTTPException(status_code=404, detail=not_found_detail)
 
 
 @dataclass(frozen=True)

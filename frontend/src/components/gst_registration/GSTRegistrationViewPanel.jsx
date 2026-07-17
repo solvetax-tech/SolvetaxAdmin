@@ -215,13 +215,13 @@ const GSTRegistrationViewPanel = ({ isOpen, onClose, recordId, configs, onUpdate
                                     {details.registration_status === 'SUSPENDED' && (
                                         <div className="info-item-v4" style={{ gridColumn: 'span 2' }}>
                                             <label>Suspension Reason</label>
-                                            <span style={{ color: '#f89a92' }}>{details.suspension_reason || '-'}</span>
+                                            <span style={{ color: 'var(--danger)' }}>{details.suspension_reason || '-'}</span>
                                         </div>
                                     )}
                                     {details.registration_status === 'CANCELLED' && (
                                         <div className="info-item-v4" style={{ gridColumn: 'span 2' }}>
                                             <label>Cancellation Reason</label>
-                                            <span style={{ color: '#f89a92' }}>{details.cancellation_reason || '-'}</span>
+                                            <span style={{ color: 'var(--danger)' }}>{details.cancellation_reason || '-'}</span>
                                         </div>
                                     )}
                                 </div>

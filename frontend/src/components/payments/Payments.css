@@ -14,6 +14,7 @@
     margin-bottom: 8px;
     padding: 0;
     gap: 10px;
+    flex: 0 0 auto;
 }
 
 @keyframes fadeIn {
@@ -65,7 +66,7 @@
     padding: 0 16px;
 }
 
-/* --- Status Badge Fixes (Aligned with Global Glassmorphism) --- */
+/* --- Status Badge (soft semantic pills on solid token surfaces) --- */
 .status-badge-v4 {
     display: inline-flex;
     align-items: center;
@@ -76,42 +77,36 @@
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(var(--fg-rgb), 0.1);
     transition: all 0.3s ease;
     min-width: 60px;
     height: 18px;
 }
 
-.status-badge-v4.paid, 
+.status-badge-v4.paid,
 .status-badge-v4.active {
-    background: rgba(46, 184, 122, 0.15);
-    color: #2eb87a;
-    border-color: rgba(46, 184, 122, 0.3);
-    box-shadow: 0 2px 10px rgba(46, 184, 122, 0.1);
+    background: rgba(var(--success-rgb), 0.14);
+    color: var(--success);
+    border-color: rgba(var(--success-rgb), 0.32);
 }
 
 .status-badge-v4.pending {
-    background: rgba(245, 158, 11, 0.15);
-    color: #f59e0b;
-    border-color: rgba(245, 158, 11, 0.3);
-    box-shadow: 0 2px 10px rgba(245, 158, 11, 0.1);
+    background: rgba(var(--warning-rgb), 0.14);
+    color: var(--warning);
+    border-color: rgba(var(--warning-rgb), 0.32);
 }
 
 .status-badge-v4.failed,
 .status-badge-v4.inactive {
-    background: rgba(244, 63, 94, 0.15);
-    color: #ef4444;
-    border-color: rgba(244, 63, 94, 0.3);
-    box-shadow: 0 2px 10px rgba(244, 63, 94, 0.1);
+    background: rgba(var(--danger-rgb), 0.14);
+    color: var(--danger);
+    border-color: rgba(var(--danger-rgb), 0.32);
 }
 
 .status-badge-v4.partial-paid {
-    background: rgba(59, 130, 246, 0.15);
-    color: #3b82f6;
-    border-color: rgba(59, 130, 246, 0.3);
-    box-shadow: 0 2px 10px rgba(59, 130, 246, 0.1);
+    background: rgba(var(--info-rgb), 0.14);
+    color: var(--info);
+    border-color: rgba(var(--info-rgb), 0.32);
 }
 
 /* --- Grid Table Structure for Payments --- */
@@ -140,18 +135,17 @@
 
     overflow-x: auto;
     overflow-y: visible;
-    background: rgba(var(--bg-rgb), 0.4);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(var(--fg-rgb), 0.08);
-    border-radius: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
     width: 100%;
     position: relative;
 }
 
-/* Horizontal scroll only — no vertical scrollbar on the table panel */
+/* Internal scroll on both axes — horizontal scrollbar sits at the table's bottom */
 .payments-ledger-container::-webkit-scrollbar {
-    width: 0;
+    width: 6px;
     height: 6px;
 }
 .payments-ledger-container::-webkit-scrollbar-track {
@@ -162,27 +156,28 @@
     border-radius: 10px;
 }
 .payments-ledger-container::-webkit-scrollbar-thumb:hover {
-    background: rgba(46, 184, 122, 0.3);
+    background: rgba(var(--accent-rgb), 0.3);
 }
 
 .payments-ledger-header {
-    background: var(--bg-surface);
+    background: var(--bg-surface-2);
     position: sticky;
     top: 0;
     z-index: 40;
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.08);
+    border-bottom: 1px solid var(--border);
     height: 48px;
 }
 
 .payments-ledger-header .payments-ledger-cell {
-    color: var(--text-primary);
-    font-size: 11px;
-    font-weight: 700;
+    color: var(--text-faint);
+    font-family: var(--font-accent);
+    font-size: 10.5px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     padding: 0 16px;
     height: 100%;
-    background: var(--bg-surface);
+    background: var(--bg-surface-2);
     justify-content: flex-start;
 }
 
@@ -197,8 +192,8 @@
     width: var(--pay-total-width) !important;
     min-width: 100% !important;
     height: 56px;
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.03);
-    transition: background 0.2s;
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background var(--transition);
     align-items: stretch;
 }
 
@@ -211,12 +206,13 @@
 }
 
 .payments-ledger-row.active-drawer-row {
-    background: rgba(46, 184, 122, 0.08);
-    border-bottom: 1px solid rgba(46, 184, 122, 0.2);
+    background: rgba(var(--accent-rgb), 0.08);
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.2);
 }
 
 .payments-ledger-row:hover:not(.payments-ledger-header) {
-    background: rgba(var(--fg-rgb), 0.02);
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover));
+    box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .payments-ledger-cell {
@@ -224,13 +220,14 @@
     height: 100%;
     display: flex;
     align-items: center;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     background: transparent;
-    border-right: 1px solid rgba(var(--fg-rgb), 0.05);
+    /* Same hairline every other ledger uses, so no column stands out */
+    border-right: 1px solid var(--border-subtle);
 }
 
 .payments-ledger-cell:last-child {
@@ -247,47 +244,33 @@
     justify-content: flex-end;
 }
 
-.pay-col-id { color: var(--text-muted); font-family: monospace; }
+.pay-col-id { color: var(--text-primary); font-family: var(--font-body); font-variant-numeric: tabular-nums; }
 .pay-col-amount { font-weight: 700; color: var(--text-primary); }
 .pay-col-discount { color: var(--text-primary); }
 .pay-col-date { color: var(--text-primary); font-size: 11px; }
 
 /* Entity Type Badges */
-.entity-type-badge {
-    padding: 4px 8px;
-    border-radius: 4px;
+/* Neutral chip — type is metadata, not a status, so it stays monochrome */
+.entity-type-badge,
+.entity-type-badge.gst,
+.entity-type-badge.income-tax,
+.entity-type-badge.company {
+    padding: 3px 9px;
+    border-radius: 6px;
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    background: rgba(var(--fg-rgb), 0.1);
+    background: rgba(var(--fg-rgb), 0.05);
     color: var(--text-primary);
-    border: 1px solid rgba(var(--fg-rgb), 0.05);
-}
-
-.entity-type-badge.gst {
-    background: rgba(139, 92, 246, 0.15);
-    color: #8b5cf6;
-    border-color: rgba(139, 92, 246, 0.3);
-}
-
-.entity-type-badge.income-tax {
-    background: rgba(16, 185, 129, 0.15);
-    color: #2eb87a;
-    border-color: rgba(16, 185, 129, 0.3);
-}
-
-.entity-type-badge.company {
-    background: rgba(59, 130, 246, 0.15);
-    color: #3b82f6;
-    border-color: rgba(59, 130, 246, 0.3);
+    border: 1px solid var(--border-subtle);
 }
 
 /* Sticky first column logic */
 .pay-ledger-sticky-id {
     position: sticky;
     z-index: 10;
-    background-color: var(--bg-app) !important;
+    background-color: var(--bg-surface) !important;
     flex: none !important;
 }
 
@@ -295,33 +278,35 @@
     position: sticky;
     top: 0;
     z-index: 35;
-    background-color: var(--bg-surface) !important;
+    background-color: var(--bg-surface-2) !important;
     flex: none !important;
 }
 
 .payments-ledger-row:hover:not(.payments-ledger-header) .pay-ledger-sticky-id {
-    background-color: var(--bg-app) !important;
+    background-color: var(--bg-surface) !important;
 }
 
-.pay-ledger-sticky-col-1 { 
-    left: 0; 
+/* Only the ID column stays frozen-left; Cust ID and Entity ID scroll with the
+   rest, so the divider and shadow mark the edge of ID. */
+.pay-ledger-sticky-col-1 {
+    left: 0;
     width: var(--pay-col-1) !important;
-    min-width: var(--pay-col-1) !important; 
-    max-width: var(--pay-col-1) !important; 
+    min-width: var(--pay-col-1) !important;
+    max-width: var(--pay-col-1) !important;
+    border-right: 1px solid var(--border-subtle) !important;
+    box-shadow: none;
 }
-.pay-ledger-sticky-col-2 { 
-    left: var(--pay-col-1); 
+.pay-ledger-col-2 {
     width: var(--pay-col-2) !important;
-    min-width: var(--pay-col-2) !important; 
-    max-width: var(--pay-col-2) !important; 
+    min-width: var(--pay-col-2) !important;
+    max-width: var(--pay-col-2) !important;
+    flex: none !important;
 }
-.pay-ledger-sticky-col-3 { 
-    left: calc(var(--pay-col-1) + var(--pay-col-2)); 
+.pay-ledger-col-3 {
     width: var(--pay-col-3) !important;
-    min-width: var(--pay-col-3) !important; 
-    max-width: var(--pay-col-3) !important; 
-    border-right: 1px solid rgba(var(--fg-rgb), 0.12) !important;
-    box-shadow: 1px 0 0 rgba(var(--fg-rgb), 0.05);
+    min-width: var(--pay-col-3) !important;
+    max-width: var(--pay-col-3) !important;
+    flex: none !important;
 }
 
 /* Sticky Actions column (right edge) */
@@ -330,20 +315,20 @@
     position: sticky;
     right: 0;
     z-index: 10;
-    background-color: var(--bg-app) !important;
-    border-left: 1px solid rgba(var(--fg-rgb), 0.12) !important;
+    background-color: var(--bg-surface) !important;
+    border-left: 1px solid var(--border-subtle) !important;
     justify-content: center;
-    box-shadow: -4px 0 8px rgba(0, 0, 0, 0.25);
+    box-shadow: none;
 }
 
 .payments-ledger-header > .pay-ledger-actions-sticky {
     z-index: 35;
-    background-color: var(--bg-surface) !important;
+    background-color: var(--bg-surface-2) !important;
 }
 
 .payments-ledger-row:hover:not(.payments-ledger-header) > .pay-ledger-actions-sticky,
 .payments-ledger-row.active-drawer-row > .pay-ledger-actions-sticky {
-    background-color: var(--bg-app) !important;
+    background-color: var(--bg-surface) !important;
 }
 
 .payments-ledger-row.active-drawer-row > .pay-ledger-actions-sticky {
@@ -373,14 +358,14 @@
 }
 
 .btn-view-services-mini.btn-view-icon-only {
-    width: 34px;
-    height: 34px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     border-radius: 8px;
 }
 
 .btn-view-services-mini:hover {
     background: rgba(var(--fg-rgb), 0.08);
-    border-color: rgba(var(--fg-rgb), 0.2);
+    border-color: var(--text-muted);
     color: var(--text-primary);
 }

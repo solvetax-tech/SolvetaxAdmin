@@ -62,8 +62,10 @@ async function doRefresh() {
         }
         return null;
     } catch (err) {
-        // 401/expired → refresh token is dead; force re-auth.
-        if (err?.status === 401) {
+        // Dead/rejected refresh token → force re-auth. The backend signals this
+        // as 401 OR 403 ("Token expired"), so treat both as terminal; otherwise
+        // a 403 would be retried every minute forever instead of logging out.
+        if (err?.status === 401 || err?.status === 403) {
             if (typeof onAuthFailure === 'function') onAuthFailure();
             return null;
         }

@@ -43,9 +43,9 @@ const CRMKnowledge = ({ entityType = 'GST_REGISTRATION' }) => {
     }
 
     if (error) return (
-        <div style={{ padding: '40px', textAlign: 'center', background: 'rgba(239, 68, 68, 0.05)', borderRadius: '20px', border: '1px solid rgba(239, 68, 68, 0.1)' }}>
-            <p style={{ color: '#ef4444', marginBottom: '20px' }}>{error}</p>
-            <button onClick={fetchCRMData} className="btn-retry" style={{ background: '#ef4444', color: 'var(--text-primary)', border: 'none', padding: '10px 24px', borderRadius: '10px', fontWeight: '600', cursor: 'pointer' }}>Retry Sync</button>
+        <div style={{ padding: '40px', textAlign: 'center', background: 'rgba(var(--danger-rgb), 0.05)', borderRadius: '20px', border: '1px solid rgba(var(--danger-rgb), 0.1)' }}>
+            <p style={{ color: 'var(--danger)', marginBottom: '20px' }}>{error}</p>
+            <button onClick={fetchCRMData} className="btn-retry" style={{ background: 'var(--danger)', color: 'var(--text-primary)', border: 'none', padding: '10px 24px', borderRadius: '10px', fontWeight: '600', cursor: 'pointer' }}>Retry Sync</button>
         </div>
     );
 
@@ -91,7 +91,7 @@ const CRMKnowledge = ({ entityType = 'GST_REGISTRATION' }) => {
             {/* 1. CRM Lead Stages Table */}
             <section className="crm-knowledge-section">
                 <div className="crm-section-header">
-                    <div className="crm-header-icon" style={{ borderColor: 'rgba(245, 158, 11, 0.3)', background: 'rgba(245, 158, 11, 0.1)', color: 'var(--crm-amber)' }}>
+                    <div className="crm-header-icon" style={{ borderColor: 'rgba(var(--warning-rgb), 0.3)', background: 'rgba(var(--warning-rgb), 0.1)', color: 'var(--crm-amber)' }}>
                         <Target size={22} />
                     </div>
                     <div>
@@ -125,7 +125,7 @@ const CRMKnowledge = ({ entityType = 'GST_REGISTRATION' }) => {
             <div className="crm-double-section-wrapper">
                 <section className="crm-knowledge-section" style={{ flex: 1 }}>
                     <div className="crm-section-header">
-                        <div className="crm-header-icon" style={{ borderColor: 'rgba(59, 130, 246, 0.3)', background: 'rgba(59, 130, 246, 0.1)', color: 'var(--crm-blue)' }}>
+                        <div className="crm-header-icon" style={{ borderColor: 'rgba(var(--info-rgb), 0.3)', background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--crm-blue)' }}>
                             <PhoneCall size={20} />
                         </div>
                         <div>
@@ -148,7 +148,7 @@ const CRMKnowledge = ({ entityType = 'GST_REGISTRATION' }) => {
 
                 <section className="crm-knowledge-section" style={{ flex: 1 }}>
                     <div className="crm-section-header">
-                        <div className="crm-header-icon" style={{ borderColor: 'rgba(139, 92, 246, 0.3)', background: 'rgba(139, 92, 246, 0.1)', color: 'var(--crm-purple)' }}>
+                        <div className="crm-header-icon" style={{ borderColor: 'rgba(var(--accent-rgb), 0.3)', background: 'rgba(var(--accent-rgb), 0.1)', color: 'var(--accent)' }}>
                             <Activity size={20} />
                         </div>
                         <div>
@@ -159,7 +159,7 @@ const CRMKnowledge = ({ entityType = 'GST_REGISTRATION' }) => {
 
                     <div className="status-outcome-container">
                         {finalPitchStatuses.map((s, idx) => (
-                            <span key={idx} className="status-outcome-pill" style={{ color: '#8b5cf6', borderColor: 'rgba(139, 92, 246, 0.3)' }}>
+                            <span key={idx} className="status-outcome-pill">
                                 {s.call_status_code}
                             </span>
                         ))}
@@ -194,8 +194,8 @@ const CRMKnowledge = ({ entityType = 'GST_REGISTRATION' }) => {
                             ))}
                         </div>
                     </div>
-                    <div className="config-list-item" style={{ borderLeft: '4px solid var(--crm-purple)' }}>
-                        <div className="config-label" style={{ color: 'var(--crm-purple)' }}>
+                    <div className="config-list-item" style={{ borderLeft: '4px solid var(--accent)' }}>
+                        <div className="config-label" style={{ color: 'var(--accent)' }}>
                             <ArrowRightCircle size={14} style={{ marginRight: '8px' }} /> Call Statuses
                         </div>
                         <div className="config-values">
@@ -212,7 +212,7 @@ const CRMKnowledge = ({ entityType = 'GST_REGISTRATION' }) => {
             {/* 3. CRM Workflow Mappings Table */}
             <section className="crm-knowledge-section">
                 <div className="crm-section-header">
-                    <div className="crm-header-icon" style={{ borderColor: 'rgba(16, 185, 129, 0.3)', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--crm-emerald)' }}>
+                    <div className="crm-header-icon" style={{ borderColor: 'rgba(var(--success-rgb), 0.3)', background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--crm-emerald)' }}>
                         <ShieldCheck size={22} />
                     </div>
                     <div>

@@ -3,6 +3,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
 from typing import Optional, List
 from backend.security.rbac import require_permission
+from backend.common.status_constants import PAYMENT_STATUSES
 from backend.payments.schemas import RegistrationPaymentIn
 from backend.payments.payment_ledger import PaymentLedgerError
 from backend.payments.payment_ledger_db import (
@@ -83,34 +84,41 @@ async def create_registration_payment(
 
             customer_id = entity_row["customer_id"]
 
-            if await has_completed_payment(
-                conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
-            ):
-                raise HTTPException(409, "Payment already completed.")
-
-            await lock_entity_payment_rows(
-                conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
-            )
-
-            totals = await fetch_entity_payment_totals(
-                conn,
-                DB_SCHEMA,
-                customer_id,
-                payload.entity_id,
-                entity_type,
-                first_payment_amount=float(payload.amount),
-            )
-
-            try:
-                ledger = resolve_ledger_for_create(
-                    totals,
-                    new_discount=float(payload.discount or 0),
-                    paid_amount=float(payload.paid_amount or 0),
-                )
-            except PaymentLedgerError as exc:
-                raise ledger_error_to_http(exc) from exc
-
+            # Open the transaction BEFORE taking the FOR UPDATE lock so the lock
+            # is held through the insert. asyncpg runs statements outside an
+            # explicit transaction in autocommit mode, which would release the
+            # lock immediately and let two concurrent submits both pass the
+            # balance check and double-insert against the same entity.
             async with conn.transaction():
+                await lock_entity_payment_rows(
+                    conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
+                )
+
+                # Re-check completion under the lock: a concurrent request may
+                # have completed payment between our first check and this insert.
+                if await has_completed_payment(
+                    conn, DB_SCHEMA, customer_id, payload.entity_id, entity_type
+                ):
+                    raise HTTPException(409, "Payment already completed.")
+
+                totals = await fetch_entity_payment_totals(
+                    conn,
+                    DB_SCHEMA,
+                    customer_id,
+                    payload.entity_id,
+                    entity_type,
+                    first_payment_amount=float(payload.amount),
+                )
+
+                try:
+                    ledger = resolve_ledger_for_create(
+                        totals,
+                        new_discount=float(payload.discount or 0),
+                        paid_amount=float(payload.paid_amount or 0),
+                    )
+                except PaymentLedgerError as exc:
+                    raise ledger_error_to_http(exc) from exc
+
                 payment_row = await insert_payment_from_ledger(
                     conn,
                     DB_SCHEMA,
@@ -292,12 +300,6 @@ async def list_registration_payments(
     # Enum Validation
     # --------------------------------------------------
 
-    ALLOWED_STATUS = {
-        "PENDING",
-        "PAID",
-        "CANCELLED",
-    }
-
     ALLOWED_MODES = {
         "CASH",
         "UPI",
@@ -310,7 +312,7 @@ async def list_registration_payments(
 
         payment_status = payment_status.strip().upper()
 
-        if payment_status not in ALLOWED_STATUS:
+        if payment_status not in PAYMENT_STATUSES:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid payment_status value.",
@@ -623,6 +625,44 @@ async def list_registration_payments(
     )
 
 # -------------------------------------------------------------------
+# IDOR guard for by-id payment mutations: verify the caller can see the
+# payment using the SAME COALESCE(customer→entity) rm/op ownership as the
+# unified payments list. ADMIN bypasses. Raises 404 when not visible.
+# -------------------------------------------------------------------
+async def _assert_registration_payment_visible(conn, role_norm, emp_id, payment_id):
+    visibility_sql, visibility_values, _ = build_registration_payments_visibility(
+        role_norm or "", emp_id, 2, DB_SCHEMA,
+    )
+    if not visibility_sql:
+        return  # ADMIN → unrestricted
+    visible = await conn.fetchval(
+        f"""
+        SELECT 1
+        FROM {DB_SCHEMA}.payments rp
+        LEFT JOIN {DB_SCHEMA}.customers c
+               ON rp.customer_id = c.customer_id
+        LEFT JOIN {DB_SCHEMA}.gst_registration g
+               ON rp.entity_type = 'GST_REGISTRATION' AND rp.entity_id = g.id
+        LEFT JOIN {DB_SCHEMA}.income_tax i
+               ON rp.entity_type = 'INCOME_TAX' AND rp.entity_id = i.id
+        LEFT JOIN {DB_SCHEMA}.gst_filings f
+               ON rp.entity_type = 'GST_FILING' AND rp.entity_id = f.id
+        LEFT JOIN {DB_SCHEMA}.gst_filing_return_details rd
+               ON rp.entity_type = 'GST_FILING_RETURN_DETAILS' AND rp.entity_id = rd.id
+        LEFT JOIN {DB_SCHEMA}.gst_filings f_rd
+               ON f_rd.id = rd.gst_filing_id
+        LEFT JOIN {DB_SCHEMA}.customer_services cs
+               ON rp.entity_type = 'CUSTOMER_SERVICE' AND rp.entity_id = cs.id
+        WHERE rp.id = $1 AND ({visibility_sql})
+        LIMIT 1
+        """,
+        payment_id, *visibility_values,
+    )
+    if not visible:
+        raise HTTPException(status_code=404, detail="Registration payment not found.")
+
+
+# -------------------------------------------------------------------
 # SOFT DELETE REGISTRATION PAYMENT (Production Ready + Audit)
 # -------------------------------------------------------------------
 @router.delete(
@@ -644,6 +684,8 @@ async def soft_delete_registration_payment(
     request_id = generate_uuid()
     current_emp_id = current_user.get("emp_id") or current_user.get("sub") or "-"
     emp_id = int(current_emp_id) if str(current_emp_id).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -677,6 +719,11 @@ async def soft_delete_registration_payment(
                         status_code=404,
                         detail="Registration payment not found.",
                     )
+
+                # IDOR guard: only mutate a payment the caller can see.
+                await _assert_registration_payment_visible(
+                    conn, role_norm, emp_id, payment_id,
+                )
 
                 if row["entity_type"] != "GST_REGISTRATION":
                     raise HTTPException(
@@ -789,6 +836,8 @@ async def activate_registration_payment(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -822,6 +871,11 @@ async def activate_registration_payment(
                         status_code=404,
                         detail="Registration payment not found.",
                     )
+
+                # IDOR guard: only mutate a payment the caller can see.
+                await _assert_registration_payment_visible(
+                    conn, role_norm, emp_id, payment_id,
+                )
 
                 if payment_row["entity_type"] != "GST_REGISTRATION":
                     raise HTTPException(

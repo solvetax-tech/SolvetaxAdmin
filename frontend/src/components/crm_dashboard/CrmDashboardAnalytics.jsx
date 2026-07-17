@@ -447,7 +447,7 @@ export default function CrmDashboardAnalytics({
         label: 'Scheduled',
         value: scheduledToday,
         icon: <Calendar size={20} />,
-        color: '#3b82f6',
+        color: 'var(--info)',
         desc: `SCHEDULED ${statsPeriodLabel}`,
         type: 'SCHEDULED',
       },
@@ -455,7 +455,7 @@ export default function CrmDashboardAnalytics({
         label: 'Overdue (Pending)',
         value: overduePendingToday,
         icon: <AlertCircle size={20} />,
-        color: '#ef4444',
+        color: 'var(--danger)',
         desc: `OVERDUE PENDING ${statsPeriodLabel}`,
         type: 'OVERDUE_PENDING',
       },
@@ -463,7 +463,7 @@ export default function CrmDashboardAnalytics({
         label: 'Overdue (Completed)',
         value: overdueCompletedToday,
         icon: <CheckCircle2 size={20} />,
-        color: '#f97316',
+        color: 'var(--warning)',
         desc: `OVERDUE COMPLETED ${statsPeriodLabel}`,
         type: 'OVERDUE_COMPLETED',
       },
@@ -471,7 +471,7 @@ export default function CrmDashboardAnalytics({
         label: 'Completed (On-time)',
         value: completedToday,
         icon: <CheckCircle size={20} />,
-        color: '#2eb87a',
+        color: 'var(--accent)',
         desc: `COMPLETED ${statsPeriodLabel}`,
         type: 'COMPLETED',
       },
@@ -479,7 +479,7 @@ export default function CrmDashboardAnalytics({
         label: 'Pending (Urgent)',
         value: pendingToday,
         icon: <Clock size={20} />,
-        color: '#f59e0b',
+        color: 'var(--warning)',
         desc: `PENDING ${statsPeriodLabel}`,
         type: 'PENDING',
       },
@@ -487,7 +487,7 @@ export default function CrmDashboardAnalytics({
         label: 'Success Rate',
         value: `${successRate}%`,
         icon: <Activity size={20} />,
-        color: '#06b6d4',
+        color: 'var(--info)',
         desc: statsPeriodLabel === 'TODAY' ? 'SUCCESS RATE TODAY' : `SUCCESS RATE (${statsPeriodLabel})`,
         type: null,
       },
@@ -502,8 +502,8 @@ export default function CrmDashboardAnalytics({
             style={{
               '--accent-color': s.color,
               cursor: s.type ? 'pointer' : 'default',
-              border: activeStatFilter === s.type ? `1.5px solid ${s.color}` : '1px solid rgba(var(--fg-rgb), 0.12)',
-              boxShadow: activeStatFilter === s.type ? `0 0 15px ${s.color}33` : '0 10px 25px rgba(0, 0, 0, 0.35)',
+              border: activeStatFilter === s.type ? `1.5px solid ${s.color}` : '1px solid var(--border)',
+              boxShadow: activeStatFilter === s.type ? 'var(--shadow-lg)' : 'var(--shadow-sm)',
               transform: activeStatFilter === s.type ? 'translateY(-2px)' : 'none',
               transition: 'all 0.3s cubic-bezier(0.165, 0.84, 0.44, 1)',
             }}
@@ -721,8 +721,8 @@ export default function CrmDashboardAnalytics({
                 gap: '12px',
                 padding: '16px',
                 borderRadius: '14px',
-                background: 'rgba(var(--fg-rgb), 0.01)',
-                border: '1px solid rgba(var(--fg-rgb), 0.04)',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
                 marginBottom: '8px',
               }}
               onClick={() => openScheduledLead(lead)}
@@ -735,9 +735,9 @@ export default function CrmDashboardAnalytics({
               role="button"
               tabIndex={0}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '1px solid rgba(var(--fg-rgb), 0.04)', paddingBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                  <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(172, 200, 255, 0.1)', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700, flexShrink: 0 }}>
+                  <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(var(--info-rgb), 0.12)', color: 'var(--info)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700, flexShrink: 0 }}>
                     {(lead.full_name || 'N').charAt(0).toUpperCase()}
                   </div>
                   <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -760,7 +760,7 @@ export default function CrmDashboardAnalytics({
                   <a
                     href={`tel:${lead.mobile}`}
                     onClick={(e) => e.stopPropagation()}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700, color: '#f59e0b', background: 'rgba(251, 191, 36, 0.08)', border: '1px solid rgba(251, 191, 36, 0.15)', padding: '3px 8px', borderRadius: '20px', textDecoration: 'none' }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700, color: 'var(--warning)', background: 'rgba(var(--warning-rgb), 0.1)', border: '1px solid rgba(var(--warning-rgb), 0.2)', padding: '3px 8px', borderRadius: '20px', textDecoration: 'none' }}
                   >
                     <Phone size={10} />
                     <span>{lead.mobile}</span>
@@ -778,8 +778,8 @@ export default function CrmDashboardAnalytics({
                   {statusTextString}
                 </span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--fg-rgb),0.01)', border: '1px solid rgba(var(--fg-rgb),0.02)', padding: '6px 10px', borderRadius: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#3b82f6', fontSize: '11px', fontWeight: 600 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)', padding: '6px 10px', borderRadius: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--info)', fontSize: '11px', fontWeight: 600 }}>
                   <Calendar size={12} />
                   <span>{formatDateTime(lead.followup_at || lead.last_dailed_at)}</span>
                 </div>
@@ -798,9 +798,9 @@ export default function CrmDashboardAnalytics({
 
   const subtabStyle = (active) => ({
     background: 'transparent',
-    color: active ? '#2eb87a' : 'var(--text-muted)',
+    color: active ? 'var(--accent)' : 'var(--text-muted)',
     border: 'none',
-    borderBottom: active ? '2px solid #2eb87a' : '2px solid transparent',
+    borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
     fontSize: '14px',
     fontWeight: 600,
     cursor: 'pointer',
@@ -815,7 +815,7 @@ export default function CrmDashboardAnalytics({
         <div className="crm-analytics-content crm-dashboard-empty">
           {profileLoadFailed ? (
             <>
-              <AlertCircle size={36} style={{ color: '#ef4444' }} />
+              <AlertCircle size={36} style={{ color: 'var(--danger)' }} />
               <p style={{ marginTop: '12px', color: 'var(--text-primary)', fontSize: '14px', fontWeight: 600 }}>
                 Could not load your profile
               </p>
@@ -825,7 +825,7 @@ export default function CrmDashboardAnalytics({
             </>
           ) : (
             <>
-              <Loader2 size={32} className="animate-spin" style={{ color: '#2eb87a' }} />
+              <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
               <p style={{ marginTop: '12px', color: 'var(--text-muted)', fontSize: '14px' }}>
                 Loading your CRM dashboard…
               </p>

@@ -214,7 +214,7 @@ const UploadDocuments = ({ isOpen = true, onClose, mode: modeProp, initialPerson
             <div className="gst-modal-card-v4 wide-modal app-drawer-panel gst-reg-side-drawer-shell" onClick={e => e.stopPropagation()}>
                 <div className="modal-header-v4">
                     <div className="header-content-v4">
-                        <div className="header-icon-box-v4" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#2eb87a' }}>
+                        <div className="header-icon-box-v4" style={{ background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--accent)' }}>
                             <Upload size={20} />
                         </div>
                         <div className="modal-title-box">

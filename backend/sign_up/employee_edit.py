@@ -4,7 +4,7 @@ import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
 from datetime import date, datetime
-from backend.utils import get_db_pool, DB_SCHEMA, generate_uuid, hash_password, is_password_strong
+from backend.utils import get_db_pool, DB_SCHEMA, generate_uuid, hash_password, verify_password, is_password_strong
 from backend.sign_up.schemas import EmployeeEditIn, EmployeeOut, ChangePasswordRequest, ActiveAssigneeOption
 from backend.security.rbac import require_permission
 from backend.logger import logger
@@ -129,6 +129,39 @@ async def edit_employee(
 
                 if not old_row:
                     raise HTTPException(status_code=404, detail="Employee not found.")
+
+                # --------------------------------------------------
+                # PRIVILEGE GUARD — role / is_active are sensitive
+                # Without this, any USER_ACCESS:WRITE holder (e.g. a manager)
+                # could set their own role to ADMIN or reactivate accounts.
+                # --------------------------------------------------
+                actor_role = (current_user.get("role") or "").strip().upper()
+                is_actor_admin = actor_role == "ADMIN"
+                privileged_changes = {"role", "is_active"} & set(update_data.keys())
+                if privileged_changes:
+                    if not is_actor_admin:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Only an admin can change an employee's role or activation status.",
+                        )
+                    if actor_emp_id is not None and actor_emp_id == emp_id:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="You cannot change your own role or activation status.",
+                        )
+
+                # Validate the role value against the roles table (mirrors signup),
+                # so an unknown/arbitrary role string can never be written.
+                if "role" in update_data and update_data["role"] is not None:
+                    role_exists = await conn.fetchval(
+                        f"SELECT 1 FROM {DB_SCHEMA}.roles WHERE role_code = $1",
+                        update_data["role"],
+                    )
+                    if not role_exists:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Invalid role code: {update_data['role']}.",
+                        )
 
                 manager_roles = {"SALES_MANAGER", "OP_MANAGER"}
 
@@ -304,6 +337,7 @@ async def edit_employee(
 async def filter_employees(
     emp_id: Optional[int] = None,
     full_name: Optional[str] = None,
+    username: Optional[str] = None,
     email: Optional[str] = None,
     phone_number: Optional[str] = None,
 
@@ -348,6 +382,7 @@ async def filter_employees(
         "employees:filter",
         emp_id=emp_id,
         full_name=full_name.strip() if full_name else None,
+        username=username.strip() if username else None,
         email=email.strip() if email else None,
         phone_number=phone_number.strip() if phone_number else None,
         role=role_cleaned,
@@ -394,6 +429,11 @@ async def filter_employees(
                     param_index,
                     "(first_name || ' ' || last_name)",
                     full_name.strip(),
+                )
+
+            if username and username.strip():
+                param_index = append_ilike_contains(
+                    conditions, values, param_index, "username", username.strip()
                 )
 
             if email and email.strip():
@@ -876,6 +916,24 @@ async def soft_delete_employee(
 
     log.info("Incoming soft delete employee request emp_id=%s", emp_id)
 
+    # --------------------------------------------------
+    # PRIVILEGE GUARD — deactivating an account is admin-only and self-safe,
+    # mirroring edit_employee's is_active guard. Without this any
+    # USER_ACCESS:WRITE holder (e.g. a manager) could disable any employee,
+    # including admins (account-takeover / DoS).
+    # --------------------------------------------------
+    actor_role = (current_user.get("role") or "").strip().upper()
+    if actor_role != "ADMIN":
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin can deactivate an employee.",
+        )
+    if actor_emp_id is not None and actor_emp_id == emp_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot deactivate your own account.",
+        )
+
     try:
         pool = await get_db_pool()
     except Exception as e:
@@ -1357,9 +1415,8 @@ async def change_password(
                     log.warning("Employee not found for password change emp_id=%s", emp_id)
                     raise HTTPException(status_code=404, detail="Employee not found.")
 
-                # 2️⃣ Verify current password hash
-                current_hash = hash_password(payload.current_password)
-                if old_row["password_hash"] != current_hash:
+                # 2️⃣ Verify current password (bcrypt-aware; also accepts legacy hashes)
+                if not verify_password(payload.current_password, old_row["password_hash"]):
                     log.warning("Incorrect current password for emp_id=%s", emp_id)
                     raise HTTPException(
                         status_code=400,
@@ -1378,6 +1435,14 @@ async def change_password(
                 await conn.execute(
                     f"UPDATE {DB_SCHEMA}.employees SET password_hash = $1, updated_at = NOW() WHERE emp_id = $2",
                     new_hash, emp_id
+                )
+
+                # Invalidate every active session for this account so the password
+                # change ejects any other/stolen active token; the user re-logs in
+                # with the new password.
+                await conn.execute(
+                    f"UPDATE {DB_SCHEMA}.session_token SET is_active = false WHERE emp_id = $1",
+                    emp_id
                 )
 
                 # 4️⃣ Insert Version Audit

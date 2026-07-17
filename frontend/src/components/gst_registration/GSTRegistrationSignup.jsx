@@ -13,34 +13,22 @@ import {
     resolveOpIdForPayload,
 } from '../../utils/rmOpAssignmentFields';
 import {
-    fetchActiveRmOpUsernameLists,
-    buildRmOpSelectOptions,
+    fetchActiveRmEmployees,
+    fetchActiveOpEmployees,
+    buildRmOpIdSelectOptions,
 } from '../../utils/activeEmployees';
 import { X, AlertCircle, CheckCircle2, RotateCcw, ChevronDown, User, Plus, Users, FileText } from 'lucide-react';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromConfig, optionsFromPairs } from '../common/selectOptionUtils';
+import { extractErrorMessage, extractFieldErrors } from '../../utils/apiErrors';
 
 const BASE_URL = import.meta.env.VITE_API_URL;
 
-const extractGstRegistrationError = (err) => {
-    const detail = err?.response?.data?.detail;
-    if (detail && typeof detail === 'object' && detail.error && detail.error.fields) {
-        const fields = detail.error.fields || {};
-        const messages = Object.values(fields).filter(Boolean);
-        if (messages.length) return messages.join('\n');
-        if (detail.error.message) return detail.error.message;
-    }
-    if (Array.isArray(detail)) {
-        const first = detail[0];
-        const field = Array.isArray(first?.loc) ? first.loc[first.loc.length - 1] : 'field';
-        if (first?.type === 'missing' || String(first?.msg || '').toLowerCase().includes('field required')) {
-            return `${String(field).replace(/_/g, ' ')} is required.`;
-        }
-        return first?.msg || 'Validation failed.';
-    }
-    if (typeof detail === 'string') return detail;
-    return err?.message || 'Request failed.';
-};
+// Was hand-rolled here and checked `Array.isArray(detail)` -- FastAPI's DEFAULT 422
+// shape, which backend/main.py overrides. That branch never ran, so every validation
+// failure fell through to the literal string "Request validation failed" and the user
+// was never told which field was wrong. See utils/apiErrors.js.
+const extractGstRegistrationError = (err) => extractErrorMessage(err, 'Request failed.');
 
 const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData }) => {
     const { showRmField, showOpField } = getRmOpAssignmentVisibility(profileData);
@@ -130,9 +118,16 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
             }
 
             try {
-                const { activeRMs, activeOps } = await fetchActiveRmOpUsernameLists();
-                setActiveRMs(activeRMs);
-                setActiveOps(activeOps);
+                // Must keep emp_id: the API types rm_id/created_by as int. The username-only
+                // lists made the dropdown submit "indhu" instead of 58, so every create 422'd
+                // with "Input should be a valid integer". /employees/active-rm already returns
+                // emp_id + username -- the username-only fetch was discarding the id.
+                const [rms, ops] = await Promise.all([
+                    fetchActiveRmEmployees(),
+                    fetchActiveOpEmployees(),
+                ]);
+                setActiveRMs(rms);
+                setActiveOps(ops);
             } catch (err) {
                 console.error('Failed to fetch active RM/OP lists:', err);
             }
@@ -145,8 +140,13 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
         let errorMsg = '';
         const trimmedValue = typeof value === 'string' ? value.trim() : value;
 
+        // Must mirror GSTRegistrationIn's required set (backend/gst_registration/schemas.py).
+        // ownership_category and turnover_details are required there but were missing here,
+        // so the form happily submitted without them and the server answered 422 -- which
+        // the UI then reported only as "Request validation failed", naming no field.
         const requiredFields = [
-            'business_name', 'registration_type', 'state', 'mobile', 'email',
+            'business_name', 'registration_type', 'ownership_category',
+            'state', 'turnover_details', 'mobile', 'email',
         ];
         if (showRmField) requiredFields.push('rm_id');
         if (showOpField) requiredFields.push('created_by');
@@ -411,7 +411,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                     <>
                         <div className="modal-header-v4">
                             <div className="header-content-v4">
-                                <div className="header-icon-box-v4" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#2eb87a' }}>
+                                <div className="header-icon-box-v4" style={{ background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--accent)' }}>
                                     <Users size={20} />
                                 </div>
                                 <div className="modal-title-box">
@@ -482,7 +482,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                                         </div>
                                         <div className="form-group-v4" style={{ gridColumn: 'span 2' }}>
                                             <label className="modal-label-caps">GSTIN</label>
-                                            <input type="text" name="gstin" value={formData.gstin} onChange={handleChange} className="modal-input-v4 mono-v4" style={{ color: '#2eb87a' }} placeholder="Optional" />
+                                            <input type="text" name="gstin" value={formData.gstin} onChange={handleChange} className="modal-input-v4 mono-v4" style={{ color: 'var(--accent)' }} placeholder="Optional" />
                                             {fieldErrors.gstin && <span className="field-error-msg">{fieldErrors.gstin}</span>}
                                         </div>
                                     </div>
@@ -504,7 +504,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                                             />
                                         </div>
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Ownership Category</label>
+                                            <label className="modal-label-caps">Ownership Category*</label>
                                             <FormCustomSelect
                                                 name="ownership_category"
                                                 value={formData.ownership_category}
@@ -600,7 +600,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                                                 name="rm_id"
                                                 value={formData.rm_id}
                                                 onChange={handleChange}
-                                                options={optionsFromPairs(buildRmOpSelectOptions(activeRMs), 'Select RM')}
+                                                options={optionsFromPairs(buildRmOpIdSelectOptions(activeRMs), 'Select RM')}
                                                 placeholder="Select RM"
                                                 ariaLabel="Relationship manager"
                                             />
@@ -613,7 +613,7 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                                                 name="created_by"
                                                 value={formData.created_by}
                                                 onChange={handleChange}
-                                                options={optionsFromPairs(buildRmOpSelectOptions(activeOps), 'Select OP')}
+                                                options={optionsFromPairs(buildRmOpIdSelectOptions(activeOps), 'Select OP')}
                                                 placeholder="Select OP"
                                                 ariaLabel="Assigned OP"
                                             />

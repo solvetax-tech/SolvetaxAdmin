@@ -268,8 +268,8 @@ const PaymentDetails = ({ onLogout, selectedId, onClose }) => {
                             <button
                                 className="btn-delete-v4"
                                 style={{
-                                    background: deleteConfirmText === 'DELETE' ? '#ef4444' : 'rgba(239, 68, 68, 0.1)',
-                                    color: deleteConfirmText === 'DELETE' ? 'var(--text-primary)' : 'rgba(239, 68, 68, 0.5)',
+                                    background: deleteConfirmText === 'DELETE' ? 'var(--danger)' : 'rgba(var(--danger-rgb), 0.1)',
+                                    color: deleteConfirmText === 'DELETE' ? 'var(--text-inverse)' : 'rgba(var(--danger-rgb), 0.5)',
                                     opacity: deleteConfirmText === 'DELETE' ? 1 : 0.6,
                                     cursor: deleteConfirmText === 'DELETE' ? 'pointer' : 'not-allowed',
                                     border: 'none',
@@ -293,8 +293,8 @@ const PaymentDetails = ({ onLogout, selectedId, onClose }) => {
                     className={`modal-global-error-banner ${message.type === 'success' ? 'success-banner' : ''}`}
                     style={{
                         marginBottom: '20px',
-                        background: message.type === 'success' ? 'rgba(46, 184, 122, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: message.type === 'success' ? '#2eb87a' : '#ef4444',
+                        background: message.type === 'success' ? 'rgba(var(--success-rgb), 0.1)' : 'rgba(var(--danger-rgb), 0.1)',
+                        color: message.type === 'success' ? 'var(--success)' : 'var(--danger)',
                     }}
                 >
                     <span>{message.text}</span>
@@ -333,7 +333,7 @@ const PaymentDetails = ({ onLogout, selectedId, onClose }) => {
                 <div className="input-group-v4">
                     <label><IndianRupee size={14} /> Net Amount</label>
                     <div className="input-wrapper-v4">
-                        <input type="text" value={payment?.net_amount ?? ''} disabled style={{ color: '#2eb87a', fontWeight: '700' }} />
+                        <input type="text" value={payment?.net_amount ?? ''} disabled style={{ color: 'var(--text-primary)', fontWeight: '700' }} />
                     </div>
                 </div>
 
@@ -363,7 +363,7 @@ const PaymentDetails = ({ onLogout, selectedId, onClose }) => {
                             disabled={!editMode}
                             step="0.01"
                             min="0"
-                            style={!editMode ? { color: payment?.is_active === false ? '#ef4444' : '#2eb87a', fontWeight: '700' } : {}}
+                            style={!editMode ? { color: payment?.is_active === false ? 'var(--danger)' : 'var(--text-primary)', fontWeight: '700' } : {}}
                         />
                     </div>
                 </div>
@@ -418,7 +418,7 @@ const PaymentDetails = ({ onLogout, selectedId, onClose }) => {
     if (error) {
         return drawerShell(
             <div className="drawer-content gst-reg-details-scroll payment-drawer-error-state">
-                <AlertCircle size={48} color="#ef4444" />
+                <AlertCircle size={48} color="var(--danger)" />
                 <h2>Error Loading Payment</h2>
                 <p>{error}</p>
             </div>,

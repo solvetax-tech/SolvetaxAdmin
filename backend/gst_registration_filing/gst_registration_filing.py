@@ -259,6 +259,44 @@ _LEAD_DAYS_YEARLY_ANNUAL = 7
 
 _FILING_FREQUENCY_TO_SERVICE_ID = {"MONTHLY": 4, "QUARTERLY": 5, "YEARLY": 6}
 
+# Identity sync: gst_filings column -> gst_registration column. When a filing is
+# linked to a registration, editing the filing writes these back to the master
+# record ("Identity Sync Active" in the edit modal).
+#
+# EVERY VALUE MUST BE A REAL gst_registration COLUMN. This map is interpolated
+# straight into an UPDATE, so a name that does not exist raises
+# UndefinedColumnError, which aborts the whole transaction and fails the ENTIRE
+# edit with a generic 500 -- even when the user only touched something unrelated
+# like status. Two entries did exactly that, which is why no filing linked to a
+# registration could be edited at all:
+#
+#   "taxpayer_type": "taxpayer_type" -- gst_registration has no such column. The
+#       equivalent is `registration_type` (same REGULAR/COMPOSITION vocabulary).
+#       Deliberately NOT remapped: this path has never written that column, and
+#       starting to is a product decision, not a bug fix. The filing's own
+#       taxpayer_type still updates normally.
+#   "business_description": "business_description" -- gst_registration has no
+#       such column and no equivalent. It is a filing-only field.
+#
+# Both were dropped rather than remapped, so the sync now does what the modal
+# actually promises: State, Frequency, Turnover (plus login/identity fields).
+#
+# Before adding an entry, verify the target column exists:
+#     python db/checks/verify_gst_filing_sync_map.py
+# It checks this map against the live schema and exits non-zero on a bad column.
+FILING_TO_REGISTRATION_SYNC = {
+    "gstin": "gstin",
+    "turnover_details": "turnover_details",
+    "filing_frequency": "filing_preference",
+    "state": "state",
+    "language": "language",
+    "gst_reg_status": "registration_status",
+    "username": "username",
+    "password": "password",
+    "business_name": "business_name",
+    "business_type": "business_type",
+}
+
 
 def _gst_filing_table_filings_tag() -> str:
     """Redis cache tag for GET ``/table/filings`` (``gst_filings`` only)."""
@@ -283,6 +321,12 @@ async def _invalidate_gst_filing_cache(gst_registration_id: Optional[int] = None
     await redis_invalidate_tag(_gst_filing_table_return_details_tag())
     if gst_registration_id is not None:
         await redis_invalidate_tag(_gst_filing_prefill_tag(gst_registration_id))
+    # gst_filings.status can transition into/out of FILED ("service done"), which
+    # changes the service-done-payment-pending dashboard.
+    from backend.Dashboard.service_done_payment_pending import (
+        invalidate_service_done_payment_pending_cache,
+    )
+    await invalidate_service_done_payment_pending_cache()
 
 
 def _lead_days_for_periodic_frequency(filing_frequency: str) -> int:
@@ -1827,6 +1871,8 @@ async def update_gst_filing(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -1857,21 +1903,37 @@ async def update_gst_filing(
 
                 # =====================================================
                 # LOCK EXISTING RECORD
+                # IDOR guard: RM/OP/managers may only edit filings they can
+                # see; ADMIN unrestricted.
                 # =====================================================
+                visibility_sql, visibility_values, _vidx = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["f.id = $1"]
+                fetch_values = [filing_id]
+                if visibility_sql:
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_values.extend(visibility_values)
+
                 old = await conn.fetchrow(
                     f"""
-                    SELECT *
-                    FROM {DB_SCHEMA}.gst_filings
-                    WHERE id=$1
+                    SELECT f.*
+                    FROM {DB_SCHEMA}.gst_filings f
+                    WHERE {' AND '.join(fetch_conditions)}
                     FOR UPDATE
                     """,
-                    filing_id,
+                    *fetch_values,
                 )
 
                 if not old:
                     raise HTTPException(404, GstFilingApiMessages.FILING_NOT_FOUND)
 
                 update_data = payload.model_dump(exclude_unset=True)
+
+                # Mass-assignment guard: only an admin may reassign ownership.
+                if role_norm != "ADMIN":
+                    update_data.pop("rm_id", None)
+                    update_data.pop("op_id", None)
 
                 if not update_data:
                     raise HTTPException(400, GstFilingApiMessages.UPDATE_NO_CHANGES)
@@ -2002,24 +2064,10 @@ async def update_gst_filing(
 
                 # Keep shared GST registration fields in sync when this filing is linked.
                 if new_reg:
-                    filing_to_registration = {
-                        "gstin": "gstin",
-                        "taxpayer_type": "taxpayer_type",
-                        "turnover_details": "turnover_details",
-                        "filing_frequency": "filing_preference",
-                        "state": "state",
-                        "language": "language",
-                        "gst_reg_status": "registration_status",
-                        "username": "username",
-                        "password": "password",
-                        "business_name": "business_name",
-                        "business_type": "business_type",
-                        "business_description": "business_description",
-                    }
                     reg_fields = []
                     reg_values = []
                     reg_idx = 1
-                    for filing_key, reg_col in filing_to_registration.items():
+                    for filing_key, reg_col in FILING_TO_REGISTRATION_SYNC.items():
                         if filing_key in update_data:
                             reg_fields.append(f"{reg_col}=${reg_idx}")
                             reg_values.append(update_data[filing_key])
@@ -2127,6 +2175,8 @@ async def deactivate_gst_filing(
     request_id = generate_uuid()
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -2154,15 +2204,26 @@ async def deactivate_gst_filing(
 
                 # --------------------------------------------------
                 # 1️⃣ FETCH GST FILING
+                #     IDOR guard: RM/OP/managers may only deactivate filings
+                #     they can see; ADMIN unrestricted.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["f.id = $1"]
+                fetch_values = [filing_id]
+                if visibility_sql:
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_values.extend(visibility_values)
+
                 filing = await conn.fetchrow(
                     f"""
-                    SELECT *
-                    FROM {DB_SCHEMA}.gst_filings
-                    WHERE id = $1
+                    SELECT f.*
+                    FROM {DB_SCHEMA}.gst_filings f
+                    WHERE {' AND '.join(fetch_conditions)}
                     FOR UPDATE
                     """,
-                    filing_id,
+                    *fetch_values,
                 )
 
                 if not filing:
@@ -2327,6 +2388,8 @@ async def activate_gst_filing(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -2357,15 +2420,26 @@ async def activate_gst_filing(
 
                 # --------------------------------------------------
                 # 1️⃣ FETCH GST FILING (LOCK ROW)
+                #     IDOR guard: RM/OP/managers may only activate filings they
+                #     can see; ADMIN unrestricted.
                 # --------------------------------------------------
+                visibility_sql, visibility_values, _vidx = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                fetch_conditions = ["f.id = $1"]
+                fetch_values = [filing_id]
+                if visibility_sql:
+                    fetch_conditions.append(f"({visibility_sql})")
+                    fetch_values.extend(visibility_values)
+
                 filing = await conn.fetchrow(
                     f"""
-                    SELECT *
-                    FROM {DB_SCHEMA}.gst_filings
-                    WHERE id = $1
+                    SELECT f.*
+                    FROM {DB_SCHEMA}.gst_filings f
+                    WHERE {' AND '.join(fetch_conditions)}
                     FOR UPDATE
                     """,
-                    filing_id,
+                    *fetch_values,
                 )
 
                 if not filing:
@@ -2539,6 +2613,8 @@ async def update_return_statuses(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role else None
 
     log = logging.LoggerAdapter(
         logger,
@@ -2555,14 +2631,25 @@ async def update_return_statuses(
         try:
             async with conn.transaction():
 
-                # 1️⃣ Ensure filing exists
+                # 1️⃣ Ensure filing exists AND is visible to this RM/OP.
+                #     Without the gst_filings visibility join, any SPECIAL
+                #     holder could flip return statuses on filings assigned to
+                #     other RMs/OPs (IDOR). Mirrors bulk_delete_missed_return_details.
+                vis_sql, vis_vals, _ = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA
+                )
+                vis_clause = f"AND ({vis_sql})" if vis_sql else ""
                 filing = await conn.fetchrow(
                     f"""
-                    SELECT id
-                    FROM {DB_SCHEMA}.gst_filing_return_details
-                    WHERE id = $1
+                    SELECT d.id
+                    FROM {DB_SCHEMA}.gst_filing_return_details d
+                    JOIN {DB_SCHEMA}.gst_filings f
+                      ON f.id = d.gst_filing_id
+                    WHERE d.id = $1
+                    {vis_clause}
                     """,
                     filing_id,
+                    *vis_vals,
                 )
 
                 if not filing:
@@ -2733,13 +2820,12 @@ async def update_return_statuses(
             raise HTTPException(400, GstFilingApiMessages.RETURN_STATUS_FK_INVALID)
 
         except asyncpg.exceptions.CheckViolationError as e:
-            log.exception("Constraint violation during return status update")
-            constraint = getattr(e, "constraint_name", None)
-            if constraint:
-                raise HTTPException(
-                    400,
-                    GstFilingApiMessages.RETURN_STATUS_CONSTRAINT_NAMED.format(constraint=constraint),
-                )
+            # Log the constraint name server-side only; never echo internal
+            # constraint identifiers back to the client.
+            log.warning(
+                "Constraint violation during return status update | constraint=%s",
+                getattr(e, "constraint_name", None),
+            )
             raise HTTPException(400, GstFilingApiMessages.RETURN_STATUS_CONSTRAINT)
 
         except asyncpg.exceptions.DataError:
@@ -2770,7 +2856,11 @@ async def bulk_delete_missed_return_details(
 
     emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
     emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
-    role = current_user.get("role")
+    # Normalize role before the case-sensitive visibility builder so a
+    # non-upper token (e.g. "admin") doesn't fall through to the restrictive
+    # branch and over-restrict a legitimate admin/manager.
+    role_raw = current_user.get("role")
+    role = str(role_raw).strip().upper() if role_raw else None
 
     log = logging.LoggerAdapter(
         logger,

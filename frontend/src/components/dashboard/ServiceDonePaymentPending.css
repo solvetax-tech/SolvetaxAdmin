@@ -25,7 +25,7 @@
 }
 
 .sdpp-page .progress-tracker-container-v4::-webkit-scrollbar {
-    width: 0;
+    width: 6px;
     height: 6px;
 }
 
@@ -62,10 +62,10 @@
     align-items: center;
     gap: 6px;
     padding: 6px 10px;
-    border-radius: 8px;
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
-    background: rgba(var(--fg-rgb), 0.03);
-    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-secondary);
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
@@ -79,9 +79,9 @@
 }
 
 .sdpp-entity-pill.is-active {
-    background: rgba(46, 184, 122, 0.12);
-    border-color: rgba(46, 184, 122, 0.45);
-    color: #2eb87a;
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: var(--accent);
 }
 
 .sdpp-entity-pill-count {
@@ -97,10 +97,14 @@
     opacity: 0.9;
 }
 
-.sdpp-entity-pill--gst_registration.is-active { border-color: rgba(139, 92, 246, 0.5); color: #8b5cf6; background: rgba(139, 92, 246, 0.1); }
-.sdpp-entity-pill--gst_filing.is-active { border-color: rgba(6, 182, 212, 0.5); color: #67e8f9; background: rgba(6, 182, 212, 0.1); }
-.sdpp-entity-pill--income_tax.is-active { border-color: rgba(245, 158, 11, 0.5); color: #f59e0b; background: rgba(245, 158, 11, 0.1); }
-.sdpp-entity-pill--customer_service.is-active { border-color: rgba(16, 185, 129, 0.5); color: #2eb87a; background: rgba(16, 185, 129, 0.1); }
+.sdpp-entity-pill--gst_registration.is-active,
+.sdpp-entity-pill--gst_filing.is-active,
+.sdpp-entity-pill--income_tax.is-active,
+.sdpp-entity-pill--customer_service.is-active {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.12);
+}
 
 .sdpp-filter-bar {
     display: flex;
@@ -128,16 +132,21 @@
     height: 34px;
     padding: 0 10px;
     border-radius: 8px;
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
-    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border);
+    background: var(--bg-input);
     color: var(--text-primary);
     font-size: 13px;
     width: 150px;
 }
 
+.sdpp-filter-field input::placeholder {
+    color: var(--text-faint);
+}
+
 .sdpp-filter-field input:focus {
     outline: none;
-    border-color: rgba(46, 184, 122, 0.45);
+    border-color: var(--accent);
+    box-shadow: var(--ring);
 }
 
 .sdpp-filter-actions {
@@ -172,41 +181,28 @@
     display: inline-flex;
     align-items: center;
     padding: 3px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     font-size: 10px;
-    font-weight: 800;
+    font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    border: 1px solid rgba(var(--fg-rgb), 0.12);
-    background: rgba(var(--fg-rgb), 0.04);
+    border: 1px solid var(--border-subtle);
+    background: rgba(var(--fg-rgb), 0.05);
     color: var(--text-primary);
 }
 
-.sdpp-entity-chip.GST_REGISTRATION {
-    border-color: rgba(139, 92, 246, 0.35);
-    color: #8b5cf6;
-}
-
-.sdpp-entity-chip.GST_FILING {
-    border-color: rgba(6, 182, 212, 0.35);
-    color: #67e8f9;
-}
-
-.sdpp-entity-chip.INCOME_TAX {
-    border-color: rgba(245, 158, 11, 0.35);
-    color: #f59e0b;
-}
-
-.sdpp-entity-chip.CUSTOMER_SERVICE {
-    border-color: rgba(16, 185, 129, 0.35);
-    color: #2eb87a;
-}
-
 .sdpp-status-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    color: #2eb87a;
+    letter-spacing: 0.04em;
+    border: 1px solid var(--border-subtle);
+    background: rgba(var(--fg-rgb), 0.05);
+    color: var(--text-primary);
 }
 
 .sdpp-col-pending {
@@ -216,7 +212,8 @@
 .sdpp-pending-amount {
     font-size: 12px;
     font-weight: 700;
-    color: #f59e0b;
+    color: var(--text-primary);
+    font-family: var(--font-body);
     font-variant-numeric: tabular-nums;
 }
 
@@ -226,9 +223,9 @@
     gap: 4px;
     padding: 4px 10px;
     border-radius: 6px;
-    border: 1px solid rgba(46, 184, 122, 0.25);
-    background: rgba(46, 184, 122, 0.08);
-    color: #2eb87a;
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    background: rgba(var(--accent-rgb), 0.08);
+    color: var(--accent);
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
@@ -236,6 +233,6 @@
 }
 
 .sdpp-row-action:hover {
-    background: #2eb87a;
-    color: var(--text-primary);
+    background: var(--accent);
+    color: var(--text-inverse);
 }

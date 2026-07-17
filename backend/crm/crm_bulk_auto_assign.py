@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 from fastapi import HTTPException
 
+from backend.common.status_constants import normalize_run_type
 from backend.crm.crm_leads_common import (
     _invalidate_crm_cache,
     _svc_execute_bulk_assign,
@@ -429,6 +430,13 @@ async def insert_bulk_assign_log(
     triggered_by: Optional[int],
     summary: Dict[str, Any],
 ) -> None:
+    # run_type reaches the column unmediated by any Pydantic model, and the value CHECK is
+    # gone. required=True because the column is NOT NULL with no default -- a blank would
+    # otherwise normalize to None and fail as a NotNullViolation deep in the INSERT below.
+    try:
+        run_type_norm = normalize_run_type(run_type, required=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     roles = summary.get("roles") or {}
     rm_n = _role_assigned_count(roles, "RM", summary)
     op_n = _role_assigned_count(roles, "OP", summary)
@@ -444,7 +452,7 @@ async def insert_bulk_assign_log(
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
                 """,
                 scheduler_id,
-                run_type,
+                run_type_norm,
                 (entity_type or "").strip().upper(),
                 triggered_by,
                 matched,
@@ -474,7 +482,10 @@ async def svc_list_bulk_assign_logs(
         params.append((entity_type or "").strip().upper())
         clauses.append(f"upper(trim(l.entity_type)) = ${len(params)}")
     if run_type:
-        params.append(run_type.strip().upper())
+        try:
+            params.append(normalize_run_type(run_type))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         clauses.append(f"l.run_type = ${len(params)}")
     if scheduler_id is not None:
         params.append(scheduler_id)
@@ -629,11 +640,34 @@ async def run_auto_assign_scheduler(scheduler_id: int, *, force: bool = False) -
 
     rule = _row_to_rule(row)
     now = datetime.now(timezone.utc)
-    last_run_at = row["last_run_at"]
     interval = int(row["interval_minutes"] or 5)
-    if not force and last_run_at:
-        lr = last_run_at.replace(tzinfo=timezone.utc) if last_run_at.tzinfo is None else last_run_at
-        if now - lr < timedelta(minutes=interval):
+
+    # Atomically CLAIM this run. Two overlapping scheduler ticks (a slow run
+    # overlapping the next tick, or the scheduler active on more than one
+    # worker) must not both pass the interval gate and double-assign the same
+    # leads. This conditional UPDATE — which advances last_run_at only if the
+    # interval has elapsed — succeeds for exactly one runner; everyone else
+    # gets no row back and bails. `force` skips the claim for manual runs.
+    if not force:
+        async with pool.acquire() as conn:
+            claimed = await conn.fetchval(
+                f"""
+                UPDATE {DB_SCHEMA}.crm_bulk_assign_schedulers
+                SET last_run_at = $2,
+                    updated_at = NOW()
+                WHERE id = $1
+                  AND enabled = TRUE
+                  AND (
+                        last_run_at IS NULL
+                        OR last_run_at <= $2 - ($3 * INTERVAL '1 minute')
+                      )
+                RETURNING id
+                """,
+                scheduler_id,
+                now,
+                interval,
+            )
+        if not claimed:
             return None
 
     leads = await _fetch_matching_leads(rule)

@@ -46,16 +46,14 @@
 }
 
 .add-payment-content .selected-badge-v2 {
-    border: 1px solid rgba(46, 184, 122, 0.2);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
 }
 
 /* Ensure textarea matches V4 input style */
 .add-payment-content textarea {
     width: 100%;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
     color: var(--text-primary);
     padding: 14px 16px;
     border-radius: 16px;
@@ -64,28 +62,27 @@
     line-height: 1.6;
     transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     outline: none;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
     resize: vertical;
 }
 
 .add-payment-content textarea:hover {
-    border-color: rgba(var(--fg-rgb), 0.2);
-    background: rgba(0, 0, 0, 0.4);
+    border-color: var(--border-strong);
+    background: var(--bg-hover);
 }
 
 .add-payment-content textarea:focus {
-    border-color: #2eb87a;
-    background: rgba(0, 0, 0, 0.45);
-    box-shadow: 0 0 0 4px rgba(46, 184, 122, 0.1), inset 0 2px 4px rgba(0, 0, 0, 0.2);
+    border-color: var(--accent);
+    background: var(--bg-input);
+    box-shadow: var(--ring);
 }
 
 .add-payment-content textarea::placeholder {
-    color: var(--text-primary);
+    color: var(--text-faint);
 }
 
 /* Input group variations */
 .add-payment-content .input-group-v4 label svg {
-    color: #2eb87a;
+    color: var(--accent);
     opacity: 0.8;
 }
 
@@ -114,14 +111,14 @@
 }
 
 .add-payment-content .input-wrapper-v4.highlighted input {
-    color: #ef4444 !important;
+    color: var(--danger) !important;
     font-weight: 800 !important;
-    border: 1px solid rgba(239, 68, 68, 0.3) !important;
-    background: rgba(239, 68, 68, 0.05) !important;
+    border: 1px solid rgba(var(--danger-rgb), 0.3) !important;
+    background: rgba(var(--danger-rgb), 0.05) !important;
 }
 
 .add-payment-content .input-wrapper-v4.highlighted:hover input {
-    border-color: rgba(239, 68, 68, 0.5) !important;
+    border-color: rgba(var(--danger-rgb), 0.5) !important;
 }
 
 .add-payment-content .btn-save-v4:disabled {
@@ -133,33 +130,32 @@
 /* --- Premium Select Dropdown Styling --- */
 .add-payment-content select {
     width: 100%;
-    background: rgba(0, 0, 0, 0.3) !important;
-    border: 1px solid rgba(var(--fg-rgb), 0.1) !important;
+    background: var(--bg-input) !important;
+    border: 1px solid var(--border) !important;
     color: var(--text-primary) !important;
     padding: 14px 16px !important;
     border-radius: 16px !important;
     font-size: 15px !important;
     transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
     outline: none !important;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2) !important;
     cursor: pointer !important;
     appearance: none !important;
     -webkit-appearance: none !important;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%232eb87a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%238a8f99' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
     background-repeat: no-repeat !important;
     background-position: right 16px center !important;
     background-size: 18px !important;
 }
 
 .add-payment-content select:hover {
-    border-color: rgba(var(--fg-rgb), 0.2) !important;
-    background-color: rgba(0, 0, 0, 0.4) !important;
+    border-color: var(--border-strong) !important;
+    background-color: var(--bg-hover) !important;
 }
 
 .add-payment-content select:focus {
-    border-color: #2eb87a !important;
-    background: rgba(0, 0, 0, 0.45) !important;
-    box-shadow: 0 0 0 4px rgba(46, 184, 122, 0.1), inset 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+    border-color: var(--accent) !important;
+    background: var(--bg-input) !important;
+    box-shadow: var(--ring) !important;
 }
 
 .add-payment-content select option {

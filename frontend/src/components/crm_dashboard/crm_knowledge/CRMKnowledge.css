@@ -13,26 +13,25 @@
 
 /* CRM Specific Colors */
 :root {
-    --crm-blue: #3b82f6;
-    --crm-purple: #8b5cf6;
-    --crm-amber: #f59e0b;
-    --crm-emerald: #2eb87a;
-    --crm-bg-glass: rgba(15, 23, 42, 0.6);
+    --crm-blue: var(--info);
+    --crm-purple: var(--role-hr);
+    --crm-amber: var(--warning);
+    --crm-emerald: var(--accent);
+    --crm-bg-glass: var(--bg-surface);
 }
 
 .crm-knowledge-section {
-    background: var(--crm-bg-glass);
+    background: var(--bg-surface);
     border: 1px solid rgba(var(--fg-rgb), 0.08);
     border-radius: 20px;
     padding: 28px;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-sm);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .crm-knowledge-section:hover {
-    border-color: rgba(59, 130, 246, 0.3);
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    box-shadow: var(--shadow-md);
     transform: translateY(-2px);
 }
 
@@ -42,19 +41,19 @@
     gap: 16px;
     margin-bottom: 24px;
     padding-bottom: 16px;
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.1);
+    border-bottom: 1px solid var(--border);
 }
 
 .crm-header-icon {
     width: 42px;
     height: 42px;
-    background: rgba(59, 130, 246, 0.1);
+    background: rgba(var(--info-rgb), 0.1);
     border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--crm-blue);
-    border: 1px solid rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(var(--info-rgb), 0.2);
 }
 
 .crm-section-header h2 {
@@ -73,49 +72,56 @@
 }
 
 .knowledge-table th {
-    background: rgba(var(--fg-rgb), 0.03);
-    padding: 16px;
-    font-size: 11px;
-    font-weight: 700;
+    background: var(--bg-surface-2);
+    padding: 14px 16px;
+    font-family: var(--font-accent);
+    font-size: 10.5px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text-muted);
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
     text-align: left;
-    border-bottom: 2px solid rgba(var(--fg-rgb), 0.1);
+    border-bottom: 1px solid var(--border);
 }
 
 .knowledge-table th:first-child { border-top-left-radius: 12px; }
 .knowledge-table th:last-child { border-top-right-radius: 12px; }
 
 .knowledge-table td {
-    padding: 16px;
+    padding: 14px 16px;
     font-size: 14px;
-    color: var(--text-secondary);
-    border-bottom: 1px solid rgba(var(--fg-rgb), 0.05);
-    transition: background 0.2s ease;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .knowledge-table tr:hover td {
-    background: rgba(var(--fg-rgb), 0.02);
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-hover));
     color: var(--text-primary);
+}
+
+.knowledge-table tr:hover td:first-child {
+    box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* Specific Cell Styles */
 .crm-id-badge {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-body);
+    font-variant-numeric: tabular-nums;
     font-size: 11px;
     background: rgba(var(--fg-rgb), 0.05);
     padding: 4px 8px;
     border-radius: 6px;
-    color: var(--text-muted);
-    border: 1px solid rgba(var(--fg-rgb), 0.1);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
 }
 
 .crm-code-text {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-body);
     font-size: 13px;
-    color: var(--crm-amber);
-    background: rgba(245, 158, 11, 0.1);
+    color: var(--text-primary);
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
     padding: 4px 10px;
     border-radius: 6px;
 }
@@ -136,9 +142,9 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.2);
-    color: var(--crm-blue);
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
     padding: 6px 14px;
     border-radius: 8px;
     font-weight: 600;
@@ -155,16 +161,16 @@
     font-size: 11px;
     font-weight: 600;
     padding: 4px 12px;
-    background: rgba(139, 92, 246, 0.1);
-    border: 1px solid rgba(139, 92, 246, 0.2);
-    color: #8b5cf6;
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
     border-radius: 6px;
     transition: all 0.2s ease;
 }
 
 .status-outcome-pill:hover {
-    background: rgba(139, 92, 246, 0.2);
-    border-color: rgba(139, 92, 246, 0.4);
+    background: rgba(var(--fg-rgb), 0.08);
+    border-color: var(--border);
     transform: translateY(-1px);
 }
 
@@ -174,10 +180,10 @@
     grid-template-columns: 200px 1fr;
     gap: 24px;
     padding: 20px;
-    background: rgba(var(--fg-rgb), 0.02);
-    border-radius: 12px;
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-md);
     margin-bottom: 12px;
-    border: 1px solid rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
 }
 
 .config-label {

@@ -61,7 +61,7 @@ const GSTPeopleViewPanel = ({ isOpen, onClose, personId, onUpdate }) => {
                 aria-modal="true"
             >
                 <div className="drawer-header gst-reg-details-header">
-                    <div className="header-icon-v4" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', borderColor: 'rgba(59, 130, 246, 0.2)' }}>
+                    <div className="header-icon-v4" style={{ background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)', borderColor: 'rgba(var(--info-rgb), 0.2)' }}>
                         <UserCircle size={24} />
                     </div>
                     <div className="header-text-v4">
@@ -88,7 +88,7 @@ const GSTPeopleViewPanel = ({ isOpen, onClose, personId, onUpdate }) => {
                     ) : details ? (
                         <div className="details-container-v4">
                             <div className="details-section-v4">
-                                <h4 className="section-title-v4" style={{ color: '#3b82f6' }}>Personal Identity</h4>
+                                <h4 className="section-title-v4" style={{ color: 'var(--info)' }}>Personal Identity</h4>
                                 <div className="info-grid-v4">
                                     <div className="info-item-v4">
                                         <label>Full Name</label>
@@ -96,7 +96,7 @@ const GSTPeopleViewPanel = ({ isOpen, onClose, personId, onUpdate }) => {
                                     </div>
                                     <div className="info-item-v4">
                                         <label>Designation</label>
-                                        <span className="status-pill-v4 status-filed" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                                        <span className="status-pill-v4 status-filed" style={{ background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)', border: '1px solid rgba(var(--info-rgb), 0.2)' }}>
                                             {details.designation || '-'}
                                         </span>
                                     </div>

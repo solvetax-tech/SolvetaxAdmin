@@ -38,7 +38,7 @@ const ActivationConfirmModal = ({ isOpen, onClose, employee, onActivate }) => {
                 </button>
 
                 <div className="confirm-icon-wrapper">
-                    <AlertCircle size={40} color="#2eb87a" />
+                    <AlertCircle size={40} color="var(--accent)" />
                 </div>
 
                 <h2>Activate Employee</h2>

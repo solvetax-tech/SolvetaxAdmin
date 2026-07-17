@@ -234,7 +234,8 @@ async def edit_crm_itr_lead(
     except asyncpg.exceptions.ForeignKeyViolationError:
         raise _validation_error("Invalid foreign key reference.", {"rm_id/op_id": "Referenced employee not found."})
     except asyncpg.exceptions.CheckViolationError as e:
-        raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
+        logger.warning("Check violation (CRM ITR lead): %s", getattr(e, "constraint_name", "unknown"))
+        raise _validation_error("Constraint validation failed.", {})
     except asyncpg.PostgresError:
         logger.exception("Database error while editing CRM ITR lead")
         raise HTTPException(status_code=500, detail="Database error.")
@@ -665,7 +666,8 @@ async def update_crm_itr_followup_status(
             await _invalidate_crm_cache(lead_id)
             return result
     except asyncpg.exceptions.CheckViolationError as e:
-        raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
+        logger.warning("Check violation (CRM ITR lead): %s", getattr(e, "constraint_name", "unknown"))
+        raise _validation_error("Constraint validation failed.", {})
     except asyncpg.PostgresError:
         logger.exception("Database error while updating CRM ITR follow-up status")
         raise HTTPException(status_code=500, detail="Database error.")
@@ -709,7 +711,8 @@ async def update_crm_itr_call(
     except asyncpg.exceptions.ForeignKeyViolationError:
         raise _validation_error("Invalid foreign key reference.", {"performed_by": "Employee reference invalid."})
     except asyncpg.exceptions.CheckViolationError as e:
-        raise _validation_error("Constraint validation failed.", {"constraint": getattr(e, "constraint_name", "unknown")})
+        logger.warning("Check violation (CRM ITR lead): %s", getattr(e, "constraint_name", "unknown"))
+        raise _validation_error("Constraint validation failed.", {})
     except asyncpg.PostgresError:
         logger.exception("Database error while applying CRM ITR call update")
         raise HTTPException(status_code=500, detail="Database error.")

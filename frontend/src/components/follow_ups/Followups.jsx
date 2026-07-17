@@ -20,6 +20,7 @@ import {
     buildFollowupRangeFromDates,
     getFollowupListMeta,
     FOLLOWUP_SCHEDULE_PAGE_SIZE,
+    PAYMENT_ENTITY_TYPE_MAP,
 } from '../../utils/followupsApi';
 import {
     Search,
@@ -567,6 +568,13 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
 
             if (selectedDates && selectedDates.length > 0) {
                 params.dates = selectedDates.join(',');
+                // "Overdue" is a derived state, not a stored status. Translate it to
+                // PENDING/MISSED so the backend (which only accepts
+                // PENDING/COMPLETED/MISSED) doesn't 400 when a date is also selected.
+                if (params.status === 'OVERDUE' || filters.is_overdue) {
+                    params.statuses = ['PENDING', 'MISSED'];
+                    delete params.status;
+                }
                 delete params.today_only;
                 delete params.is_overdue;
                 delete params.followup_from;
@@ -615,6 +623,10 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
             let fetchedData = [];
             if (activeFollowupCategory === 'services') {
                 const listParams = Object.fromEntries(queryParams.entries());
+                // Object.fromEntries collapses duplicate keys to the last value, which drops
+                // 'PENDING' from a multi-value statuses filter (e.g. ['PENDING','MISSED']).
+                const statusesArr = queryParams.getAll('statuses');
+                if (statusesArr.length > 1) listParams.statuses = statusesArr;
                 Object.keys(listParams).forEach((key) => {
                     if (listParams[key] === 'true') listParams[key] = true;
                     if (listParams[key] === 'false') listParams[key] = false;
@@ -664,6 +676,10 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 }
             } else {
                 const listParams = Object.fromEntries(queryParams.entries());
+                // Object.fromEntries collapses duplicate keys to the last value, which drops
+                // 'PENDING' from a multi-value statuses filter (e.g. ['PENDING','MISSED']).
+                const statusesArr = queryParams.getAll('statuses');
+                if (statusesArr.length > 1) listParams.statuses = statusesArr;
                 Object.keys(listParams).forEach((key) => {
                     if (listParams[key] === 'true') listParams[key] = true;
                     if (listParams[key] === 'false') listParams[key] = false;
@@ -977,7 +993,10 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
     }, []);
 
     const renderFilterDrawer = () => {
-        const statuses = ['PENDING', 'OVERDUE', 'COMPLETED', 'CANCELLED'];
+        // CANCELLED has no backend equivalent (domain is PENDING/COMPLETED/MISSED),
+        // so it could never return results — omitted. OVERDUE is a derived state
+        // translated to PENDING+MISSED in fetchFollowups.
+        const statuses = ['PENDING', 'OVERDUE', 'COMPLETED'];
         const serviceEntityTypes = Object.keys(SERVICE_TYPE_MAP);
         const isPaymentsTab = activeFollowupCategory === 'payments';
 
@@ -1188,9 +1207,9 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
 
                     <div className="calendar-drawer-body">
                         {addPaymentFollowupError && (
-                            <div className="inlay-error" style={{ margin: '0 0 16px 0', padding: '10px 12px', background: 'rgba(244, 63, 94, 0.1)', border: '1px solid rgba(244, 63, 94, 0.2)', borderRadius: '6px', color: '#ef4444', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div className="inlay-error" style={{ margin: '0 0 16px 0', padding: '10px 12px', background: 'rgba(var(--danger-rgb), 0.1)', border: '1px solid rgba(var(--danger-rgb), 0.2)', borderRadius: '6px', color: 'var(--danger)', fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <span>{addPaymentFollowupError}</span>
-                                <button style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px' }} onClick={() => setAddPaymentFollowupError(null)}>&times;</button>
+                                <button style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '14px' }} onClick={() => setAddPaymentFollowupError(null)}>&times;</button>
                             </div>
                         )}
 
@@ -1211,7 +1230,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                         <select
                                             value={newPaymentFollowup.payment_id}
                                             onChange={e => setNewPaymentFollowup({ ...newPaymentFollowup, payment_id: e.target.value })}
-                                            style={{ width: '100%', background: 'rgba(13, 16, 21, 0.95)', border: '1px solid rgba(var(--fg-rgb), 0.08)', borderRadius: '6px', color: 'var(--text-primary)', padding: '10px 12px', fontSize: '13px', outline: 'none' }}
+                                            style={{ width: '100%', background: 'var(--bg-input)', border: '1px solid rgba(var(--fg-rgb), 0.08)', borderRadius: '6px', color: 'var(--text-primary)', padding: '10px 12px', fontSize: '13px', outline: 'none' }}
                                         >
                                             <option value="">-- Choose Pending Payment --</option>
                                             {pendingPayments.map(p => (
@@ -1239,7 +1258,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                     placeholder="Enter details about this follow-up..."
                                     value={newPaymentFollowup.remarks}
                                     onChange={e => setNewPaymentFollowup({ ...newPaymentFollowup, remarks: e.target.value })}
-                                    style={{ width: '100%', minHeight: '100px', background: 'rgba(13, 16, 21, 0.95)', border: '1px solid rgba(var(--fg-rgb), 0.08)', borderRadius: '6px', color: 'var(--text-primary)', padding: '10px 12px', fontSize: '13px', outline: 'none', resize: 'vertical' }}
+                                    style={{ width: '100%', minHeight: '100px', background: 'var(--bg-input)', border: '1px solid rgba(var(--fg-rgb), 0.08)', borderRadius: '6px', color: 'var(--text-primary)', padding: '10px 12px', fontSize: '13px', outline: 'none', resize: 'vertical' }}
                                 />
                             </div>
                         </form>
@@ -1292,7 +1311,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 label: 'Scheduled',
                 value: scheduledToday,
                 icon: <Calendar size={20} />,
-                color: '#3b82f6',
+                color: 'var(--info)',
                 desc: `SCHEDULED ${statsPeriodLabel}`,
                 type: 'SCHEDULED'
             },
@@ -1300,7 +1319,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 label: 'Overdue (Pending)',
                 value: overduePendingToday,
                 icon: <AlertCircle size={20} />,
-                color: '#ef4444',
+                color: 'var(--danger)',
                 desc: `OVERDUE PENDING ${statsPeriodLabel}`,
                 type: 'OVERDUE_PENDING'
             },
@@ -1308,7 +1327,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 label: 'Overdue (Completed)',
                 value: overdueCompletedToday,
                 icon: <CheckCircle2 size={20} />,
-                color: '#f97316',
+                color: 'var(--warning)',
                 desc: `OVERDUE COMPLETED ${statsPeriodLabel}`,
                 type: 'OVERDUE_COMPLETED'
             },
@@ -1316,7 +1335,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 label: 'Completed (On-time)',
                 value: completedToday,
                 icon: <CheckCircle size={20} />,
-                color: '#2eb87a',
+                color: 'var(--accent)',
                 desc: `COMPLETED ${statsPeriodLabel}`,
                 type: 'COMPLETED'
             },
@@ -1324,7 +1343,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 label: 'Pending (Urgent)',
                 value: pendingToday,
                 icon: <Clock size={20} />,
-                color: '#f59e0b',
+                color: 'var(--warning)',
                 desc: `PENDING ${statsPeriodLabel}`,
                 type: 'PENDING'
             },
@@ -1332,7 +1351,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 label: 'Success Rate',
                 value: `${successRate}%`,
                 icon: <Activity size={20} />,
-                color: '#06b6d4',
+                color: 'var(--success)',
                 desc: statsPeriodLabel === 'TODAY' ? 'SUCCESS RATE TODAY' : `SUCCESS RATE (${statsPeriodLabel})`,
                 type: null
             },
@@ -1347,8 +1366,8 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                         style={{ 
                             '--accent-color': s.color,
                             cursor: s.type ? 'pointer' : 'default',
-                            border: activeStatFilter === s.type ? `1.5px solid ${s.color}` : '1px solid rgba(var(--fg-rgb), 0.12)',
-                            boxShadow: activeStatFilter === s.type ? `0 0 15px ${s.color}33` : '0 10px 25px rgba(0, 0, 0, 0.35)',
+                            border: activeStatFilter === s.type ? `1.5px solid ${s.color}` : '1px solid var(--border)',
+                            boxShadow: activeStatFilter === s.type ? 'var(--shadow-md)' : 'var(--shadow-sm)',
                             transform: activeStatFilter === s.type ? 'translateY(-2px)' : 'none',
                             transition: 'all 0.3s cubic-bezier(0.165, 0.84, 0.44, 1)'
                         }}
@@ -1671,7 +1690,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                                 </div>
                                                 <div className="stat-card">
                                                     <span className="stat-label">Completed</span>
-                                                    <span className="stat-value" style={{ color: '#2eb87a' }}>
+                                                    <span className="stat-value" style={{ color: 'var(--accent)' }}>
                                                         {stats.total - stats.pending}
                                                     </span>
                                                 </div>
@@ -1894,7 +1913,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                 <div className="followups-detail-drawer" onClick={e => e.stopPropagation()}>
                     <div className="calendar-drawer-header" style={{ borderBottom: '1px solid rgba(var(--fg-rgb), 0.08)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <Activity size={20} className="header-icon-glow" style={{ color: '#2eb87a' }} />
+                            <Activity size={20} className="header-icon-glow" style={{ color: 'var(--accent)' }} />
                             <h2>Follow-up Details</h2>
                         </div>
                         <button className="btn-close-drawer" onClick={closeDetailDrawer}>
@@ -1904,7 +1923,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
 
                     <div className="calendar-drawer-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '24px 20px', overflowY: 'auto' }}>
                         {/* Status Card */}
-                        <div className="detail-section glass-card-v4" style={{ padding: '16px', background: 'rgba(var(--fg-rgb), 0.02)', border: '1px solid rgba(var(--fg-rgb), 0.05)', borderRadius: '12px' }}>
+                        <div className="detail-section glass-card-v4" style={{ padding: '16px', background: 'rgba(var(--fg-rgb), 0.02)', border: '1px solid var(--border-subtle)', borderRadius: '12px' }}>
                             <span className={`followup-status-badge ${statusBadgeClass}`} style={{ marginBottom: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                 {isCompleted ? <Check size={12} /> : (isPending || statusBadgeClass === 'overdue') ? <Clock size={12} /> : null}
                                 <span>{statusText}</span>
@@ -1927,9 +1946,9 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
 
                         {/* Punctuality and Time details */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                            <div className="glass-card-v4" style={{ padding: '12px', background: 'rgba(var(--fg-rgb), 0.01)', border: '1px solid rgba(var(--fg-rgb), 0.04)', borderRadius: '10px' }}>
+                            <div className="glass-card-v4" style={{ padding: '12px', background: 'rgba(var(--fg-rgb), 0.03)', border: '1px solid var(--border-subtle)', borderRadius: '10px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '10px', fontWeight: 700, marginBottom: '6px' }}>
-                                    <Calendar size={12} style={{ color: '#2eb87a' }} />
+                                    <Calendar size={12} style={{ color: 'var(--accent)' }} />
                                     <span>SCHEDULED AT</span>
                                 </div>
                                 <div style={{ color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600 }}>
@@ -1938,9 +1957,9 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                             </div>
 
                             {isCompleted ? (
-                                <div className="glass-card-v4" style={{ padding: '12px', background: 'rgba(var(--fg-rgb), 0.01)', border: '1px solid rgba(var(--fg-rgb), 0.04)', borderRadius: '10px' }}>
+                                <div className="glass-card-v4" style={{ padding: '12px', background: 'rgba(var(--fg-rgb), 0.03)', border: '1px solid var(--border-subtle)', borderRadius: '10px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '10px', fontWeight: 700, marginBottom: '6px' }}>
-                                        <CheckCircle2 size={12} style={{ color: '#2eb87a' }} />
+                                        <CheckCircle2 size={12} style={{ color: 'var(--accent)' }} />
                                         <span>COMPLETED AT</span>
                                     </div>
                                     <div style={{ color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600 }}>
@@ -1948,24 +1967,24 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                     </div>
                                 </div>
                             ) : (
-                                <div className="glass-card-v4" style={{ padding: '12px', background: 'rgba(var(--fg-rgb), 0.01)', border: '1px solid rgba(var(--fg-rgb), 0.04)', borderRadius: '10px' }}>
+                                <div className="glass-card-v4" style={{ padding: '12px', background: 'rgba(var(--fg-rgb), 0.03)', border: '1px solid var(--border-subtle)', borderRadius: '10px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '10px', fontWeight: 700, marginBottom: '6px' }}>
-                                        <Clock size={12} style={{ color: '#3b82f6' }} />
+                                        <Clock size={12} style={{ color: 'var(--info)' }} />
                                         <span>SLA STATUS</span>
                                     </div>
-                                    <div style={{ color: '#3b82f6', fontSize: '12px', fontWeight: 600 }}>
+                                    <div style={{ color: 'var(--info)', fontSize: '12px', fontWeight: 600 }}>
                                         Awaiting Completion
                                     </div>
                                 </div>
                             )}
 
                             {isCompleted && (
-                                <div className="glass-card-v4" style={{ gridColumn: 'span 2', padding: '12px', background: 'rgba(var(--fg-rgb), 0.01)', border: '1px solid rgba(var(--fg-rgb), 0.04)', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div className="glass-card-v4" style={{ gridColumn: 'span 2', padding: '12px', background: 'rgba(var(--fg-rgb), 0.03)', border: '1px solid var(--border-subtle)', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '10px', fontWeight: 700 }}>
-                                        <Clock size={12} style={{ color: isOnTime ? '#2eb87a' : '#f59e0b' }} />
+                                        <Clock size={12} style={{ color: isOnTime ? 'var(--accent)' : 'var(--warning)' }} />
                                         <span>SLA COMPLIANCE</span>
                                     </div>
-                                    <div style={{ color: isOnTime ? '#2eb87a' : '#f59e0b', fontSize: '12px', fontWeight: 700 }}>
+                                    <div style={{ color: isOnTime ? 'var(--accent)' : 'var(--warning)', fontSize: '12px', fontWeight: 700 }}>
                                         {isOnTime ? 'SLA Passed (On-Time Completion)' : 'SLA Failed (Late Completion)'}
                                     </div>
                                 </div>
@@ -1975,14 +1994,14 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                         {/* Customer profile */}
                         <div className="detail-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <label style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.05em' }}>CLIENT INFORMATION</label>
-                            <div className="glass-card-v4" style={{ padding: '16px', background: 'rgba(var(--fg-rgb), 0.02)', border: '1px solid rgba(var(--fg-rgb), 0.05)', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div className="glass-card-v4" style={{ padding: '16px', background: 'rgba(var(--fg-rgb), 0.02)', border: '1px solid var(--border-subtle)', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{task.full_name || 'Walk-in Client'}</span>
                                     <span style={{ fontSize: '11px', color: 'var(--text-primary)' }}>Cust ID: {task.customer_id || 'N/A'}</span>
                                     <span style={{ fontSize: '11px', color: 'var(--text-primary)' }}>Phone: {task.mobile || 'No phone registered'}</span>
                                 </div>
                                 {task.mobile && (
-                                    <a href={`tel:${task.mobile}`} className="btn-icon-mini" style={{ background: 'rgba(0, 255, 170, 0.1)', color: '#2eb87a', border: '1px solid rgba(0, 255, 170, 0.2)', borderRadius: '50%', padding: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Call Client">
+                                    <a href={`tel:${task.mobile}`} className="btn-icon-mini" style={{ background: 'rgba(var(--accent-rgb), 0.1)', color: 'var(--accent)', border: '1px solid rgba(var(--accent-rgb), 0.2)', borderRadius: '50%', padding: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Call Client">
                                         <Phone size={16} />
                                     </a>
                                 )}
@@ -1992,8 +2011,8 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                         {/* Assignee Card */}
                         <div className="detail-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <label style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.05em' }}>ASSIGNED HANDLER</label>
-                            <div className="glass-card-v4" style={{ padding: '12px 16px', background: 'rgba(var(--fg-rgb), 0.02)', border: '1px solid rgba(var(--fg-rgb), 0.05)', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(0, 255, 170, 0.1)', color: '#2eb87a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, border: '1px solid rgba(0, 255, 170, 0.2)' }}>
+                            <div className="glass-card-v4" style={{ padding: '12px 16px', background: 'rgba(var(--fg-rgb), 0.02)', border: '1px solid var(--border-subtle)', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(var(--accent-rgb), 0.1)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 700, border: '1px solid rgba(var(--accent-rgb), 0.2)' }}>
                                     {(task.assigned_to_name || 'S').charAt(0).toUpperCase()}
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -2007,7 +2026,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                         {(initialRemarks || completionOutcome) && (
                             <div className="detail-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                 <label style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>REMARKS HISTORY</label>
-                                <div className="glass-card-v4" style={{ padding: '16px', background: 'rgba(var(--fg-rgb), 0.02)', border: '1px solid rgba(var(--fg-rgb), 0.05)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                <div className="glass-card-v4" style={{ padding: '16px', background: 'rgba(var(--fg-rgb), 0.02)', border: '1px solid var(--border-subtle)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                     {initialRemarks && (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
@@ -2024,11 +2043,11 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
 
                                     {isCompleted && (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', color: '#2eb87a', fontWeight: 700, textTransform: 'uppercase' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase' }}>
                                                 <Check size={10} />
                                                 <span>COMPLETION OUTCOME</span>
                                             </div>
-                                            <p style={{ margin: 0, fontSize: '12px', color: '#2eb87a', lineHeight: 1.5, paddingLeft: '12px', borderLeft: '2px solid #2eb87a' }}>
+                                            <p style={{ margin: 0, fontSize: '12px', color: 'var(--accent)', lineHeight: 1.5, paddingLeft: '12px', borderLeft: '2px solid var(--accent)' }}>
                                                 {completionOutcome || 'Completed successfully.'}
                                             </p>
                                         </div>
@@ -2349,10 +2368,10 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                     <div
                         className="activity-item-v4 premium-bento-card skeleton"
                         key={i}
-                        style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', borderRadius: '14px', background: 'rgba(var(--fg-rgb), 0.01)', border: '1px solid rgba(var(--fg-rgb), 0.04)', marginBottom: '8px' }}
+                        style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', borderRadius: '14px', background: 'rgba(var(--fg-rgb), 0.03)', border: '1px solid var(--border-subtle)', marginBottom: '8px' }}
                     >
                         {/* Customer Header Skeleton */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '1px solid rgba(var(--fg-rgb), 0.04)', paddingBottom: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '10px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <div className="skeleton-pulse" style={{ width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0 }} />
                                 <div className="skeleton-pulse" style={{ width: '90px', height: '12px', borderRadius: '4px' }} />
@@ -2372,7 +2391,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                         </div>
 
                         {/* Time Badge row Skeleton */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--fg-rgb),0.01)', border: '1px solid rgba(var(--fg-rgb),0.02)', padding: '6px 10px', borderRadius: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--fg-rgb),0.01)', border: '1px solid var(--border-subtle)', padding: '6px 10px', borderRadius: '8px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <div className="skeleton-pulse" style={{ width: '12px', height: '12px', borderRadius: '3px' }} />
                                 <div className="skeleton-pulse" style={{ width: '110px', height: '11px', borderRadius: '3px' }} />
@@ -2418,7 +2437,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                             <div
                                 className="activity-item-v4 clickable premium-bento-card"
                                 key={act.id || i}
-                                style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', borderRadius: '14px', background: 'rgba(var(--fg-rgb), 0.01)', border: '1px solid rgba(var(--fg-rgb), 0.04)', transition: 'all 0.3s ease', marginBottom: '8px' }}
+                                style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', borderRadius: '14px', background: 'rgba(var(--fg-rgb), 0.03)', border: '1px solid var(--border-subtle)', transition: 'all 0.3s ease', marginBottom: '8px' }}
                                 onClick={() => {
                                     if (act.originalItem) {
                                         setSelectedDetailTask(act.originalItem);
@@ -2427,10 +2446,10 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                 }}
                             >
                                 {/* Customer Header Row */}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '1px solid rgba(var(--fg-rgb), 0.04)', paddingBottom: '10px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '10px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
                                         {/* Avatar */}
-                                        <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(172, 200, 255, 0.1)', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700, flexShrink: 0 }}>
+                                        <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700, flexShrink: 0 }}>
                                             {(act.full_name || 'N/A').charAt(0).toUpperCase()}
                                         </div>
                                         {/* Name */}
@@ -2438,7 +2457,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                             {act.full_name || 'N/A'}
                                         </span>
                                         {/* Cust ID Badge */}
-                                        <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(172, 200, 255, 0.06)', border: '1px solid rgba(172, 200, 255, 0.12)', color: '#3b82f6', fontFamily: 'monospace', fontWeight: 600, flexShrink: 0 }}>
+                                        <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(var(--info-rgb), 0.06)', border: '1px solid rgba(var(--info-rgb), 0.12)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontVariantNumeric: 'tabular-nums', fontWeight: 600, flexShrink: 0 }}>
                                             CID {act.customer_id || 'N/A'}
                                         </span>
                                     </div>
@@ -2447,13 +2466,13 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                         <a
                                             href={`tel:${act.mobile}`}
                                             onClick={(e) => e.stopPropagation()}
-                                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700, color: '#f59e0b', background: 'rgba(251, 191, 36, 0.08)', border: '1px solid rgba(251, 191, 36, 0.15)', padding: '3px 8px', borderRadius: '20px', textDecoration: 'none', transition: 'all 0.2s ease' }}
+                                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700, color: 'var(--warning)', background: 'rgba(var(--warning-rgb), 0.08)', border: '1px solid rgba(var(--warning-rgb), 0.15)', padding: '3px 8px', borderRadius: '20px', textDecoration: 'none', transition: 'all 0.2s ease' }}
                                             onMouseEnter={(e) => {
-                                                e.currentTarget.style.background = 'rgba(251, 191, 36, 0.15)';
-                                                e.currentTarget.style.boxShadow = '0 0 8px rgba(251, 191, 36, 0.2)';
+                                                e.currentTarget.style.background = 'rgba(var(--warning-rgb), 0.15)';
+                                                e.currentTarget.style.boxShadow = '0 0 8px rgba(var(--warning-rgb), 0.2)';
                                             }}
                                             onMouseLeave={(e) => {
-                                                e.currentTarget.style.background = 'rgba(251, 191, 36, 0.08)';
+                                                e.currentTarget.style.background = 'rgba(var(--warning-rgb), 0.08)';
                                                 e.currentTarget.style.boxShadow = 'none';
                                             }}
                                         >
@@ -2472,7 +2491,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                         <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                             {act.service_name}
                                         </span>
-                                        <span style={{ fontSize: '9px', padding: '2px 5px', borderRadius: '4px', background: 'rgba(var(--fg-rgb), 0.04)', border: '1px solid rgba(var(--fg-rgb), 0.08)', color: 'var(--text-muted)', fontFamily: 'monospace', flexShrink: 0 }}>
+                                        <span style={{ fontSize: '9px', padding: '2px 5px', borderRadius: '4px', background: 'rgba(var(--fg-rgb), 0.04)', border: '1px solid rgba(var(--fg-rgb), 0.08)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                                             {act.lead_id}
                                         </span>
                                     </div>
@@ -2483,14 +2502,14 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                 </div>
 
                                 {/* Time Badge row */}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--fg-rgb),0.01)', border: '1px solid rgba(var(--fg-rgb),0.02)', padding: '6px 10px', borderRadius: '8px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#3b82f6', fontSize: '11px', fontWeight: 600 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--fg-rgb),0.01)', border: '1px solid var(--border-subtle)', padding: '6px 10px', borderRadius: '8px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--info)', fontSize: '11px', fontWeight: 600 }}>
                                         <Calendar size={12} />
                                         <span>{formatDate(act.performed_at)}</span>
                                     </div>
                                     {act.originalItem?.assigned_to_name && (
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '11px' }}>
-                                            <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: 'rgba(0, 255, 170, 0.1)', color: '#2eb87a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 700 }}>
+                                            <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: 'rgba(var(--accent-rgb), 0.1)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 700 }}>
                                                 {act.originalItem.assigned_to_name.charAt(0).toUpperCase()}
                                             </div>
                                             <span>{act.originalItem.assigned_to_name}</span>
@@ -2586,7 +2605,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                         <div className="badge-dot-wrap">
                             <Filter size={14} />
                             {(filters.status || filters.entity_type || filters.today_only || filters.is_overdue || filters.search) && (
-                                <span className="count-badge-v4" style={{ background: '#2eb87a', color: '#0d1015' }}>!</span>
+                                <span className="count-badge-v4" style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>!</span>
                             )}
                             Filters
                         </div>
@@ -2599,9 +2618,9 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                     onClick={() => switchFollowupCategory('services')}
                     style={{
                         background: 'transparent',
-                        color: activeFollowupCategory === 'services' ? '#2eb87a' : 'var(--text-muted)',
+                        color: activeFollowupCategory === 'services' ? 'var(--accent)' : 'var(--text-muted)',
                         border: 'none',
-                        borderBottom: activeFollowupCategory === 'services' ? '2px solid #2eb87a' : '2px solid transparent',
+                        borderBottom: activeFollowupCategory === 'services' ? '2px solid var(--accent)' : '2px solid transparent',
                         fontSize: '14px',
                         fontWeight: 600,
                         cursor: 'pointer',
@@ -2616,9 +2635,9 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                     onClick={() => switchFollowupCategory('payments')}
                     style={{
                         background: 'transparent',
-                        color: activeFollowupCategory === 'payments' ? '#2eb87a' : 'var(--text-muted)',
+                        color: activeFollowupCategory === 'payments' ? 'var(--accent)' : 'var(--text-muted)',
                         border: 'none',
-                        borderBottom: activeFollowupCategory === 'payments' ? '2px solid #2eb87a' : '2px solid transparent',
+                        borderBottom: activeFollowupCategory === 'payments' ? '2px solid var(--accent)' : '2px solid transparent',
                         fontSize: '14px',
                         fontWeight: 600,
                         cursor: 'pointer',

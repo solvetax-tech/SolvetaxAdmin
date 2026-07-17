@@ -14,7 +14,9 @@ import FilterDateInput from '../common/FilterDateInput';
 import './CustomerServices.css';
 import CustomerServiceDetailsModal from './CustomerServiceDetailsModal';
 import FollowupManager from './FollowupManager';
+import AddPayment from '../payments/AddPayment';
 import FormCustomSelect from '../common/FormCustomSelect';
+import Button from '../ui/Button';
 import { optionsFromPairs } from '../common/selectOptionUtils';
 import { fetchStaffServiceConfig } from '../../utils/staffServiceConfigApi';
 import {
@@ -67,6 +69,22 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
     const rowsPerPage = 20;
 
     const [showFilterModal, setShowFilterModal] = useState(false);
+
+    // --- Create service drawer (POST /api/v1/customer-service/create) ---
+    const CREATE_FORM_EMPTY = {
+        service_code: '',
+        customer_id: '',
+        rm_id: '',
+        op_id: '',
+        followup_at: '',
+        followup_remarks: '',
+    };
+    const [showCreateService, setShowCreateService] = useState(false);
+    const [createForm, setCreateForm] = useState(CREATE_FORM_EMPTY);
+    const [createSaving, setCreateSaving] = useState(false);
+    const [createError, setCreateError] = useState(null);
+    const [createFieldErrors, setCreateFieldErrors] = useState({});
+    const [showAddPayment, setShowAddPayment] = useState(false);
     const [filterInputs, setFilterInputs] = useState(() => readFiltersFromSearch(location.search));
     const [appliedFilters, setAppliedFilters] = useState(() => readFiltersFromSearch(location.search));
 
@@ -150,6 +168,36 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
             })),
         ]),
         [servicesConfig],
+    );
+
+    // Create-form variants of the dropdowns. The *FilterOptions lists above lead
+    // with "All RMs"/"All Services", which is wrong here: on a create form an
+    // empty value means "unassigned", and service is required.
+    const serviceCreateOptions = useMemo(
+        () => optionsFromPairs([
+            { value: '', label: 'Select service...' },
+            ...servicesConfig.map((svc) => ({
+                value: svc.service_code,
+                label: svc.service_name || svc.service_code,
+            })),
+        ]),
+        [servicesConfig],
+    );
+
+    const rmCreateOptions = useMemo(
+        () => optionsFromPairs([
+            { value: '', label: 'Unassigned' },
+            ...buildRmOpIdSelectOptions(activeRMs),
+        ]),
+        [activeRMs],
+    );
+
+    const opCreateOptions = useMemo(
+        () => optionsFromPairs([
+            { value: '', label: 'Unassigned' },
+            ...buildRmOpIdSelectOptions(activeOps),
+        ]),
+        [activeOps],
     );
 
     const fetchServices = useCallback(async () => {
@@ -243,6 +291,70 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
             setCurrentPage(1);
         }
     }, [location.search]);
+
+    const openCreateService = () => {
+        setCreateForm(CREATE_FORM_EMPTY);
+        setCreateError(null);
+        setCreateFieldErrors({});
+        setShowCreateService(true);
+    };
+
+    const handleCreateChange = (e) => {
+        const { name, value } = e.target;
+        setCreateForm((prev) => ({ ...prev, [name]: value }));
+        // clear the field's error as soon as the user edits it
+        setCreateFieldErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev));
+    };
+
+    const submitCreateService = async (e) => {
+        e.preventDefault();
+        if (createSaving) return;
+
+        if (!createForm.service_code) {
+            setCreateFieldErrors({ service_code: 'Select a service.' });
+            return;
+        }
+
+        // Only send what the user filled: the API treats every field except
+        // service_code as optional, and customer_id is nullable by design.
+        const body = { service_code: createForm.service_code };
+        if (createForm.customer_id !== '') body.customer_id = Number(createForm.customer_id);
+        if (createForm.rm_id !== '') body.rm_id = Number(createForm.rm_id);
+        if (createForm.op_id !== '') body.op_id = Number(createForm.op_id);
+        if (createForm.followup_at !== '') body.followup_at = new Date(createForm.followup_at).toISOString();
+        if (createForm.followup_remarks.trim() !== '') body.followup_remarks = createForm.followup_remarks.trim();
+
+        setCreateSaving(true);
+        setCreateError(null);
+        setCreateFieldErrors({});
+        try {
+            await api.post('/api/v1/customer-service/create', body);
+            setShowCreateService(false);
+            setCurrentPage(1);
+            await fetchServices();
+        } catch (err) {
+            const status = err?.response?.status;
+            const detail = err?.response?.data?.detail;
+            // 400 from _raise_validation carries {error:{fields:{...}}}; 409 is a
+            // duplicate; 422 is pydantic. Surface each where the user can act on it.
+            const fields = detail?.error?.fields;
+            if (status === 400 && fields) {
+                setCreateFieldErrors(fields);
+                setCreateError(detail?.error?.message || 'Validation failed.');
+            } else if (status === 409) {
+                setCreateError(typeof detail === 'string' ? detail : 'This service already exists.');
+            } else if (status === 422) {
+                const first = Array.isArray(detail?.errors) ? detail.errors[0] : null;
+                setCreateError(first?.msg || 'Please check the values entered.');
+            } else {
+                setCreateError(
+                    (typeof detail === 'string' && detail) || err?.message || 'Failed to create service.'
+                );
+            }
+        } finally {
+            setCreateSaving(false);
+        }
+    };
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
@@ -377,21 +489,161 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                     <button
                         type="button"
                         className="btn-cs-payments-entry"
-                        onClick={() =>
-                            navigate('/dashboard?tab=add-payment&service_type=CUSTOMER_SERVICE&return_tab=customer-services')
-                        }
+                        onClick={() => setShowAddPayment(true)}
                         title="Create customer service payment"
                     >
                         <CreditCard size={13} /> Record Payment
                     </button>
-                    <button 
+                    <button
                         className="btn-filter-trigger"
                         onClick={() => setShowFilterModal(true)}
                     >
                         <Filter size={13} /> Filters
                     </button>
+                    <Button
+                        variant="primary"
+                        size="sm"
+                        icon={<Plus size={13} />}
+                        onClick={openCreateService}
+                        title="Create customer service"
+                    >
+                        Create Service
+                    </Button>
                 </div>
             </div>
+
+            {/* Create Service Drawer -> POST /api/v1/customer-service/create */}
+            {showCreateService && (
+                <div className="gst-filters-drawer-overlay" onClick={() => !createSaving && setShowCreateService(false)}>
+                    <div className="gst-filters-drawer" onClick={e => e.stopPropagation()}>
+                        <div className="drawer-header">
+                            <h2 style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text-primary)' }}>Create Customer Service</h2>
+                            <button className="btn-drawer-close" onClick={() => setShowCreateService(false)} disabled={createSaving}>
+                                <XCircle size={20} />
+                            </button>
+                        </div>
+
+                        <form onSubmit={submitCreateService} style={{ display: 'contents' }}>
+                            <div className="drawer-content">
+                                {createError && (
+                                    <div className="error-banner" style={{ marginBottom: '14px' }}>
+                                        <span>{createError}</span>
+                                    </div>
+                                )}
+
+                                <div className="filter-section-v4">
+                                    <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Service</h4>
+                                    <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
+                                        <div className="filter-group-v4">
+                                            <label>Service <span style={{ color: 'var(--danger)' }}>*</span></label>
+                                            <FormCustomSelect
+                                                name="service_code"
+                                                value={createForm.service_code}
+                                                onChange={handleCreateChange}
+                                                options={serviceCreateOptions}
+                                                placeholder="Select service..."
+                                                ariaLabel="Service code"
+                                                error={Boolean(createFieldErrors.service_code)}
+                                            />
+                                            {createFieldErrors.service_code && (
+                                                <span className="field-error-msg">{createFieldErrors.service_code}</span>
+                                            )}
+                                        </div>
+                                        <div className="filter-group-v4">
+                                            <label>Customer ID <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+                                            <input
+                                                type="number"
+                                                name="customer_id"
+                                                value={createForm.customer_id}
+                                                onChange={handleCreateChange}
+                                                placeholder="Leave empty if not attached"
+                                            />
+                                            {createFieldErrors.customer_id && (
+                                                <span className="field-error-msg">{createFieldErrors.customer_id}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+
+                                <div className="filter-section-v4">
+                                    <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Assignment</h4>
+                                    <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
+                                        <div className="filter-group-v4">
+                                            <label>Relationship Manager</label>
+                                            <FormCustomSelect
+                                                name="rm_id"
+                                                value={createForm.rm_id}
+                                                onChange={handleCreateChange}
+                                                options={rmCreateOptions}
+                                                placeholder="Unassigned"
+                                                ariaLabel="Relationship manager"
+                                            />
+                                            {createFieldErrors.rm_id && (
+                                                <span className="field-error-msg">{createFieldErrors.rm_id}</span>
+                                            )}
+                                        </div>
+                                        <div className="filter-group-v4">
+                                            <label>Assigned OP</label>
+                                            <FormCustomSelect
+                                                name="op_id"
+                                                value={createForm.op_id}
+                                                onChange={handleCreateChange}
+                                                options={opCreateOptions}
+                                                placeholder="Unassigned"
+                                                ariaLabel="Assigned OP"
+                                            />
+                                            {createFieldErrors.op_id && (
+                                                <span className="field-error-msg">{createFieldErrors.op_id}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+
+                                <div className="filter-section-v4">
+                                    <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Follow-up (optional)</h4>
+                                    <div className="filter-group-v4" style={{ marginBottom: '12px' }}>
+                                        <label>Follow-up At</label>
+                                        <input
+                                            type="datetime-local"
+                                            name="followup_at"
+                                            value={createForm.followup_at}
+                                            onChange={handleCreateChange}
+                                        />
+                                    </div>
+                                    <div className="filter-group-v4">
+                                        <label>Remarks</label>
+                                        <input
+                                            type="text"
+                                            name="followup_remarks"
+                                            value={createForm.followup_remarks}
+                                            onChange={handleCreateChange}
+                                            placeholder="Optional note"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="drawer-footer">
+                                <button
+                                    type="button"
+                                    className="btn-reset-v4"
+                                    onClick={() => setShowCreateService(false)}
+                                    disabled={createSaving}
+                                >
+                                    Cancel
+                                </button>
+                                <button type="submit" className="btn-apply-v4" disabled={createSaving}>
+                                    {createSaving ? 'Creating…' : 'Create Service'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* Unified Filter Drawer */}
             {showFilterModal && (
@@ -404,7 +656,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                         
                         <div className="drawer-content">
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Core Identifiers</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Core Identifiers</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Customer ID</label>
@@ -427,7 +679,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Service Status</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Service Status</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Record Status</label>
@@ -465,7 +717,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Assignment</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Assignment</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>RM</label>
@@ -495,7 +747,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                             <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Timeline</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Timeline</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Created From</label>
@@ -562,11 +814,13 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                                 className={`filings-ledger-row cs-services-grid-template ${activeFollowupId === item.id ? 'active-drawer-row' : ''} ${selectedServiceId === item.id ? 'cs-row-active' : ''}`}
                             >
                                 <div className="filings-ledger-cell">{item.id}</div>
-                                <div className="filings-ledger-cell">{item.customer_id}</div>
+                                <div className="filings-ledger-cell">{item.customer_id ?? '-'}</div>
                                 <div className="filings-ledger-cell bold-cell">
-                                    {item.full_name === 'string' ? `Customer ${item.customer_id}` : (item.full_name || '-')}
+                                    {item.customer_id == null
+                                        ? 'Unattached'
+                                        : (item.full_name === 'string' ? `Customer ${item.customer_id}` : (item.full_name || '-'))}
                                 </div>
-                                <div className="filings-ledger-cell" title={item.business_name}>{item.business_name || '-'}</div>
+                                <div className="filings-ledger-cell ledger-cell-longtext" title={item.business_name}>{item.business_name || '-'}</div>
                                 <div className="filings-ledger-cell">{item.mobile || '-'}</div>
                                 <div className="filings-ledger-cell"><code className="code-badge">{item.service_code}</code></div>
                                 <div className="filings-ledger-cell">{resolveRmLabel(item)}</div>
@@ -698,6 +952,18 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                     onUpdated={fetchServices}
                     initialEditMode={detailsEditMode}
                     onClose={closeServiceDetails}
+                />
+            )}
+
+            {/* Inline payment — stays on the Customer Services tab instead of
+                switching to the add-payment tab (keeps the flow within 2 tabs). */}
+            {showAddPayment && (
+                <AddPayment
+                    initialServiceType="CUSTOMER_SERVICE"
+                    onBack={() => {
+                        setShowAddPayment(false);
+                        fetchServices();
+                    }}
                 />
             )}
         </div>

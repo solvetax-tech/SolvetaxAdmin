@@ -56,7 +56,7 @@ const CRMHistory = ({ entityType = 'GST_REGISTRATION' }) => {
       <div className="history-header">
         <div>
           <h2 style={{ color: 'var(--text-primary)', fontSize: '24px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Activity color="#2eb87a" /> CRM Global History
+            <Activity color="var(--accent)" /> CRM Global History
           </h2>
           <p style={{ color: 'var(--text-primary)', marginTop: '4px', fontSize: '14px' }}>
             Track all lead activities and system updates across the module

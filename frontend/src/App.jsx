@@ -116,7 +116,12 @@ function App() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [forceReauth]);
+    // Re-run on login (isLoggedIn) as well as mount: a fresh in-session login
+    // sets the token AFTER this effect first ran with no token and bailed, so
+    // without isLoggedIn the wake/focus refresh handler would never attach for
+    // that session until a full page reload. startTokenRefreshScheduler clears
+    // its own prior timer, so re-running it is safe.
+  }, [forceReauth, isLoggedIn]);
 
   /**
    * Called upon successful login/signup to store the token and update state.

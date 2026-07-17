@@ -15,6 +15,8 @@ import LoadingOverlay from '../common/LoadingOverlay';
 import Pagination from '../common/Pagination';
 import '../common/Filters.css';
 import FilterDateInput from '../common/FilterDateInput';
+import Button from '../ui/Button';
+import StatusPill from '../ui/StatusPill';
 import './Customer.css';
 import AddCustomerModal from './AddCustomerModal';
 import { canManageRmOpRecords } from '../../utils/rmOpAssignmentFields';
@@ -470,19 +472,18 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                     {renderFilterChips()}
                 </div>
                 <div className="gst-action-buttons">
-                    <button className="btn-filter-trigger" onClick={() => setShowFilterModal(true)}>
-                        <Filter size={13} /> Filters
-                    </button>
+                    <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={() => setShowFilterModal(true)}>
+                        Filters
+                    </Button>
                     {(appliedFilters.customerId || appliedFilters.fullName || appliedFilters.email || appliedFilters.isActive) && (
-                        <button className="btn-clear-v2" onClick={clearFilters}>
-                            <X size={14} /> Reset Filters
-                        </button>
+                        <Button variant="ghost" size="sm" icon={<X size={14} />} onClick={clearFilters}>
+                            Reset Filters
+                        </Button>
                     )}
                     {canManageRmOpRecords(profileData, isAdmin) && (
-                        <button className="btn-primary-action" onClick={() => setIsAddModalOpen(true)}>
-                            <UserPlus size={13} />
-                            <span>Create Customer</span>
-                        </button>
+                        <Button variant="primary" size="sm" icon={<UserPlus size={13} />} onClick={() => setIsAddModalOpen(true)}>
+                            Create Customer
+                        </Button>
                     )}
                 </div>
             </div>
@@ -497,7 +498,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
 
                     <div className="drawer-content-v4">
                         <div className="filter-section-v4">
-                            <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Core Identifiers</h4>
+                            <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Core Identifiers</h4>
                             <div className="drawer-filter-grid">
                                 <div className="filter-group-v4">
                                     <label>Customer ID</label>
@@ -513,7 +514,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                         <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                         <div className="filter-section-v4">
-                            <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contact Details</h4>
+                            <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contact Details</h4>
                             <div className="drawer-filter-grid">
                                 <div className="filter-group-v4">
                                     <label>Email</label>
@@ -529,7 +530,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                         <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                         <div className="filter-section-v4">
-                            <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Location & Business</h4>
+                            <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Location & Business</h4>
                             <div className="drawer-filter-grid">
                                 <div className="filter-group-v4">
                                     <label>Business Type</label>
@@ -578,7 +579,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                         <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                         <div className="filter-section-v4">
-                            <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Assignment</h4>
+                            <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Assignment</h4>
                             <div className="drawer-filter-grid">
                                 <div className="filter-group-v4">
                                     <label>RM ID</label>
@@ -608,7 +609,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                         <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
 
                         <div className="filter-section-v4">
-                            <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Configuration</h4>
+                            <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Configuration</h4>
                             <div className="drawer-filter-grid">
                                 <div className="filter-group-v4">
                                     <label>Created From</label>
@@ -631,7 +632,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                 </div>
             </div>
 
-            <div className="gst-table-wrapper" style={{ height: 'calc(100vh - 200px)' }}>
+            <div className="gst-table-wrapper">
                 <div className="gst-table-container">
                     <div className="filings-ledger-header customer-grid-template">
                         <div className="filings-ledger-header-cell">Cust ID</div>
@@ -670,37 +671,33 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                     ) : (
                         <div className="filings-ledger-body">
                             {data.map(item => (
-                                <div 
+                                <div
                                     key={item.customer_id}
                                     className={`filings-ledger-row customer-grid-template ${openPopover.customerId === item.customer_id ? 'customer-row-active' : ''}`}
-                                    onClick={(e) => {
-                                        if (e.target.closest('.service-popover-cell') || e.target.closest('button')) return;
-                                        openCustomerView(item, e);
-                                    }}
                                 >
                                     <div className="filings-ledger-cell">
-                                        <span className="customer-id-green-v4">{item.customer_id}</span>
+                                        <span className="ui-num">{item.customer_id}</span>
                                     </div>
                                     <div className="filings-ledger-cell" title={item.full_name}>
                                         <span className="customer-name-blue-v4">{item.full_name}</span>
                                     </div>
                                     <div className="filings-ledger-cell" title={item.email}>{item.email || '-'}</div>
-                                    <div className="filings-ledger-cell">{item.mobile || '-'}</div>
-                                    <div className="filings-ledger-cell">{item.referral_phone_number || '-'}</div>
-                                    <div className="filings-ledger-cell" title={item.business_name}>{item.business_name || '-'}</div>
+                                    <div className="filings-ledger-cell"><span className="ui-num">{item.mobile || '-'}</span></div>
+                                    <div className="filings-ledger-cell"><span className="ui-num">{item.referral_phone_number || '-'}</span></div>
+                                    <div className="filings-ledger-cell ledger-cell-longtext" title={item.business_name}>{item.business_name || '-'}</div>
                                     <div className="filings-ledger-cell" title={item.business_type}>
-                                        <span className="business-type-chip-v4">
+                                        <StatusPill tone="neutral" dot={false}>
                                             {getDisplayName(businessTypes, item.business_type)}
-                                        </span>
+                                        </StatusPill>
                                     </div>
                                     <div className="filings-ledger-cell" title={item.state}>{getDisplayName(states, item.state)}</div>
                                     <div className="filings-ledger-cell" title={item.city}>{item.city || '-'}</div>
                                     <div className="filings-ledger-cell" title={item.rm_name}>{item.rm_name || '-'}</div>
                                     <div className="filings-ledger-cell" title={item.op_name}>{item.op_name || '-'}</div>
                                     <div className="filings-ledger-cell" style={{ justifyContent: 'center' }}>
-                                        <span className={`status-badge ${item.is_active ? 'active' : 'inactive'}`}>
-                                            {item.is_active ? 'Yes' : 'No'}
-                                        </span>
+                                        <StatusPill tone={item.is_active ? 'success' : 'danger'}>
+                                            {item.is_active ? 'Active' : 'Inactive'}
+                                        </StatusPill>
                                     </div>
                                     <div className="filings-ledger-cell customer-actions-sticky">
                                         <div className="table-actions-combined">
@@ -801,10 +798,10 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                         <>
                             <div className="drawer-header">
                                 <div className="drawer-title">
-                                    <ShieldCheck size={24} color="#2eb87a" />
+                                    <ShieldCheck size={24} color="var(--accent)" />
                                     <div>
                                         <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>{sidePanel.data.full_name}</h3>
-                                        <p style={{ margin: 0, color: '#2eb87a', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Customer ID {sidePanel.data.customer_id}</p>
+                                        <p style={{ margin: 0, color: 'var(--accent)', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Customer ID {sidePanel.data.customer_id}</p>
                                     </div>
                                 </div>
                                 <button className="btn-close-drawer" onClick={closeSidePanel}>

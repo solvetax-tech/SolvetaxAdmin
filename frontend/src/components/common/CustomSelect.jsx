@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
+import { getAnchorRect } from '../../utils/zoom';
 import './CustomSelect.css';
 
 /**
@@ -26,7 +27,9 @@ export default function CustomSelect({
     const updateMenuPosition = () => {
         const trigger = ref.current?.querySelector('.custom-select-trigger');
         if (!trigger) return;
-        const rect = trigger.getBoundingClientRect();
+        // Zoom-corrected: the menu is portalled to <body>, so a raw viewport rect
+        // would be re-scaled by the app's html zoom and miss the field.
+        const rect = getAnchorRect(trigger);
         setMenuStyle({
             position: 'fixed',
             top: rect.bottom + 4,

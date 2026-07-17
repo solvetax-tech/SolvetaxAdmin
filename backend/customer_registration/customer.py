@@ -774,6 +774,15 @@ async def create_customer(
     rm_id = payload.rm_id
     op_id = payload.op_id
 
+    # Public (unauthenticated) callers must never control assignment. A public
+    # lead/registration form runs with employee=None; honouring a client-sent
+    # rm_id/op_id would let anyone assign the new customer (and the crm_lead it
+    # creates) to an arbitrary employee, or poison RM/OP visibility scoping.
+    # Only an authenticated employee may supply assignment ids.
+    if not employee:
+        rm_id = None
+        op_id = None
+
     if role == "RM" and rm_id is None:
         rm_id = emp_id
     if role == "OP" and op_id is None:
@@ -1082,7 +1091,7 @@ async def create_customer(
                     "error": {
                         "type": "validation_error",
                         "message": "Validation failed",
-                        "fields": {"non_field_error": f"Data violates constraint: {getattr(e, 'constraint_name', '')}"}
+                        "fields": {"non_field_error": "Data violates a validation rule."}
                     }
                 },
             )
@@ -1274,6 +1283,27 @@ async def upload_customer_business_image(
         raise HTTPException(
             status_code=400,
             detail="File size exceeds 10MB limit.",
+        )
+
+    # Content-sniff via magic bytes — the client-supplied Content-Type is
+    # untrusted; a caller could spoof image/png on an HTML/SVG/script payload
+    # that would later be served/rendered. Require the actual bytes to match an
+    # allowed image signature (JPEG / PNG / WebP / GIF).
+    def _sniff_image(data: bytes) -> bool:
+        if data.startswith(b"\xff\xd8\xff"):  # JPEG
+            return True
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):  # PNG
+            return True
+        if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):  # GIF
+            return True
+        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":  # WebP
+            return True
+        return False
+
+    if not _sniff_image(contents):
+        raise HTTPException(
+            status_code=400,
+            detail="File content does not match an allowed image type (JPEG, PNG, WebP, GIF).",
         )
 
     try:
@@ -1568,9 +1598,14 @@ async def filter_customers(
             if business_name:
                 idx = append_fuzzy_name_filter(conditions, values, idx, "business_name", business_name)
             if email:
-                idx = append_ilike_contains(conditions, values, idx, "lower(email)", email)
-            if state:
-                idx = append_fuzzy_name_filter(conditions, values, idx, "state", state)
+                idx = append_ilike_contains(conditions, values, idx, "lower(c.email)", email)
+            if state and state.strip():
+                # State comes from a fixed dropdown (same config the value is
+                # stored from) — exact match. Fuzzy over-matched: "ANDHRA PRADESH"
+                # also pulled Uttar/Madhya Pradesh via the shared "PRADESH" word.
+                conditions.append(f"upper(trim(c.state)) = upper(trim(${idx}))")
+                values.append(state.strip())
+                idx += 1
             if city:
                 idx = append_fuzzy_name_filter(conditions, values, idx, "city", city)
 
@@ -1620,12 +1655,12 @@ async def filter_customers(
         # DATE FILTER
         # --------------------------------------------------
             if from_date:
-                conditions.append(f"created_at::date >= ${idx}")
+                conditions.append(f"c.created_at::date >= ${idx}")
                 values.append(from_date)
                 idx += 1
 
             if to_date:
-                conditions.append(f"created_at::date <= ${idx}")
+                conditions.append(f"c.created_at::date <= ${idx}")
                 values.append(to_date)
                 idx += 1
 
@@ -1719,7 +1754,7 @@ async def filter_customers(
                 LEFT JOIN {DB_SCHEMA}.employees e_op
                        ON c.op_id = e_op.emp_id
                 {where_clause_c}
-                ORDER BY c.created_at DESC
+                ORDER BY c.created_at DESC, c.customer_id DESC
                 {pagination_sql}
             """
 
@@ -1878,6 +1913,13 @@ async def edit_customer(
     # Normalize service arrays (service_required merged with DB row inside transaction)
     # --------------------------------------------------
 
+    # Active-state transitions must go through the dedicated soft_delete /
+    # activate endpoints, which enforce the cascade + conflict rules (and
+    # RM/OP visibility). Silently dropping is_active here prevents the generic
+    # edit path from being used to bypass those rules or reactivate a customer
+    # without the duplicate-active checks.
+    update_data.pop("is_active", None)
+
     incoming_service_required_patch: Optional[List[str]] = None
     if "service_required" in update_data:
         incoming_service_required_patch = normalize_services(
@@ -1916,16 +1958,34 @@ async def edit_customer(
 
                 # --------------------------------------------------
                 # 1️⃣ Fetch Existing Customer (Row Lock)
+                #     RM/OP visibility scoping (IDOR guard): a WRITE holder
+                #     must only mutate customers they can see. ADMIN is
+                #     unrestricted; RM/OP/managers are limited to their own
+                #     assignments — matching get_customer_by_id read scope.
                 # --------------------------------------------------
+
+                fetch_conditions = ["c.customer_id = $1"]
+                fetch_values: List = [customer_id]
+                fetch_idx = 2
+
+                visibility_sql, visibility_values, fetch_idx = build_customer_visibility(
+                    current_user.get("role"),
+                    emp_id,
+                    fetch_idx,
+                    DB_SCHEMA,
+                )
+                if visibility_sql:
+                    fetch_conditions.append(visibility_sql)
+                    fetch_values.extend(visibility_values)
 
                 old_row = await conn.fetchrow(
                     f"""
-                    SELECT {_customers_cols_sql()}
-                    FROM {DB_SCHEMA}.customers
-                    WHERE customer_id = $1
+                    SELECT {_customers_cols_sql('c')}
+                    FROM {DB_SCHEMA}.customers c
+                    WHERE {" AND ".join(fetch_conditions)}
                     FOR UPDATE
                     """,
-                    customer_id,
+                    *fetch_values,
                 )
 
                 if not old_row:
@@ -2193,16 +2253,30 @@ async def soft_delete_customer(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 1️⃣ Lock Customer
+                # 1️⃣ Lock Customer (RM/OP visibility scoping — IDOR guard)
                 # --------------------------------------------------
+                del_conditions = ["c.customer_id = $1"]
+                del_values: List = [customer_id]
+                del_idx = 2
+
+                visibility_sql, visibility_values, del_idx = build_customer_visibility(
+                    current_user.get("role"),
+                    emp_id,
+                    del_idx,
+                    DB_SCHEMA,
+                )
+                if visibility_sql:
+                    del_conditions.append(visibility_sql)
+                    del_values.extend(visibility_values)
+
                 customer = await conn.fetchrow(
                     f"""
-                    SELECT {_customers_cols_sql()}
-                      FROM {DB_SCHEMA}.customers
-                     WHERE customer_id = $1
+                    SELECT {_customers_cols_sql('c')}
+                      FROM {DB_SCHEMA}.customers c
+                     WHERE {" AND ".join(del_conditions)}
                      FOR UPDATE
                     """,
-                    customer_id,
+                    *del_values,
                 )
 
                 if not customer:
@@ -2475,16 +2549,30 @@ async def activate_customer(
             async with conn.transaction():
 
                 # --------------------------------------------------
-                # 3️⃣ Lock Customer Row (Concurrency Safe)
+                # 3️⃣ Lock Customer Row (Concurrency Safe + IDOR guard)
                 # --------------------------------------------------
+                act_conditions = ["c.customer_id = $1"]
+                act_values: List = [customer_id]
+                act_idx = 2
+
+                visibility_sql, visibility_values, act_idx = build_customer_visibility(
+                    current_user.get("role"),
+                    emp_id,
+                    act_idx,
+                    DB_SCHEMA,
+                )
+                if visibility_sql:
+                    act_conditions.append(visibility_sql)
+                    act_values.extend(visibility_values)
+
                 customer = await conn.fetchrow(
                     f"""
-                    SELECT {_customers_cols_sql()}
-                      FROM {DB_SCHEMA}.customers
-                     WHERE customer_id = $1
+                    SELECT {_customers_cols_sql('c')}
+                      FROM {DB_SCHEMA}.customers c
+                     WHERE {" AND ".join(act_conditions)}
                      FOR UPDATE
                     """,
-                    customer_id,
+                    *act_values,
                 )
 
                 if not customer:

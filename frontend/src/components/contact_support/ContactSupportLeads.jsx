@@ -565,7 +565,7 @@ const ContactSupportLeads = () => {
                                                                 </button>
                                                             </div>
                                                         )}
-                                                        <div className="filings-ledger-cell">{row.email_address || '—'}</div>
+                                                        <div className="filings-ledger-cell ledger-cell-longtext" title={row.email_address || ''}>{row.email_address || '—'}</div>
                                                         <div className="filings-ledger-cell">
                                                             <button
                                                                 type="button"
@@ -628,8 +628,8 @@ const ContactSupportLeads = () => {
             />
 
             {editRow && (
-                <div className="premium-filter-overlay show" onClick={closeEdit}>
-                    <div className="premium-edit-modal-v4" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                <div className="premium-filter-overlay app-side-drawer-mode show" onClick={closeEdit}>
+                    <div className="premium-edit-modal-v4" onClick={(e) => e.stopPropagation()}>
                         <button type="button" className="btn-close-modal-v4" onClick={closeEdit} aria-label="Close">
                             <X size={20} />
                         </button>
@@ -743,7 +743,7 @@ const ContactSupportLeads = () => {
                                 </label>
                             </div>
                             {editError && (
-                                <div className="input-group-v4 full" style={{ color: '#ef4444', fontSize: 13 }}>{editError}</div>
+                                <div className="input-group-v4 full" style={{ color: 'var(--danger)', fontSize: 13 }}>{editError}</div>
                             )}
                             <div className="edit-modal-footer-v4 cs-sticky-drawer-footer" style={{ gridColumn: '1 / -1' }}>
                                 <button type="button" className="btn-cancel-v4" onClick={closeEdit}>Cancel</button>
@@ -757,8 +757,8 @@ const ContactSupportLeads = () => {
             )}
 
             {createOpen && (
-                <div className="premium-filter-overlay show" onClick={closeCreate}>
-                    <div className="premium-edit-modal-v4" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+                <div className="premium-filter-overlay app-side-drawer-mode show" onClick={closeCreate}>
+                    <div className="premium-edit-modal-v4" onClick={(e) => e.stopPropagation()}>
                         <button type="button" className="btn-close-modal-v4" onClick={closeCreate} aria-label="Close">
                             <X size={20} />
                         </button>
@@ -836,7 +836,7 @@ const ContactSupportLeads = () => {
                                 <textarea name="your_message" value={createForm.your_message} onChange={handleCreateChange} rows={3} />
                             </div>
                             {createError && (
-                                <div className="input-group-v4 full" style={{ color: '#ef4444', fontSize: 13 }}>{createError}</div>
+                                <div className="input-group-v4 full" style={{ color: 'var(--danger)', fontSize: 13 }}>{createError}</div>
                             )}
                             <div className="edit-modal-footer-v4 cs-sticky-drawer-footer" style={{ gridColumn: '1 / -1' }}>
                                 <button type="button" className="btn-cancel-v4" onClick={closeCreate}>Cancel</button>

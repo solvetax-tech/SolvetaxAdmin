@@ -18,6 +18,7 @@ import './gst_registration.css';
 import './GSTRegistrationSignup.css';
 import './gst_people.css';
 import { Filter, X, RotateCcw, Plus, AlertCircle, CheckCircle2, Upload, Eye, Pencil, User, FileText } from 'lucide-react';
+import Button from '../ui/Button';
 import UploadDocuments from './UploadDocuments';
 import GSTPeopleViewPanel from './GSTPeopleViewPanel';
 import {
@@ -364,10 +365,9 @@ export const GSTPeople = ({ handleLogout, isAdmin, profileData, onRenderToolbar 
                 </button>
             )}
             {canEdit && (
-                <button type="button" className="btn-primary-action" onClick={() => setShowCreateModal(true)}>
-                    <Plus size={13} />
-                    <span>Create Person</span>
-                </button>
+                <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setShowCreateModal(true)}>
+                    Create Person
+                </Button>
             )}
         </>
     );
@@ -399,7 +399,7 @@ export const GSTPeople = ({ handleLogout, isAdmin, profileData, onRenderToolbar 
                         
                         <div className="drawer-content">
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Core Identifiers</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Core Identifiers</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Person ID</label>
@@ -422,10 +422,10 @@ export const GSTPeople = ({ handleLogout, isAdmin, profileData, onRenderToolbar 
                                 </div>
                             </div>
 
-                            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Stakeholder Profile</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Stakeholder Profile</h4>
                                 <div className="filter-group-v4" style={{ marginBottom: '12px' }}>
                                     <label>Full Name</label>
                                     <input name="full_name" value={filterInputs.full_name} onChange={handleFilterChange} placeholder="Search by name..." />
@@ -460,10 +460,10 @@ export const GSTPeople = ({ handleLogout, isAdmin, profileData, onRenderToolbar 
                                 </div>
                             </div>
 
-                            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Contact Information</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Contact Information</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>Mobile Number</label>
@@ -476,10 +476,10 @@ export const GSTPeople = ({ handleLogout, isAdmin, profileData, onRenderToolbar 
                                 </div>
                             </div>
 
-                            <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+                            <div className="filter-divider-v4" style={{ height: '1px', background: 'var(--border-subtle)', margin: '16px 0' }} />
 
                             <div className="filter-section-v4">
-                                <h4 className="section-title" style={{ fontSize: '10px', color: '#2eb87a', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Audit Timeline</h4>
+                                <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>Audit Timeline</h4>
                                 <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '12px' }}>
                                     <div className="filter-group-v4">
                                         <label>From Date</label>
@@ -903,7 +903,7 @@ const GSTPeopleCreateModal = ({ isOpen, onClose, onSuccess }) => {
                     <>
                         <div className="modal-header-v4">
                             <div className="header-content-v4">
-                                <div className="header-icon-box-v4" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#2eb87a' }}>
+                                <div className="header-icon-box-v4" style={{ background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--accent)' }}>
                                     <User size={20} />
                                 </div>
                                 <div className="modal-title-box">
@@ -1435,7 +1435,7 @@ const GSTPeopleDetailsModal = ({ isOpen, data, onClose, onUpdated, isAdmin, canE
             <div className="gst-filters-drawer gst-reg-details-drawer gst-reg-side-drawer-shell app-drawer-panel" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
                 <div className="drawer-header gst-reg-details-header">
                     <div className="header-content-v4">
-                        <div className="header-icon-box-v4" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}>
+                        <div className="header-icon-box-v4" style={{ background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)' }}>
                             <User size={20} />
                         </div>
                         <div className="modal-title-box">
@@ -1652,7 +1652,7 @@ const GSTPeopleDetailsModal = ({ isOpen, data, onClose, onUpdated, isAdmin, canE
                                 </label>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)' }}>
                                     <span style={{ color: 'var(--text-primary)', textTransform: 'uppercase', fontSize: '10px', fontWeight: '700' }}>Active Status:</span>
-                                    <span style={{ color: currentItem.is_active ? '#2eb87a' : '#f44336', fontWeight: '600' }}>
+                                    <span style={{ color: currentItem.is_active ? 'var(--success)' : 'var(--danger)', fontWeight: '600' }}>
                                         {currentItem.is_active ? 'ACTIVE' : 'INACTIVE'}
                                     </span>
                                 </div>
@@ -1727,7 +1727,7 @@ const GSTPeopleDetailsModal = ({ isOpen, data, onClose, onUpdated, isAdmin, canE
                     <div className="gst-confirm-overlay">
                         <div className="gst-confirm-content">
                             <div className="gst-confirm-icon">
-                                <AlertCircle size={32} color={confirmAction === 'delete' ? '#f44336' : '#2eb87a'} />
+                                <AlertCircle size={32} color={confirmAction === 'delete' ? 'var(--danger)' : 'var(--accent)'} />
                             </div>
                             <h2>{confirmAction === 'delete' ? 'Confirm Delete' : 'Confirm Activation'}</h2>
                             <p>
@@ -1768,8 +1768,6 @@ export const GSTPersonDetails = ({ onLogout }) => {
     const navigate = useNavigate();
     const location = useLocation();
     const data = location.state?.data;
-
-    if (!data) return <div className="gst-people-no-data">No data provided. Please navigate from the dashboard.</div>;
 
     const label = 'GST Person';
     const [item, setItem] = useState(data);
@@ -1820,6 +1818,11 @@ export const GSTPersonDetails = ({ onLogout }) => {
         };
         checkAdmin();
     }, [location.state?.isAdmin]);
+
+    // All hooks are declared above — safe to bail out now without breaking the
+    // Rules of Hooks (previously this early-returned before the useState/useEffect
+    // calls, which crashes React with a hook-count mismatch when data changes).
+    if (!data) return <div className="gst-people-no-data">No data provided. Please navigate from the dashboard.</div>;
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -1894,7 +1897,7 @@ export const GSTPersonDetails = ({ onLogout }) => {
             <div className="gst-modal-card-v4 wide-modal standalone-v4-card" style={{ margin: '40px auto', maxWidth: '1000px', position: 'relative', zIndex: 10 }}>
                 <div className="modal-header-v4">
                     <div className="header-content-v4">
-                        <div className="header-icon-box-v4" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}>
+                        <div className="header-icon-box-v4" style={{ background: 'rgba(var(--info-rgb), 0.1)', color: 'var(--info)' }}>
                             <User size={20} />
                         </div>
                         <div className="modal-title-box">
@@ -1922,7 +1925,7 @@ export const GSTPersonDetails = ({ onLogout }) => {
                             <div className="form-grid-3">
                                 <div className="form-group-v4">
                                     <label className="modal-label-caps">Full Name</label>
-                                    {isEditing ? (
+                                    {editMode ? (
                                         <input 
                                             name="full_name" 
                                             value={formData.full_name || ''} 
@@ -1954,7 +1957,7 @@ export const GSTPersonDetails = ({ onLogout }) => {
                                 </div>
                                 <div className="form-group-v4">
                                     <label className="modal-label-caps">PAN</label>
-                                    {isEditing ? (
+                                    {editMode ? (
                                         <input 
                                             name="pan" 
                                             value={formData.pan || ''} 
@@ -1969,7 +1972,7 @@ export const GSTPersonDetails = ({ onLogout }) => {
                                 </div>
                                 <div className="form-group-v4">
                                     <label className="modal-label-caps">Aadhaar</label>
-                                    {isEditing ? (
+                                    {editMode ? (
                                         <input 
                                             name="aadhaar" 
                                             value={formData.aadhaar || ''} 
@@ -1999,7 +2002,7 @@ export const GSTPersonDetails = ({ onLogout }) => {
                             <div className="form-grid-3">
                                 <div className="form-group-v4">
                                     <label className="modal-label-caps">Mobile</label>
-                                    {isEditing ? (
+                                    {editMode ? (
                                         <input 
                                             name="mobile" 
                                             value={formData.mobile || ''} 
@@ -2012,7 +2015,7 @@ export const GSTPersonDetails = ({ onLogout }) => {
                                 </div>
                                 <div className="form-group-v4" style={{ gridColumn: 'span 2' }}>
                                     <label className="modal-label-caps">Email</label>
-                                    {isEditing ? (
+                                    {editMode ? (
                                         <input 
                                             name="email" 
                                             value={formData.email || ''} 
@@ -2039,7 +2042,7 @@ export const GSTPersonDetails = ({ onLogout }) => {
                                 </label>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)' }}>
                                     <span style={{ color: 'var(--text-primary)', textTransform: 'uppercase', fontSize: '10px', fontWeight: '700' }}>Active Status:</span>
-                                    <span style={{ color: item.is_active ? '#2eb87a' : '#f44336', fontWeight: '600' }}>
+                                    <span style={{ color: item.is_active ? 'var(--success)' : 'var(--danger)', fontWeight: '600' }}>
                                         {item.is_active ? 'ACTIVE' : 'INACTIVE'}
                                     </span>
                                 </div>
@@ -2094,7 +2097,7 @@ export const GSTPersonDetails = ({ onLogout }) => {
                                         </button>
                                     </>
                                 ) : (
-                                    <button onClick={handleActivate} className="gst-btn-primary" style={{ background: '#2eb87a' }} disabled={subLoading}>
+                                    <button onClick={handleActivate} className="gst-btn-primary" style={{ background: 'var(--accent)' }} disabled={subLoading}>
                                         {subLoading && <RotateCcw size={16} className="gst-refresh-spin" />}
                                         {subLoading ? 'Activating...' : 'Activate'}
                                     </button>

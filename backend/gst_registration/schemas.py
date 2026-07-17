@@ -9,6 +9,7 @@ from pydantic import (
 )
 from typing import Optional, Annotated, Literal, List
 from datetime import datetime
+from backend.common.status_constants import RegistrationStatusLiteral
 import html
 
 # =========================================================
@@ -69,12 +70,7 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     # Workflow Status
     # ----------------------------
-    registration_status: Literal[
-        "DRAFT",
-        "APPROVED",
-        "SUSPENDED",
-        "CANCELLED",
-    ] = "DRAFT"
+    registration_status: RegistrationStatusLiteral = "DRAFT"
 
     suspension_reason: Optional[str] = Field(None, max_length=255)
     cancellation_reason: Optional[str] = Field(None, max_length=255)
@@ -104,7 +100,14 @@ class GSTRegistrationIn(BaseModel):
     # ----------------------------
     mobile: Annotated[str, Field(pattern=r"^\d{10}$")]
     email: Annotated[EmailStr, Field(..., max_length=150)]
-    secondary_email: Optional[Annotated[EmailStr, Field(None, max_length=150)]]
+    # `= None` is load-bearing. In pydantic v2 `Optional[X]` WITHOUT an assigned
+    # default is REQUIRED (it may be null, but the key must be present), and a
+    # default passed inside Annotated(Field(None, ...)) does NOT supply one. So
+    # this field was mandatory despite reading as optional, and the UI -- which
+    # never marked it required -- made every create fail with
+    # "missing: secondary_email". A *secondary* email being compulsory was
+    # plainly not the intent.
+    secondary_email: Optional[Annotated[EmailStr, Field(max_length=150)]] = None
 
     # ----------------------------
     # Filing Preference (NEW)
@@ -311,9 +314,7 @@ class GSTRegistrationEditIn(BaseModel):
     referral_phone_number: Optional[str] = Field(None, pattern=r"^\d{10}$")
     turnover_details: Optional[str] = Field(None, max_length=50)
 
-    registration_status: Optional[
-        Literal["DRAFT", "APPROVED", "SUSPENDED", "CANCELLED"]
-    ] = None
+    registration_status: Optional[RegistrationStatusLiteral] = None
 
     suspension_reason: Optional[str] = Field(None, max_length=255)
     cancellation_reason: Optional[str] = Field(None, max_length=255)
