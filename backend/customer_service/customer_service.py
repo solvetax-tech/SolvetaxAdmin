@@ -11,6 +11,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.common.status_constants import SERVICE_STATUSES
+from backend.customer_registration.customer_cache import invalidate_customer_cache
 from backend.customer_service.bulk_lead_assignment import (
     _invalidate_customer_services_index_caches,
     svc_bulk_assign_candidates,
@@ -346,21 +347,55 @@ async def bulk_assign_execute(
     status_code=201,
     summary="Create one customer service directly",
     description=(
-        "Creates a single customer_services row. `customer_id` is OPTIONAL -- omit it "
-        "to record a service that is not yet attached to a customer. All other "
-        "creation paths go through customer registration; this is the direct route."
+        "Creates a single customer_services row. The customer is attached in one of "
+        "three ways: pass `customer_id` for an existing customer; pass `full_name` + "
+        "`mobile` (+ optional `business_name`) to create that customer and attach it "
+        "in the same transaction; or pass neither for a service that is not yet "
+        "attached to anyone. The first two are mutually exclusive. All other creation "
+        "paths go through customer registration; this is the direct route."
     ),
     responses={
-        400: {"description": "Unknown service_code, or customer_id/rm_id/op_id does not exist"},
+        400: {
+            "description": (
+                "Unknown service_code; customer_id/rm_id/op_id does not exist; "
+                "customer_id combined with new-customer fields; incomplete new-customer "
+                "details; or a mobile that already belongs to a customer"
+            )
+        },
         409: {"description": "This service_code already exists for that customer (or already exists unattached)"},
     },
 )
 async def create_customer_service(
     payload: CustomerServiceCreateIn,
+    # EMPLOYEE:WRITE is also exactly what verify_create_customer_access demands of a
+    # bearer caller on POST /api/v1/customers, so the inline-customer branch below
+    # opens no path around the customer-create gate.
     current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     role, emp_id = _ctx(current_user)
     _require_emp(role, emp_id)
+
+    # Contact details are a customers concern; customer_services has no such
+    # columns. Supplying both an existing customer and a new one is ambiguous.
+    wants_new_customer = any((payload.full_name, payload.mobile, payload.business_name))
+    if payload.customer_id is not None and wants_new_customer:
+        _raise_validation({
+            "customer_id": "Pick an existing customer or enter a new one's details, not both.",
+        })
+
+    if wants_new_customer:
+        # full_name and mobile are NOT NULL on customers, so business_name alone
+        # cannot produce a row.
+        errors = {}
+        name = (payload.full_name or "").strip()
+        if len(name) < 2:
+            errors["full_name"] = "Enter the customer's name (at least 2 characters)."
+        if not payload.mobile:
+            errors["mobile"] = "Enter the customer's 10-digit mobile number."
+        elif not (payload.mobile.isdigit() and len(payload.mobile) == 10):
+            errors["mobile"] = "Mobile must be exactly 10 digits."
+        if errors:
+            _raise_validation(errors)
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
@@ -398,27 +433,94 @@ async def create_customer_service(
             if not ok:
                 _raise_validation({field: "Employee does not exist or is inactive."})
 
+        customer_id = payload.customer_id
+        created_customer_id = None
         try:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {DB_SCHEMA}.customer_services (
-                    customer_id, service_code, service_status,
-                    rm_id, op_id, followup_at, followup_remarks, is_active
+            # One transaction: a service insert that fails must not leave the
+            # customer it just created stranded with no service.
+            async with conn.transaction():
+                if wants_new_customer:
+                    # uq_customers_mobile is UNIQUE on trim(mobile). Check first so the
+                    # common case names the field and the owner instead of surfacing a
+                    # raw constraint; the handler below still covers the race.
+                    owner = await conn.fetchval(
+                        f"SELECT customer_id FROM {DB_SCHEMA}.customers WHERE trim(mobile) = trim($1)",
+                        payload.mobile,
+                    )
+                    if owner:
+                        _raise_validation({
+                            "mobile": f"This mobile already belongs to customer #{owner}. Search for them instead.",
+                        })
+
+                    # Assignment defaults mirror POST /api/v1/customers: an RM or OP
+                    # creating a customer owns it unless told otherwise. Deliberately
+                    # applied to the customer only -- the service row keeps this
+                    # endpoint's existing "unassigned unless asked" behaviour.
+                    cust_rm_id, cust_op_id = payload.rm_id, payload.op_id
+                    if role == "RM" and cust_rm_id is None:
+                        cust_rm_id = emp_id
+                    if role == "OP" and cust_op_id is None:
+                        cust_op_id = emp_id
+
+                    customer_row = await conn.fetchrow(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.customers (
+                            full_name, mobile, business_name, rm_id, op_id
+                        )
+                        VALUES ($1, $2, $3, $4, $5)
+                        RETURNING customer_id, full_name, mobile, business_name,
+                                  rm_id, op_id, is_active, created_at
+                        """,
+                        payload.full_name.strip(),
+                        payload.mobile,
+                        (payload.business_name or "").strip() or None,
+                        cust_rm_id,
+                        cust_op_id,
+                    )
+                    customer_id = customer_row["customer_id"]
+                    created_customer_id = customer_id
+
+                    # Same audit trail POST /api/v1/customers writes, so a customer
+                    # born here is not invisible to the versions history.
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {DB_SCHEMA}.versions (
+                            emp_id, entity_type, entity_id, customer_id, action, json, updated_json
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        """,
+                        emp_id,
+                        "CUSTOMER",
+                        customer_id,
+                        customer_id,
+                        "CREATE",
+                        json.dumps(dict(customer_row), default=str),
+                        None,
+                    )
+
+                row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO {DB_SCHEMA}.customer_services (
+                        customer_id, service_code, service_status,
+                        rm_id, op_id, followup_at, followup_remarks, is_active
+                    )
+                    VALUES ($1, $2, COALESCE($3, 'PENDING'), $4, $5, $6, $7, COALESCE($8, TRUE))
+                    RETURNING id, customer_id, service_code, service_status,
+                              rm_id, op_id, followup_at, is_active, created_at
+                    """,
+                    customer_id,
+                    svc["service_code"],
+                    payload.service_status,
+                    payload.rm_id,
+                    payload.op_id,
+                    payload.followup_at,
+                    payload.followup_remarks,
+                    payload.is_active,
                 )
-                VALUES ($1, $2, COALESCE($3, 'PENDING'), $4, $5, $6, $7, COALESCE($8, TRUE))
-                RETURNING id, customer_id, service_code, service_status,
-                          rm_id, op_id, followup_at, is_active, created_at
-                """,
-                payload.customer_id,
-                svc["service_code"],
-                payload.service_status,
-                payload.rm_id,
-                payload.op_id,
-                payload.followup_at,
-                payload.followup_remarks,
-                payload.is_active,
-            )
-        except asyncpg.UniqueViolationError:
+        except asyncpg.UniqueViolationError as e:
+            # Both inserts run in here now, so the constraint decides the message.
+            if getattr(e, "constraint_name", "") == "uq_customers_mobile":
+                _raise_validation({"mobile": "This mobile already belongs to another customer."})
             # uq_customer_services_customer_service_code (customer_id, service_code).
             # It is NULLS NOT DISTINCT, so this also fires for a second unattached
             # row with the same service_code -- which is what stops a retried
@@ -427,19 +529,27 @@ async def create_customer_service(
                 status_code=409,
                 detail=(
                     f"Service '{svc['service_code']}' already exists for "
-                    + (f"customer {payload.customer_id}." if payload.customer_id is not None
+                    + (f"customer {customer_id}." if customer_id is not None
                        else "an unattached record.")
                 ),
             )
-        except asyncpg.ForeignKeyViolationError:
+        except asyncpg.ForeignKeyViolationError as e:
+            constraint = getattr(e, "constraint_name", "") or ""
+            if constraint == "customers_rm_id_fkey":
+                _raise_validation({"rm_id": "Employee does not exist."})
+            if constraint == "customers_op_id_fkey":
+                _raise_validation({"op_id": "Employee does not exist."})
             _raise_validation({"customer_id": "Referenced row no longer exists."})
 
     # Lists/counts are Redis-cached; without this the new row is invisible until TTL.
     await _invalidate_customer_services_index_caches()
+    if created_customer_id is not None:
+        # The new customer has to show up in the customers list/detail too.
+        await invalidate_customer_cache(created_customer_id)
 
     logger.info(
-        "customer_service_created id=%s customer_id=%s service_code=%s by emp_id=%s",
-        row["id"], row["customer_id"], row["service_code"], emp_id,
+        "customer_service_created id=%s customer_id=%s service_code=%s new_customer=%s by emp_id=%s",
+        row["id"], row["customer_id"], row["service_code"], created_customer_id is not None, emp_id,
     )
     return CustomerServiceCreateOut(**dict(row))
 

@@ -29,15 +29,18 @@ from backend.utils import (
 import json
 from zoneinfo import ZoneInfo
 from backend.customer_registration.business_description_ai import request_business_description
+from backend.customer_registration.customer_cache import (
+    customer_filter_tag as _customer_filter_tag,
+    customer_get_by_id_tag as _customer_get_by_id_tag,
+    invalidate_customer_cache as _invalidate_customer_cache,
+)
 from backend.customer_service.bulk_lead_assignment import (
     _invalidate_customer_services_index_caches as _invalidate_customer_services_cache,
 )
 from backend.crm.crm_leads_common import _invalidate_crm_cache
-from backend.payments.payment_cache_invalidation import invalidate_followup_caches
 from backend.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
-    invalidate_tag as redis_invalidate_tag,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -89,22 +92,6 @@ def _customer_get_by_id_cache_key(customer_id: int, role: Optional[str], emp_id:
         role=(role or "").strip().upper() or None,
         emp_id=emp_id,
     )
-
-
-def _customer_get_by_id_tag(customer_id: int) -> str:
-    return f"customer:get_by_id:index:{customer_id}"
-
-
-def _customer_filter_tag() -> str:
-    return "customer:filter:index"
-
-
-async def _invalidate_customer_cache(customer_id: int) -> None:
-    # Customer detail + list caches. If GST (or other) GET endpoints add Redis later,
-    # invalidate their tags here too when customer fields affect those responses.
-    await redis_invalidate_tag(_customer_get_by_id_tag(customer_id))
-    await redis_invalidate_tag(_customer_filter_tag())
-    await invalidate_followup_caches()
 
 
 def _customer_pincode_lookup_tag() -> str:

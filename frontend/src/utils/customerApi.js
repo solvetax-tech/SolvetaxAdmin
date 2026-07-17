@@ -197,5 +197,64 @@ export async function createCustomer(payload, staffToken = null) {
     });
 }
 
+/** Stored mobiles are exactly 10 digits (see normalizeMobile), so a pasted
+ *  +91/0-prefixed number has to be reduced before it can match. */
+function toStoredMobile(digits) {
+    if (digits.length === 10) return digits;
+    if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+    if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+    return '';
+}
+
+/**
+ * GET /api/v1/customers/customer_get/filter — lookup for customer pickers.
+ *
+ * The endpoint ANDs its conditions, so matching "name OR business" needs two
+ * calls merged here. mobile is an exact match server-side
+ * (`trim(mobile) = trim($1)`), hence the full-10-digits requirement; a shorter
+ * digit string is read as a customer_id instead, which keeps working for staff
+ * who know the id. Results are scoped by the caller's own visibility rules.
+ */
+export async function searchCustomers(query, { signal, limit = 8 } = {}) {
+    const q = String(query ?? '').trim();
+    if (q.length < 2) return [];
+
+    const base = { is_active: true, limit };
+    const digits = q.replace(/\D/g, '');
+    const looksNumeric = /^[\d\s+()-]+$/.test(q);
+    const requests = [];
+
+    if (looksNumeric) {
+        const mobile = toStoredMobile(digits);
+        if (mobile) {
+            requests.push({ ...base, mobile });
+        } else if (digits.length > 0 && digits.length < 10) {
+            requests.push({ ...base, customer_id: Number(digits) });
+        } else {
+            return [];
+        }
+    } else {
+        requests.push({ ...base, full_name: q }, { ...base, business_name: q });
+    }
+
+    const pages = await Promise.all(
+        requests.map((params) =>
+            api.get('/api/v1/customers/customer_get/filter', { params, signal }).then((res) => {
+                const body = res.data;
+                return Array.isArray(body) ? body : (body?.data || body?.items || []);
+            }),
+        ),
+    );
+
+    // Name matches lead business-name matches; first occurrence wins.
+    const byId = new Map();
+    pages.flat().forEach((row) => {
+        if (row?.customer_id != null && !byId.has(row.customer_id)) {
+            byId.set(row.customer_id, row);
+        }
+    });
+    return Array.from(byId.values()).slice(0, limit);
+}
+
 export const SERVICE_REQUIRED_CRM_HINT =
     'GST Registration and ITR Filing selections create CRM leads automatically (Smart Board). Other services are added as pending customer services.';

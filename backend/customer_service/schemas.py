@@ -43,9 +43,20 @@ class CustomerServiceBulkAssignExecuteIn(CustomerServiceBaseSchema):
 class CustomerServiceCreateIn(CustomerServiceBaseSchema):
     """Create one customer_services row directly.
 
-    customer_id is OPTIONAL: the column is nullable so a service can exist
-    before it is attached to a customer (see
-    db/migrations/2026-07-17_customer_services_nullable_customer_id.sql).
+    The customer is attached one of three ways:
+
+      1. `customer_id` -- attach to an existing customer.
+      2. `full_name` + `mobile` (+ optional `business_name`) -- create that
+         customer and attach the service to it, in one transaction. Contact
+         details are NOT service columns; they only exist on a customers row,
+         so this is the only way a service can carry a name/phone.
+      3. neither -- an unattached service (customer_id is nullable, see
+         db/migrations/2026-07-17_customer_services_nullable_customer_id.sql).
+         It has no name or phone anywhere until it is attached.
+
+    1 and 2 are mutually exclusive. Lengths mirror CustomerIn / the customers
+    columns; the cross-field rules live in the endpoint so each failure comes
+    back tagged with the field the form should show it on.
     """
 
     service_code: str = Field(..., min_length=1, max_length=50)
@@ -56,6 +67,27 @@ class CustomerServiceCreateIn(CustomerServiceBaseSchema):
     followup_at: Optional[datetime] = None
     followup_remarks: Optional[str] = None
     is_active: Optional[bool] = None
+
+    # --- new-customer fields (omit when customer_id is set) ---
+    full_name: Optional[str] = Field(
+        None, max_length=150, description="New customer's name. Requires mobile; rejects customer_id."
+    )
+    mobile: Optional[str] = Field(
+        None, max_length=15, description="New customer's 10-digit mobile. Requires full_name; rejects customer_id."
+    )
+    business_name: Optional[str] = Field(
+        None, max_length=200, description="New customer's business name. Optional."
+    )
+
+    @field_validator("mobile", mode="before")
+    @classmethod
+    def strip_mobile_separators(cls, v):
+        # "98765 43210" and "98765-43210" are the same number. Reduce to digits
+        # so the endpoint's 10-digit rule judges the number, not the formatting.
+        if isinstance(v, str):
+            digits = "".join(ch for ch in v if ch.isdigit())
+            return digits or None
+        return v
 
     @field_validator("service_code", mode="before")
     @classmethod

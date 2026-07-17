@@ -16,7 +16,9 @@ import CustomerServiceDetailsModal from './CustomerServiceDetailsModal';
 import FollowupManager from './FollowupManager';
 import AddPayment from '../payments/AddPayment';
 import FormCustomSelect from '../common/FormCustomSelect';
+import CustomerPicker from '../common/CustomerPicker';
 import Button from '../ui/Button';
+import { normalizeMobile } from '../../utils/customerApi';
 import { optionsFromPairs } from '../common/selectOptionUtils';
 import { fetchStaffServiceConfig } from '../../utils/staffServiceConfigApi';
 import {
@@ -29,6 +31,19 @@ import {
     fetchActiveOpEmployees,
     buildRmOpIdSelectOptions,
 } from '../../utils/activeEmployees';
+
+// Create-form vocabularies. The filter drawer's equivalents lead with an
+// "All ..." entry, which is meaningless here: a new row always lands on one
+// concrete value. Mirrors ServiceStatusLiteral in backend/common/status_constants.py.
+const SERVICE_STATUS_CREATE_OPTIONS = optionsFromPairs([
+    { value: 'PENDING', label: 'Pending' },
+    { value: 'PROVIDED', label: 'Provided' },
+]);
+
+const RECORD_STATUS_CREATE_OPTIONS = optionsFromPairs([
+    { value: 'true', label: 'Active' },
+    { value: 'false', label: 'Inactive' },
+]);
 
 const EMPTY_FILTERS = {
     customer_id: '',
@@ -74,6 +89,8 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
     const CREATE_FORM_EMPTY = {
         service_code: '',
         customer_id: '',
+        service_status: 'PENDING',
+        is_active: 'true',
         rm_id: '',
         op_id: '',
         followup_at: '',
@@ -81,6 +98,11 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
     };
     const [showCreateService, setShowCreateService] = useState(false);
     const [createForm, setCreateForm] = useState(CREATE_FORM_EMPTY);
+    // Contact details are NOT service columns, so the drawer names a customer one
+    // of two ways, never both: createCustomer is an existing row (-> customer_id),
+    // createNewCustomer is a draft the create request itself inserts.
+    const [createCustomer, setCreateCustomer] = useState(null);
+    const [createNewCustomer, setCreateNewCustomer] = useState(null);
     const [createSaving, setCreateSaving] = useState(false);
     const [createError, setCreateError] = useState(null);
     const [createFieldErrors, setCreateFieldErrors] = useState({});
@@ -294,9 +316,35 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
 
     const openCreateService = () => {
         setCreateForm(CREATE_FORM_EMPTY);
+        setCreateCustomer(null);
+        setCreateNewCustomer(null);
         setCreateError(null);
         setCreateFieldErrors({});
         setShowCreateService(true);
+    };
+
+    const handleCreateCustomerSelect = (row) => {
+        setCreateCustomer(row);
+        setCreateNewCustomer(null);
+        setCreateForm((prev) => ({
+            ...prev,
+            customer_id: row?.customer_id != null ? String(row.customer_id) : '',
+        }));
+        setCreateFieldErrors((prev) => (prev.customer_id ? { ...prev, customer_id: undefined } : prev));
+    };
+
+    const handleCreateNewCustomerChange = (draft) => {
+        setCreateNewCustomer(draft);
+        if (draft) {
+            setCreateCustomer(null);
+            setCreateForm((prev) => ({ ...prev, customer_id: '' }));
+        }
+        setCreateFieldErrors((prev) => ({
+            ...prev,
+            full_name: undefined,
+            mobile: undefined,
+            business_name: undefined,
+        }));
     };
 
     const handleCreateChange = (e) => {
@@ -310,15 +358,44 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
         e.preventDefault();
         if (createSaving) return;
 
-        if (!createForm.service_code) {
-            setCreateFieldErrors({ service_code: 'Select a service.' });
+        const errors = {};
+        if (!createForm.service_code) errors.service_code = 'Select a service.';
+
+        // Mirrors the API's rule: full_name + mobile are NOT NULL on customers, so
+        // a draft without them cannot become a row. Checked here too so the user
+        // is not charged a round-trip to learn it.
+        if (createNewCustomer) {
+            if (createNewCustomer.full_name.trim().length < 2) {
+                errors.full_name = "Enter the customer's name (at least 2 characters).";
+            }
+            if (!normalizeMobile(createNewCustomer.mobile)) {
+                errors.mobile = 'Enter a 10-digit mobile number.';
+            }
+        }
+        if (Object.keys(errors).length > 0) {
+            setCreateFieldErrors(errors);
             return;
         }
 
         // Only send what the user filled: the API treats every field except
         // service_code as optional, and customer_id is nullable by design.
-        const body = { service_code: createForm.service_code };
-        if (createForm.customer_id !== '') body.customer_id = Number(createForm.customer_id);
+        // service_status/is_active are always sent -- both render as an explicit
+        // control with a visible default, so the shown value is the sent value.
+        const body = {
+            service_code: createForm.service_code,
+            service_status: createForm.service_status,
+            is_active: createForm.is_active === 'true',
+        };
+        if (createNewCustomer) {
+            // The API creates this customer and attaches the service in one
+            // transaction. customer_id must stay absent -- sending both is a 400.
+            body.full_name = createNewCustomer.full_name.trim();
+            body.mobile = normalizeMobile(createNewCustomer.mobile);
+            const business = createNewCustomer.business_name.trim();
+            if (business !== '') body.business_name = business;
+        } else if (createForm.customer_id !== '') {
+            body.customer_id = Number(createForm.customer_id);
+        }
         if (createForm.rm_id !== '') body.rm_id = Number(createForm.rm_id);
         if (createForm.op_id !== '') body.op_id = Number(createForm.op_id);
         if (createForm.followup_at !== '') body.followup_at = new Date(createForm.followup_at).toISOString();
@@ -550,18 +627,64 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                                             )}
                                         </div>
                                         <div className="filter-group-v4">
-                                            <label>Customer ID <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
-                                            <input
-                                                type="number"
-                                                name="customer_id"
-                                                value={createForm.customer_id}
+                                            <label>Fulfillment Status</label>
+                                            <FormCustomSelect
+                                                name="service_status"
+                                                value={createForm.service_status}
                                                 onChange={handleCreateChange}
-                                                placeholder="Leave empty if not attached"
+                                                options={SERVICE_STATUS_CREATE_OPTIONS}
+                                                placeholder="Pending"
+                                                ariaLabel="Fulfillment status"
+                                                error={Boolean(createFieldErrors.service_status)}
                                             />
-                                            {createFieldErrors.customer_id && (
-                                                <span className="field-error-msg">{createFieldErrors.customer_id}</span>
+                                            {createFieldErrors.service_status && (
+                                                <span className="field-error-msg">{createFieldErrors.service_status}</span>
                                             )}
                                         </div>
+                                    </div>
+                                    <div className="filter-group-v4" style={{ marginTop: '12px' }}>
+                                        <label>Record Status</label>
+                                        <FormCustomSelect
+                                            name="is_active"
+                                            value={createForm.is_active}
+                                            onChange={handleCreateChange}
+                                            options={RECORD_STATUS_CREATE_OPTIONS}
+                                            placeholder="Active"
+                                            ariaLabel="Record status"
+                                            error={Boolean(createFieldErrors.is_active)}
+                                        />
+                                        {createFieldErrors.is_active && (
+                                            <span className="field-error-msg">{createFieldErrors.is_active}</span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="filter-divider-v4" style={{ height: '1px', background: 'rgba(var(--fg-rgb),0.05)', margin: '16px 0' }} />
+
+                                <div className="filter-section-v4">
+                                    <h4 className="section-title" style={{ fontSize: '10px', color: 'var(--accent)', marginBottom: '12px', textTransform: 'uppercase', fontWeight: '800' }}>
+                                        Customer <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>(optional)</span>
+                                    </h4>
+                                    <div className="filter-group-v4">
+                                        <CustomerPicker
+                                            customer={createCustomer}
+                                            onSelect={handleCreateCustomerSelect}
+                                            newCustomer={createNewCustomer}
+                                            onNewCustomerChange={handleCreateNewCustomerChange}
+                                            fieldErrors={createFieldErrors}
+                                            disabled={createSaving}
+                                            error={Boolean(createFieldErrors.customer_id)}
+                                            inputId="create-service-customer"
+                                        />
+                                        {createFieldErrors.customer_id && (
+                                            <span className="field-error-msg">{createFieldErrors.customer_id}</span>
+                                        )}
+                                        {!createCustomer && !createNewCustomer && (
+                                            <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)' }}>
+                                                Phone and business name belong to the customer. Search for an existing
+                                                one, add a new one, or leave empty for a service attached to nobody.
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
 
