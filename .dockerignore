@@ -1,0 +1,48 @@
+# What NOT to copy into the Docker build. Keeps the image small AND keeps
+# secrets out of it. Docker matches these against the build context root.
+
+.git
+.gitignore
+.github
+
+# --- SECRETS: must never enter the image ---------------------------------------
+# LOAD-BEARING. Do not weaken these lines.
+#
+# `.env` alone matches ONLY the root .env — it does NOT match frontend/.env.
+# So the `**/.env` patterns are what actually keep frontend/.env out of the
+# build. frontend/.env contains VITE_API_URL=http://localhost:8000 for local
+# dev; if it leaked into the build, Vite would bake "localhost" into the
+# production bundle and the deployed app would call the visitor's own machine.
+# The `**` patterns are the guardrail that makes keeping that local value safe.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# --- Python ---
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+venv/
+.venv/
+
+# --- Frontend: node_modules is reinstalled in-image; dist is rebuilt fresh ---
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# --- Noise that doesn't belong in a runtime image ---
+*.log
+logs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+README.md
+deploy/
+db/
+.claude/
+.gstack/

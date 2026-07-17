@@ -1,0 +1,87 @@
+# Push to `develop` → build the image → push to Azure ACR → deploy to the Web App.
+#
+# Secrets this needs (repo → Settings → Secrets and variables → Actions):
+#   AZURE_CREDENTIALS    — the service principal JSON (already added)
+#   VITE_PUBLIC_API_KEY  — baked into the frontend bundle at build time
+#
+# Backend runtime secrets (DB_PASSWORD, JWT_SECRET, …) are NOT here — they live
+# in Azure App Service settings and are injected when the container starts.
+
+name: Deploy develop (Azure App Service)
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:        # adds a manual "Run workflow" button in the UI
+
+env:
+  ACR_NAME: solvetaxacrdev                     # registry (login server: solvetaxacrdev.azurecr.io)
+  IMAGE: solvetax-admin                        # image repository name
+  APP_NAME: solvetax-admin-dev                 # the Web App
+  RG: solvetax-dev-rg                          # resource group
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Get the code onto the runner.
+      - uses: actions/checkout@v4
+
+      # 2. Log in to Azure as the service principal (robot user).
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # 3. Get a docker credential for the registry (uses the Azure login above).
+      - name: ACR login
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      # 4. Build. Two tags: the git SHA (exact, enables rollback) and "develop"
+      #    (moving latest). VITE_API_URL is intentionally NOT passed → stays empty
+      #    → same-origin relative /api in production.
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg VITE_PUBLIC_API_KEY="${{ secrets.VITE_PUBLIC_API_KEY }}" \
+            -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE }}:develop \
+            .
+
+      - name: Push image
+        run: docker push --all-tags ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE }}
+
+      # 5. Point the Web App at the new SHA tag. We deploy the SHA (never "develop")
+      #    so the running version is unambiguous and rollback is a one-liner.
+      - name: Set Web App image
+        run: |
+          az webapp config container set \
+            --resource-group ${{ env.RG }} \
+            --name ${{ env.APP_NAME }} \
+            --container-image-name ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE }}:${{ github.sha }} \
+            --container-registry-url https://${{ env.ACR_NAME }}.azurecr.io
+
+      # 6. Re-assert managed-identity pull (idempotent). Guards against the set
+      #    above resetting it, which would make the Web App unable to pull.
+      - name: Ensure managed-identity pull
+        run: |
+          az webapp config set \
+            --resource-group ${{ env.RG }} \
+            --name ${{ env.APP_NAME }} \
+            --generic-configurations '{"acrUseManagedIdentityCreds": true}'
+
+      # 7. Kick a restart so the new image is pulled immediately.
+      - name: Restart Web App
+        run: az webapp restart --resource-group ${{ env.RG }} --name ${{ env.APP_NAME }}
+
+      # 8. Prove it actually came up. Cold start + pool warmup takes a bit, so we
+      #    retry /health for ~2 minutes before calling it a failure.
+      - name: Smoke test /health
+        run: |
+          URL="https://${{ env.APP_NAME }}.azurewebsites.net/health"
+          for i in 1 2 3 4 5 6 7 8; do
+            if curl -fsS "$URL"; then echo ""; echo "healthy on attempt $i"; exit 0; fi
+            echo "attempt $i: not ready yet, waiting 20s..."; sleep 20
+          done
+          echo "health check never passed — check: az webapp log tail -g ${{ env.RG }} -n ${{ env.APP_NAME }}"
+          exit 1
