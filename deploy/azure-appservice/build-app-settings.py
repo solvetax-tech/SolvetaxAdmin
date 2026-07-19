@@ -57,7 +57,10 @@ def main():
     settings = parse_env(ENV_FILE)
     settings.update(FORCED)  # forced values win over .env
 
-    payload = [{"name": k, "value": v} for k, v in settings.items()]
+    # slotSetting:false is required by the portal's "Advanced edit" box and is
+    # also accepted by `az ... appsettings set --settings @file`, so this one
+    # file works for both upload paths.
+    payload = [{"name": k, "value": v, "slotSetting": False} for k, v in settings.items()]
     with open(OUT_FILE, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
 

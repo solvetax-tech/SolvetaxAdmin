@@ -241,6 +241,8 @@ from backend.contact_support.contact_support import router as contact_support_ro
 from backend.campaign.campaign import router as campaign_router
 from backend.customer_service.customer_service import router as customer_service_staff_router
 from backend.customer_service.service_config import router as customer_service_config_router
+from backend.issue_reports.issue_reports import router as issue_reports_router
+from backend.employee_tasks.employee_tasks import router as employee_tasks_router
 from backend.Dashboard.service_done_payment_pending import router as dashboard_router
 from backend.Dashboard.gst_filing_monthly_matrix import router as gst_filing_matrix_router
 
@@ -315,6 +317,10 @@ if customer_service_staff_router:
     app.include_router(customer_service_staff_router)
 if customer_service_config_router:
     app.include_router(customer_service_config_router)
+if issue_reports_router:
+    app.include_router(issue_reports_router)
+if employee_tasks_router:
+    app.include_router(employee_tasks_router)
 if dashboard_router:
     app.include_router(dashboard_router)
 if gst_filing_matrix_router:

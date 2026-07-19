@@ -31,6 +31,7 @@ const MAIN_DASHBOARD_SUB_TABS = new Set([
   'progress',
   'service-done-payment',
   'gst-filing-matrix',
+  'today-tasks',
 ]);
 
 /** Normalize bare /dashboard or invalid dashboard sub before mounting workspace. */

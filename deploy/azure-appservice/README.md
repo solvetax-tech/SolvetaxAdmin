@@ -281,12 +281,18 @@ deployed app would try to call the visitor's own machine. The `**/.env` lines in
 - [x] `.dockerignore` — excludes **all** `.env` incl. `frontend/.env` (see gotcha #2 below)
 - [x] `.github/workflows/deploy-develop.yml` — build → push to ACR → deploy, on push to `develop`
 
+**Done — DEPLOYED & LIVE (2026-07-18):**
+- [x] `VITE_PUBLIC_API_KEY` GitHub secret added
+- [x] Backend `.env` uploaded to App Service settings (46 settings)
+- [x] Pushed `develop` → CI built → pushed to ACR → deployed → verified healthy
+- [x] Live at **https://solvetax-admin-dev.azurewebsites.net** (push to `develop` = auto-deploy)
+
 **Left:**
-- [ ] Add GitHub Secret `VITE_PUBLIC_API_KEY`
-- [ ] Upload backend `.env` → App Service settings
-- [ ] `git push origin develop` → watch the first CI run
-- [ ] Recommended: Always On, HTTPS-only, `WORKERS=1`, `RUN_SCHEDULER` decision
-- [ ] Last: lock the Postgres firewall to the Web App's outbound IPs
+- [ ] Rotate secrets exposed during setup (SP client secret + backend `.env` values)
+- [ ] Lock Postgres + Redis firewalls to the app's outbound IPs (see §10)
+- [ ] Delete the abandoned Canada-Central app `solvetaxadmindevweb` (+ its RG/plan)
+- [ ] Custom domain (Hostinger CNAME + TXT → `hostname add` + free managed cert)
+- [ ] Optional: enable Always On + HTTPS-only
 
 ---
 
@@ -330,3 +336,6 @@ managed identity, AcrPull, and the `AZURE_CREDENTIALS` service principal — is
 ACR-native. The workflow pushes to `solvetaxacrdev.azurecr.io` and the Web App
 pulls with its managed identity. No registry password is stored anywhere. (The
 old `dev` branch used GHCR + a publish profile — a different, now-unused path.)
+
+feature → PR → develop → auto-deploy to DEV   (what we have now — keep it)
+develop → PR to main → [CI gate: build + checks] → merge → deploy to PROD

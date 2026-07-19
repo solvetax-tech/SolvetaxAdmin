@@ -165,6 +165,26 @@ IncomeTaxPriorityLiteral = Literal["LOW", "NORMAL", "HIGH"]
 INCOME_TAX_PRIORITIES: Tuple[str, ...] = get_args(IncomeTaxPriorityLiteral)
 
 # --------------------------------------------------------------------------- #
+# Issue reports (in-app bug/issue reporting)
+# --------------------------------------------------------------------------- #
+
+IssuePriorityLiteral = Literal["LOW", "MEDIUM", "HIGH", "URGENT"]
+ISSUE_PRIORITIES: Tuple[str, ...] = get_args(IssuePriorityLiteral)
+
+IssueStatusLiteral = Literal["OPEN", "IN_PROGRESS", "RESOLVED"]
+ISSUE_STATUSES: Tuple[str, ...] = get_args(IssueStatusLiteral)
+
+# --------------------------------------------------------------------------- #
+# Employee tasks (personal day calendar)
+# --------------------------------------------------------------------------- #
+
+TaskStatusLiteral = Literal["PENDING", "IN_PROGRESS", "DONE", "CANCELLED"]
+TASK_STATUSES: Tuple[str, ...] = get_args(TaskStatusLiteral)
+
+# Task time is quantised to fixed 15-minute slots; every task occupies exactly one.
+TASK_SLOT_MINUTES: int = 15
+
+# --------------------------------------------------------------------------- #
 # Versions (audit log)
 # --------------------------------------------------------------------------- #
 

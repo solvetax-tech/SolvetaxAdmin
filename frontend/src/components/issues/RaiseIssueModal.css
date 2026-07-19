@@ -1,0 +1,11 @@
+/* Self-contained so the upload spinner animates wherever the drawer opens
+   (from the Issues page and from the topbar bug button). */
+@keyframes raise-issue-spin {
+    to { transform: rotate(360deg); }
+}
+.raise-issue-spin {
+    animation: raise-issue-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .raise-issue-spin { animation: none; }
+}
