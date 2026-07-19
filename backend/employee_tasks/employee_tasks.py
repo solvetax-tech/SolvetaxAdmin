@@ -22,6 +22,7 @@ from backend.employee_tasks.schemas import (
     TaskCreateIn,
     TaskListOut,
     TaskOut,
+    TaskPageOut,
     TaskPatchIn,
 )
 from backend.logger import logger
@@ -63,6 +64,18 @@ def _as_aware(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
     return dt.replace(tzinfo=IST) if dt.tzinfo is None else dt
+
+
+def _norm_status(status: Optional[str]) -> Optional[str]:
+    """Validate an optional status filter. Empty / 'ALL' -> no filter (None)."""
+    if not status:
+        return None
+    s = status.strip().upper()
+    if s in ("", "ALL"):
+        return None
+    if s not in TASK_STATUSES:
+        _raise_validation({"status": f"status must be one of {list(TASK_STATUSES)} or ALL."})
+    return s
 
 
 def _parse_day(date_str: Optional[str]) -> date_cls:
@@ -142,6 +155,7 @@ async def create_task(
 @router.get("/list", response_model=TaskListOut, summary="List my tasks for a day")
 async def list_tasks(
     date: Optional[str] = Query(None, description="IST day as YYYY-MM-DD; default today"),
+    status: Optional[str] = Query(None, description="Filter by status; omit or ALL for any"),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
 ):
     role, emp_id = _ctx(current_user)
@@ -149,6 +163,13 @@ async def list_tasks(
 
     day = _parse_day(date)
     start, end = _ist_day_bounds(day)
+    st = _norm_status(status)
+
+    params = [emp_id, start, end]
+    status_sql = ""
+    if st:
+        params.append(st)
+        status_sql = f" AND status = ${len(params)}"
 
     pool = await get_db_pool()
     async with pool.acquire() as conn:
@@ -157,13 +178,104 @@ async def list_tasks(
             SELECT {_COLUMNS} FROM {DB_SCHEMA}.employee_tasks
             WHERE emp_id = $1 AND is_active IS TRUE
               AND scheduled_at >= $2 AND scheduled_at < $3
+              {status_sql}
             ORDER BY scheduled_at ASC, id ASC
             """,
-            emp_id, start, end,
+            *params,
         )
 
     data = [TaskOut(**dict(r)) for r in rows]
     return TaskListOut(data=data, count=len(data), date=day.isoformat())
+
+
+@router.get("/all", response_model=TaskPageOut, summary="List all my tasks (paginated)")
+async def all_tasks(
+    status: Optional[str] = Query(None, description="Filter by status; omit or ALL for any"),
+    limit: int = Query(50, ge=1, le=200, description="Page size"),
+    offset: int = Query(0, ge=0, description="Rows to skip"),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    role, emp_id = _ctx(current_user)
+    _require_emp(emp_id)
+
+    st = _norm_status(status)
+    params = [emp_id]
+    status_sql = ""
+    if st:
+        params.append(st)
+        status_sql = f" AND status = ${len(params)}"
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            f"SELECT count(*) FROM {DB_SCHEMA}.employee_tasks "
+            f"WHERE emp_id = $1 AND is_active IS TRUE {status_sql}",
+            *params,
+        )
+        row_params = list(params)
+        row_params.append(limit)
+        limit_pos = len(row_params)
+        row_params.append(offset)
+        offset_pos = len(row_params)
+        rows = await conn.fetch(
+            f"""
+            SELECT {_COLUMNS} FROM {DB_SCHEMA}.employee_tasks
+            WHERE emp_id = $1 AND is_active IS TRUE {status_sql}
+            ORDER BY scheduled_at DESC, id DESC
+            LIMIT ${limit_pos} OFFSET ${offset_pos}
+            """,
+            *row_params,
+        )
+
+    data = [TaskOut(**dict(r)) for r in rows]
+    return TaskPageOut(data=data, count=len(data), total=total or 0, limit=limit, offset=offset)
+
+
+# Unfinished carry-over tasks: statuses that still need work.
+_OPEN_STATUSES = ["PENDING", "IN_PROGRESS"]
+
+
+@router.get("/previous", response_model=TaskPageOut, summary="Past unfinished tasks (pending / in-progress)")
+async def previous_tasks(
+    status: Optional[str] = Query(None, description="PENDING or IN_PROGRESS; omit / ALL for both"),
+    limit: int = Query(50, ge=1, le=200, description="Page size"),
+    offset: int = Query(0, ge=0, description="Rows to skip"),
+    current_user=Depends(require_permission("EMPLOYEE", "READ")),
+):
+    role, emp_id = _ctx(current_user)
+    _require_emp(emp_id)
+
+    # Scheduled before the start of today (IST) and still open. A specific status
+    # filter is allowed, but only among the open statuses.
+    today_start, _ = _ist_day_bounds(datetime.now(IST).date())
+    st = _norm_status(status)
+    if st and st not in _OPEN_STATUSES:
+        _raise_validation({"status": f"status must be one of {_OPEN_STATUSES} or ALL."})
+    statuses = [st] if st else _OPEN_STATUSES
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            f"""
+            SELECT count(*) FROM {DB_SCHEMA}.employee_tasks
+            WHERE emp_id = $1 AND is_active IS TRUE
+              AND scheduled_at < $2 AND status = ANY($3::text[])
+            """,
+            emp_id, today_start, statuses,
+        )
+        rows = await conn.fetch(
+            f"""
+            SELECT {_COLUMNS} FROM {DB_SCHEMA}.employee_tasks
+            WHERE emp_id = $1 AND is_active IS TRUE
+              AND scheduled_at < $2 AND status = ANY($3::text[])
+            ORDER BY scheduled_at DESC, id DESC
+            LIMIT $4 OFFSET $5
+            """,
+            emp_id, today_start, statuses, limit, offset,
+        )
+
+    data = [TaskOut(**dict(r)) for r in rows]
+    return TaskPageOut(data=data, count=len(data), total=total or 0, limit=limit, offset=offset)
 
 
 @router.get("/available-slots", response_model=AvailableSlotsOut, summary="Free 15-min slots for a day")

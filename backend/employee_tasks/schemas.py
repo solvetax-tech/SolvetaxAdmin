@@ -93,6 +93,16 @@ class TaskListOut(TaskBaseSchema):
     date: str
 
 
+class TaskPageOut(TaskBaseSchema):
+    """A page of the caller's tasks across all days (the 'All' view)."""
+
+    data: List[TaskOut]
+    count: int    # rows in this page
+    total: int    # total rows matching the filter
+    limit: int
+    offset: int
+
+
 class SlotOut(TaskBaseSchema):
     time: str            # "HH:MM" in IST, for display
     iso: str             # UTC ISO to send back inside time_slots

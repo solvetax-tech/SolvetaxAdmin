@@ -40,7 +40,7 @@ import ServiceDonePaymentPending from './dashboard/ServiceDonePaymentPending';
 import GstFilingMonthlyMatrix from './dashboard/GstFilingMonthlyMatrix';
 import ContactSupportLeads from './contact_support/ContactSupportLeads';
 import RaiseIssueModal from './issues/RaiseIssueModal';
-import TodayTasks from './tasks/TodayTasks';
+import TasksPage from './tasks/TasksPage';
 import useTaskReminders from '../hooks/useTaskReminders';
 import api from '../utils/api';
 import { fetchCustomerServiceProgressTracker } from '../utils/customerServiceApi';
@@ -1041,7 +1041,7 @@ const Dashboard = ({ onLogout }) => {
           className={`sub-nav-btn-v4 ${effectiveDashboardSubTab === 'today-tasks' ? 'active' : ''}`}
           onClick={() => handleTabChange('dashboard', 'today-tasks')}
         >
-          Today Tasks
+          Tasks
         </button>
       </div>
 
@@ -1061,7 +1061,7 @@ const Dashboard = ({ onLogout }) => {
             <GstFilingMonthlyMatrix />
           ) : null}
           {effectiveDashboardSubTab === 'today-tasks' ? (
-            <TodayTasks setToastMessage={setToastMessage} />
+            <TasksPage setToastMessage={setToastMessage} />
           ) : null}
         </div>
     </>

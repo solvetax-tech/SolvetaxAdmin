@@ -9,13 +9,41 @@ export const TASK_STATUS_LABEL = {
     PENDING: 'Pending', IN_PROGRESS: 'In Progress', DONE: 'Done', CANCELLED: 'Cancelled',
 };
 
-/** GET /list?date=YYYY-MM-DD — the caller's tasks for that IST day. */
-export async function listTasks(date, config = {}) {
+/** GET /list?date=YYYY-MM-DD&status= — the caller's tasks for that IST day. */
+export async function listTasks(date, status, config = {}) {
     const params = {};
     if (date) params.date = date;
+    if (status && status !== 'ALL') params.status = status;
     const res = await api.get(`${TASKS_BASE}/list`, { params, ...config });
     const body = res.data || {};
     return { data: Array.isArray(body.data) ? body.data : [], count: body.count || 0, date: body.date };
+}
+
+function normalizePage(body, limit, offset) {
+    const b = body || {};
+    return {
+        data: Array.isArray(b.data) ? b.data : [],
+        count: b.count || 0,
+        total: b.total || 0,
+        limit: b.limit ?? limit,
+        offset: b.offset ?? offset,
+    };
+}
+
+/** GET /all?status=&limit=&offset= — a page of the caller's tasks across all days. */
+export async function listAllTasks({ status, limit = 50, offset = 0 } = {}, config = {}) {
+    const params = { limit, offset };
+    if (status && status !== 'ALL') params.status = status;
+    const res = await api.get(`${TASKS_BASE}/all`, { params, ...config });
+    return normalizePage(res.data, limit, offset);
+}
+
+/** GET /previous?status=&limit=&offset= — past tasks still pending / in-progress. */
+export async function listPreviousTasks({ status, limit = 50, offset = 0 } = {}, config = {}) {
+    const params = { limit, offset };
+    if (status && status !== 'ALL') params.status = status;
+    const res = await api.get(`${TASKS_BASE}/previous`, { params, ...config });
+    return normalizePage(res.data, limit, offset);
 }
 
 /** GET /available-slots?date=&exclude_task_id= — 96 free/taken 15-min slots. */

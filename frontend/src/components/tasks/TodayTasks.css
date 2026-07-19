@@ -61,6 +61,7 @@
 .tt-card.st-cancelled    { border-left-color: var(--text-muted); opacity: 0.7; }
 
 .tt-time { display: flex; flex-direction: column; align-items: flex-start; }
+.tt-time-date { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; color: var(--accent); }
 .tt-time-start { font-size: 15px; font-weight: 800; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .tt-time-end { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
@@ -92,3 +93,13 @@
 .tt-icon-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-strong); }
 .tt-icon-btn.tt-danger:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 .tt-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* All view: total count + "Load more" */
+.tt-count { font-size: 13px; font-weight: 700; color: var(--text-muted); }
+.tt-loadmore-row { display: flex; justify-content: center; margin-top: 14px; }
+.tt-loadmore {
+    padding: 9px 18px; background: transparent; border: 1px solid var(--border);
+    border-radius: var(--radius-md); color: var(--text-primary); font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.tt-loadmore:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.tt-loadmore:disabled { opacity: 0.6; cursor: not-allowed; }

@@ -1,24 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, Bell } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import TaskModal from './TaskModal';
-import {
-    listTasks, deleteTask, toDateInput, TASK_STATUS_LABEL, TASK_SLOT_MINUTES,
-} from '../../utils/employeeTasksApi';
+import TaskCard from './TaskCard';
+import { listTasks, deleteTask, toDateInput } from '../../utils/employeeTasksApi';
 import './TodayTasks.css';
-
-const timeOf = (iso) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-const fmt = (ms) => new Date(ms).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-
-// A task blocks one or more 15-min slots. Derive its start, its end (last
-// slot + 15 min), and how many slots it holds.
-const slotSpan = (t) => {
-    const ms = (t.time_slots || []).map((s) => new Date(s).getTime()).sort((a, b) => a - b);
-    const count = ms.length;
-    const startMs = count ? ms[0] : new Date(t.scheduled_at).getTime();
-    const endMs = (count ? ms[count - 1] : startMs) + TASK_SLOT_MINUTES * 60000;
-    return { startMs, endMs, count };
-};
 
 const shiftDay = (dayStr, delta) => {
     const d = new Date(`${dayStr}T00:00:00`);
@@ -35,7 +21,7 @@ const prettyDay = (dayStr) => {
     return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 };
 
-export default function TodayTasks({ setToastMessage }) {
+export default function TodayTasks({ setToastMessage, statusFilter }) {
     const [day, setDay] = useState(toDateInput(new Date()));
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -48,7 +34,7 @@ export default function TodayTasks({ setToastMessage }) {
         setError(null);
         const controller = new AbortController();
         try {
-            const res = await listTasks(day, { signal: controller.signal });
+            const res = await listTasks(day, statusFilter, { signal: controller.signal });
             setData(res.data);
         } catch (err) {
             if (axios.isCancel(err) || err?.code === 'ERR_CANCELED') return;
@@ -57,7 +43,7 @@ export default function TodayTasks({ setToastMessage }) {
         } finally {
             setLoading(false);
         }
-    }, [day]);
+    }, [day, statusFilter]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -101,41 +87,20 @@ export default function TodayTasks({ setToastMessage }) {
             ) : data.length === 0 ? (
                 <div className="tt-empty">
                     <Clock size={28} style={{ opacity: 0.4 }} />
-                    <p>No tasks scheduled for {prettyDay(day).toLowerCase()}.</p>
+                    <p>No tasks {statusFilter && statusFilter !== 'ALL' ? 'match this filter' : `scheduled for ${prettyDay(day).toLowerCase()}`}.</p>
                     <button className="tt-new-btn" onClick={() => setModal('new')}><Plus size={16} /> Add one</button>
                 </div>
             ) : (
                 <div className="tt-list">
-                    {data.map((t) => {
-                        const sp = slotSpan(t);
-                        return (
-                        <div key={t.id} className={`tt-card st-${t.status?.toLowerCase()}`}>
-                            <div className="tt-time">
-                                <span className="tt-time-start">{fmt(sp.startMs)}</span>
-                                <span className="tt-time-end">{fmt(sp.endMs)}</span>
-                            </div>
-                            <div className="tt-body">
-                                <div className="tt-title-row">
-                                    <span className="tt-title">{t.title}</span>
-                                    <span className={`tt-status st-${t.status?.toLowerCase()}`}>{TASK_STATUS_LABEL[t.status] || t.status}</span>
-                                </div>
-                                {t.description && <div className="tt-desc">{t.description}</div>}
-                                {(sp.count > 1 || t.followup_at) && (
-                                    <div className="tt-meta">
-                                        {sp.count > 1 && <span>{sp.count} slots · {sp.count * 15} min</span>}
-                                        {t.followup_at && (
-                                            <span className="tt-followup"><Bell size={12} /> Follow-up {timeOf(t.followup_at)}</span>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="tt-actions">
-                                <button className="tt-icon-btn" onClick={() => setModal(t)} title="Edit / reschedule"><Pencil size={14} /></button>
-                                <button className="tt-icon-btn tt-danger" disabled={deletingId === t.id} onClick={() => remove(t)} title="Delete"><Trash2 size={14} /></button>
-                            </div>
-                        </div>
-                        );
-                    })}
+                    {data.map((t) => (
+                        <TaskCard
+                            key={t.id}
+                            task={t}
+                            onEdit={setModal}
+                            onDelete={remove}
+                            deleting={deletingId === t.id}
+                        />
+                    ))}
                 </div>
             )}
 
