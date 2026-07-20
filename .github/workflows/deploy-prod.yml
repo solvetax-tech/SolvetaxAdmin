@@ -1,0 +1,88 @@
+# Merge to `prod` → build the image → push to the (shared) ACR → deploy to the
+# PROD Web App. Same shape as deploy-develop.yml; only the target differs.
+#
+# Reuses everything: the ACR (solvetaxacrdev), the App Service Plan, the resource
+# group, and the AZURE_CREDENTIALS service principal (it already has access to
+# this RG). The only different resource is the Web App (solvetax-admin-prod),
+# which has its OWN managed identity + AcrPull grant (set up once in Azure).
+#
+# The container's entrypoint runs db/migrate/run_migrations.py against the PROD
+# database (from the app's settings) before the API starts — so DB migrations
+# ship with the code, gated behind the develop→prod PR review.
+#
+# Secrets (repo → Settings → Secrets and variables → Actions):
+#   AZURE_CREDENTIALS    — same service principal as dev
+#   VITE_PUBLIC_API_KEY  — baked into the frontend bundle at build time
+
+name: Deploy prod (Azure App Service)
+
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:        # manual "Run workflow" button
+
+env:
+  ACR_NAME: solvetaxacrdev              # SHARED registry (same as dev)
+  IMAGE: solvetax-admin                 # SHARED image repo (same as dev)
+  APP_NAME: solvetax-admin-prod         # the PROD Web App  <-- only real difference
+  RG: solvetax-dev-rg                   # SHARED resource group
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ACR login
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      # Two tags: the git SHA (exact, enables rollback) and "prod" (moving latest).
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg VITE_PUBLIC_API_KEY="${{ secrets.VITE_PUBLIC_API_KEY }}" \
+            -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE }}:prod \
+            .
+
+      - name: Push image
+        run: docker push --all-tags ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE }}
+
+      # Deploy the SHA (never "prod") so the running version is unambiguous and
+      # rollback is a one-liner (re-point to the previous SHA).
+      - name: Set Web App image
+        run: |
+          az webapp config container set \
+            --resource-group ${{ env.RG }} \
+            --name ${{ env.APP_NAME }} \
+            --container-image-name ${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE }}:${{ github.sha }} \
+            --container-registry-url https://${{ env.ACR_NAME }}.azurecr.io
+
+      # Re-assert managed-identity pull (idempotent) so the app keeps pulling as
+      # its own identity, not admin creds.
+      - name: Ensure managed-identity pull
+        run: |
+          az webapp config set \
+            --resource-group ${{ env.RG }} \
+            --name ${{ env.APP_NAME }} \
+            --generic-configurations '{"acrUseManagedIdentityCreds": true}'
+
+      - name: Restart Web App
+        run: az webapp restart --resource-group ${{ env.RG }} --name ${{ env.APP_NAME }}
+
+      # Prove it came up. Cold start + pool warmup + migrations take a bit, so we
+      # retry /health for ~3 minutes before failing.
+      - name: Smoke test /health
+        run: |
+          URL="https://${{ env.APP_NAME }}.azurewebsites.net/health"
+          for i in 1 2 3 4 5 6 7 8 9; do
+            if curl -fsS "$URL"; then echo ""; echo "healthy on attempt $i"; exit 0; fi
+            echo "attempt $i: not ready yet, waiting 20s..."; sleep 20
+          done
+          echo "health check never passed — check: az webapp log tail -g ${{ env.RG }} -n ${{ env.APP_NAME }}"
+          exit 1

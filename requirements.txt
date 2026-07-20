@@ -26,3 +26,4 @@ redis
 
 # Optional error tracking — only used when SENTRY_DSN is set (import is guarded).
 sentry-sdk[fastapi]>=2.0
+PyYAML==6.0.2

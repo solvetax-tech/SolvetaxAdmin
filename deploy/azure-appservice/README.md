@@ -337,5 +337,7 @@ ACR-native. The workflow pushes to `solvetaxacrdev.azurecr.io` and the Web App
 pulls with its managed identity. No registry password is stored anywhere. (The
 old `dev` branch used GHCR + a publish profile — a different, now-unused path.)
 
-feature → PR → develop → auto-deploy to DEV   (what we have now — keep it)
-develop → PR to main → [CI gate: build + checks] → merge → deploy to PROD
+feature → PR → develop → auto-deploy to DEV        (unchanged)
+develop → PR to PROD → [ci-checks gate + review] → merge → deploy to PROD
+                          ↑ deploy-prod.yml triggers on push to `prod`
+

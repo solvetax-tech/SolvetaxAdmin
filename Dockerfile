@@ -72,11 +72,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend ./backend
 
+# Migration runner + SQL. The entrypoint runs these at container start, before
+# the API boots. Kept out of the image before; now load-bearing (see
+# .dockerignore, which un-ignores db/ for exactly this).
+COPY db ./db
+
 # CRITICAL PATH: frontend_static.py computes dist as
 #   Path(__file__).parent.parent / "frontend" / "dist"
 # backend/ lives at /app/backend, so its parent is /app → dist MUST land here.
 # Get this path wrong and mount_frontend() silently does nothing → the UI 404s.
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
+
+# Entrypoint runs DB migrations, then execs the CMD below (the API server).
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 8000
 
@@ -85,8 +94,10 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/health || exit 1
 
-# Exec form → uvicorn is PID 1 and receives SIGTERM directly for clean stops.
+# Entrypoint applies migrations, then `exec "$@"` runs this CMD — so uvicorn
+# still ends up as PID 1 and receives SIGTERM directly for clean stops.
 #   --host 0.0.0.0  : listen on all interfaces so Azure's proxy can reach it
 #   --proxy-headers + --forwarded-allow-ips * : trust Azure's front-end proxy so
 #     the app sees the real client IP/scheme (https), not the proxy's.
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]

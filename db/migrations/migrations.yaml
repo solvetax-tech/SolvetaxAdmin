@@ -1,0 +1,19 @@
+# Ordered migration manifest.
+#
+# The runner (db/migrate/run_migrations.py) applies every listed version whose
+# row in solvetax.schema_migration_history is not yet SUCCESS, in this order.
+#
+# Rules:
+#   - version: unique, ever-increasing (V001, V002, ...). Never reuse or reorder.
+#   - script:  path relative to db/migrations/. NEVER edit a script after it has
+#              been applied anywhere — add a new version instead. The runner
+#              hard-fails on a checksum mismatch to catch silent edits.
+#   - name:    short human label (goes into the tracking table).
+#   - transactional: false  ->  the runner runs the script OUTSIDE a transaction
+#              (needed for statements like CREATE INDEX CONCURRENTLY that cannot
+#              run inside one). Defaults to true. Keep scripts free of their own
+#              BEGIN/COMMIT — the runner owns the transaction.
+migrations:
+  - version: "V001"
+    name: "baseline"
+    script: "V001__baseline.sql"

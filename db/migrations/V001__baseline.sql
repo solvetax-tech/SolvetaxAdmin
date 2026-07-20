@@ -2,7 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict 4fPNcwzFzixVSH4NuxWwcXe1UT6CUBebj0XcEfyqs2eotSX9ec0bzPbppIQJClo
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -23,7 +22,7 @@ SET row_security = off;
 -- Name: solvetax; Type: SCHEMA; Schema: -; Owner: -
 --
 
-CREATE SCHEMA solvetax;
+CREATE SCHEMA IF NOT EXISTS solvetax;
 
 
 --
@@ -33,39 +32,73 @@ CREATE SCHEMA solvetax;
 CREATE FUNCTION solvetax.fn_crm_leads_set_assigned_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     -- INSERT logic
+
     IF TG_OP = 'INSERT' THEN
+
         IF NEW.rm_id IS NOT NULL AND NEW.rm_assigned_at IS NULL THEN
+
             NEW.rm_assigned_at := now();
+
         END IF;
+
+
 
         IF NEW.op_id IS NOT NULL AND NEW.op_assigned_at IS NULL THEN
+
             NEW.op_assigned_at := now();
+
         END IF;
+
+
 
         RETURN NEW;
+
     END IF;
+
+
 
     -- UPDATE logic (only when ids change)
+
     IF NEW.rm_id IS DISTINCT FROM OLD.rm_id THEN
+
         IF NEW.rm_id IS NULL THEN
+
             NEW.rm_assigned_at := NULL;   -- unassigned
+
         ELSE
+
             NEW.rm_assigned_at := now();  -- newly assigned / reassigned
+
         END IF;
+
     END IF;
+
+
 
     IF NEW.op_id IS DISTINCT FROM OLD.op_id THEN
+
         IF NEW.op_id IS NULL THEN
+
             NEW.op_assigned_at := NULL;   -- unassigned
+
         ELSE
+
             NEW.op_assigned_at := now();  -- newly assigned / reassigned
+
         END IF;
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -76,26 +109,47 @@ $$;
 CREATE FUNCTION solvetax.fn_crm_leads_touch_dial_on_milestone_stage() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
   IF TG_OP = 'INSERT' THEN
+
     IF NEW.stage IN ('GST_REGISTRATION_DONE', 'ITR_DONE', 'SUBSCRIBED') THEN
+
       NEW.last_dailed_at := NOW();
+
       NEW.last_connected_at := NOW();
+
     END IF;
+
     RETURN NEW;
+
   END IF;
+
+
 
   IF TG_OP = 'UPDATE' THEN
+
     IF NEW.stage IS DISTINCT FROM OLD.stage
+
        AND NEW.stage IN ('GST_REGISTRATION_DONE', 'ITR_DONE', 'SUBSCRIBED') THEN
+
       NEW.last_dailed_at := NOW();
+
       NEW.last_connected_at := NOW();
+
     END IF;
+
     RETURN NEW;
+
   END IF;
 
+
+
   RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -106,14 +160,23 @@ $$;
 CREATE FUNCTION solvetax.fn_on_filing_completed() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.status = 'FILED'
+
        AND OLD.status IS DISTINCT FROM 'FILED'
+
        AND NEW.filed_at IS NULL THEN
+
         NEW.filed_at := NOW();
+
     END IF;
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -124,18 +187,31 @@ $$;
 CREATE FUNCTION solvetax.fn_payments_followup_completed_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.followup_status IS NOT DISTINCT FROM 'COMPLETED' THEN
+
         IF TG_OP = 'INSERT' THEN
+
             NEW.completed_at := COALESCE(NEW.completed_at, NOW());
+
         ELSIF OLD.followup_status IS DISTINCT FROM 'COMPLETED' THEN
+
             NEW.completed_at := COALESCE(NEW.completed_at, NOW());
+
         END IF;
+
     ELSIF TG_OP = 'UPDATE' AND OLD.followup_status IS NOT DISTINCT FROM 'COMPLETED' THEN
+
         NEW.completed_at := NULL;
+
     END IF;
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -146,18 +222,31 @@ $$;
 CREATE FUNCTION solvetax.fn_propagate_gst_registration_status_to_filings() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.registration_status IS DISTINCT FROM OLD.registration_status THEN
+
         UPDATE solvetax.gst_filings f
+
         SET gst_reg_status = NEW.registration_status,
+
             updated_at = NOW()
+
         WHERE f.gst_registration_id = NEW.id
+
           AND f.gst_registration_id IS NOT NULL
+
           AND f.gst_reg_status IS DISTINCT FROM NEW.registration_status;
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -168,49 +257,93 @@ $$;
 CREATE FUNCTION solvetax.fn_registration_payment_logic() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 DECLARE
+
     total_paid numeric := 0;
+
 BEGIN
+
     NEW.discount := COALESCE(NEW.discount, 0);
+
     NEW.paid_amount := COALESCE(NEW.paid_amount, 0);
+
     NEW.net_amount := NEW.amount - NEW.discount;
 
+
+
     IF NEW.net_amount < 0 THEN
+
         RAISE EXCEPTION 'Net amount cannot be negative';
+
     END IF;
 
+
+
     SELECT COALESCE(SUM(paid_amount), 0)
+
     INTO total_paid
+
     FROM solvetax.payments
+
     WHERE customer_id = NEW.customer_id
+
       AND entity_id = NEW.entity_id
+
       AND entity_type = NEW.entity_type
+
       AND is_active = TRUE
+
       AND payment_status <> 'CANCELLED'
+
       AND id <> NEW.id;
+
+
 
     total_paid := total_paid + NEW.paid_amount;
 
+
+
     IF total_paid > NEW.net_amount THEN
+
         RAISE EXCEPTION
+
             'Total payment %.2f exceeds payable amount %.2f',
+
             total_paid, NEW.net_amount;
+
     END IF;
+
+
 
     IF total_paid = NEW.net_amount THEN
+
         NEW.payment_status := 'PAID';
+
         NEW.payment_date := COALESCE(NEW.payment_date, NOW());
+
     ELSIF total_paid > 0 AND total_paid < NEW.net_amount THEN
+
         NEW.payment_status := 'PENDING';
+
         NEW.payment_date := COALESCE(NEW.payment_date, NOW());
+
     ELSE
+
         NEW.payment_status := 'PENDING';
+
         NEW.payment_date := NULL;
+
     END IF;
 
+
+
     NEW.updated_at := NOW();
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -221,13 +354,21 @@ $$;
 CREATE FUNCTION solvetax.fn_set_data_received_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.status = 'DATA_RECEIVED'
+
        AND OLD.status IS DISTINCT FROM 'DATA_RECEIVED' THEN
+
         NEW.data_received_at := NOW();
+
     END IF;
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -238,14 +379,23 @@ $$;
 CREATE FUNCTION solvetax.fn_set_filed_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.status = 'FILED'
+
        AND OLD.status IS DISTINCT FROM 'FILED' THEN
+
         NEW.filed_at = NOW();
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -256,35 +406,65 @@ $$;
 CREATE FUNCTION solvetax.fn_set_income_tax_filing_date() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     -- On INSERT: if FILED and filing_date missing, stamp NOW()
+
     IF TG_OP = 'INSERT' THEN
+
         IF NEW.filed_status = 'FILED' AND NEW.filing_date IS NULL THEN
+
             NEW.filing_date := NOW();
+
         END IF;
+
         IF NEW.filed_status = 'NOT_FILED' THEN
+
             NEW.filing_date := NULL;
+
         END IF;
+
         RETURN NEW;
+
     END IF;
+
+
 
     -- On UPDATE: transition logic
+
     IF TG_OP = 'UPDATE' THEN
+
         -- NOT_FILED -> FILED : stamp now when empty
+
         IF OLD.filed_status = 'NOT_FILED' AND NEW.filed_status = 'FILED' AND NEW.filing_date IS NULL THEN
+
             NEW.filing_date := NOW();
+
         END IF;
+
+
 
         -- FILED -> NOT_FILED : clear filing_date
+
         IF NEW.filed_status = 'NOT_FILED' THEN
+
             NEW.filing_date := NULL;
+
         END IF;
 
+
+
         RETURN NEW;
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -295,10 +475,15 @@ $$;
 CREATE FUNCTION solvetax.fn_set_updated_at_doc() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     NEW.updated_at := NOW();
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -309,21 +494,37 @@ $$;
 CREATE FUNCTION solvetax.fn_set_verified_fields_doc() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.verified = TRUE AND (OLD.verified IS DISTINCT FROM TRUE) THEN
+
         NEW.verified_at := NOW();
+
         IF NEW.verified_by IS NULL THEN
+
             NEW.verified_by := OLD.verified_by;
+
         END IF;
+
     END IF;
+
+
 
     IF NEW.verified = FALSE AND OLD.verified = TRUE THEN
+
         NEW.verified_at := NULL;
+
         NEW.verified_by := NULL;
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -334,79 +535,153 @@ $$;
 CREATE FUNCTION solvetax.fn_sync_crm_lead_from_gst_registration() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 DECLARE
+
     v_lead_id   BIGINT;
+
     v_old_stage VARCHAR(40);
+
     v_new_stage VARCHAR(40);
+
     v_approved  BOOLEAN;
+
 BEGIN
+
     v_approved := upper(trim(COALESCE(NEW.registration_status::text, ''))) = 'APPROVED';
 
+
+
     SELECT l.id, l.stage
+
       INTO v_lead_id, v_old_stage
+
       FROM solvetax.crm_leads l
+
      WHERE l.entity_type = 'GST_REGISTRATION'
+
        AND l.entity_id = NEW.id
+
        AND l.is_active = TRUE
+
      ORDER BY l.id DESC
+
      LIMIT 1
+
      FOR UPDATE;
 
+
+
     IF v_lead_id IS NULL THEN
+
         RETURN NEW;
+
     END IF;
+
+
 
     -- Only SUBSCRIBED is a true end stage; NOT_INTERESTED may still move forward.
+
     IF v_old_stage = 'SUBSCRIBED' THEN
+
         RETURN NEW;
+
     END IF;
+
+
 
     IF v_approved THEN
+
         v_new_stage := 'GST_REGISTRATION_DONE';
+
     ELSE
+
         v_new_stage := v_old_stage;
+
     END IF;
+
+
 
     UPDATE solvetax.crm_leads l
+
        SET mobile = NEW.mobile,
+
            entity_id = NEW.id,
+
            entity_type = 'GST_REGISTRATION',
+
            is_active = NEW.is_active,
+
            stage = CASE
+
                      WHEN l.stage = 'SUBSCRIBED' THEN l.stage
+
                      ELSE v_new_stage
+
                    END,
+
            updated_at = NOW()
+
      WHERE l.id = v_lead_id
+
      RETURNING l.stage INTO v_new_stage;
 
+
+
     IF v_old_stage IS DISTINCT FROM v_new_stage THEN
+
         INSERT INTO solvetax.crm_activities (
+
             lead_id,
+
             entity_type,
+
             activity_type,
+
             old_stage,
+
             new_stage,
+
             remarks,
+
             performed_by,
+
             performed_at,
+
             created_at
+
         )
+
         VALUES (
+
             v_lead_id,
+
             'GST_REGISTRATION',
+
             'SYSTEM',
+
             v_old_stage,
+
             v_new_stage,
+
             'Auto stage sync from GST registration update',
+
             NULL,
+
             NOW(),
+
             NOW()
+
         );
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -417,18 +692,31 @@ $$;
 CREATE FUNCTION solvetax.fn_sync_gst_reg_status_to_filings() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.gst_registration_id IS NOT NULL THEN
+
         SELECT g.registration_status
+
         INTO NEW.gst_reg_status
+
         FROM solvetax.gst_registration g
+
         WHERE g.id = NEW.gst_registration_id;
+
     ELSE
+
         NEW.gst_reg_status := NULL;
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -439,9 +727,13 @@ $$;
 CREATE FUNCTION solvetax.fn_update_parent_filing_status() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     RETURN COALESCE(NEW, OLD);
+
 END;
+
 $$;
 
 
@@ -452,20 +744,35 @@ $$;
 CREATE FUNCTION solvetax.fn_update_remaining_amount() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     NEW.remaining_amount := NEW.net_amount - COALESCE(NEW.paid_amount, 0);
 
+
+
     IF NEW.remaining_amount < 0 THEN
+
         RAISE EXCEPTION
+
             'Remaining amount cannot be negative. Paid amount exceeds net amount.';
+
     END IF;
+
+
 
     IF NEW.remaining_amount = 0 AND NEW.payment_status <> 'PAID' THEN
+
         NEW.payment_status := 'PAID';
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -476,17 +783,29 @@ $$;
 CREATE FUNCTION solvetax.normalize_gst_fields() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.pan IS NOT NULL THEN
+
         NEW.pan := UPPER(TRIM(NEW.pan));
+
     END IF;
+
+
 
     IF NEW.gstin IS NOT NULL THEN
+
         NEW.gstin := UPPER(TRIM(NEW.gstin));
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -497,19 +816,33 @@ $$;
 CREATE FUNCTION solvetax.set_approved_timestamp() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.registration_status = 'APPROVED'
+
        AND OLD.registration_status IS DISTINCT FROM 'APPROVED'
+
        AND NEW.approved_at IS NULL THEN
+
         NEW.approved_at := NOW();
+
     END IF;
+
+
 
     IF NEW.registration_status <> 'APPROVED' THEN
+
         NEW.approved_at := NULL;
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -520,14 +853,23 @@ $$;
 CREATE FUNCTION solvetax.set_followup_completed_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
   IF NEW.followup_status IS NOT NULL
+
      AND NEW.followup_status::text = 'COMPLETED'
+
      AND NEW.completed_at IS NULL THEN
+
     NEW.completed_at := now();
+
   END IF;
+
   RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -538,14 +880,23 @@ $$;
 CREATE FUNCTION solvetax.set_provided_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
   IF NEW.service_status IS NOT NULL
+
      AND NEW.service_status::text = 'PROVIDED'
+
      AND NEW.provided_at IS NULL THEN
+
     NEW.provided_at := now();
+
   END IF;
+
   RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -556,10 +907,15 @@ $$;
 CREATE FUNCTION solvetax.set_updated_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
   NEW.updated_at = now();
+
   RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -570,14 +926,23 @@ $$;
 CREATE FUNCTION solvetax.set_verified_timestamp() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.verified = TRUE
+
        AND OLD.verified IS DISTINCT FROM TRUE THEN
+
         NEW.verified_at := NOW();
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -588,45 +953,85 @@ $$;
 CREATE FUNCTION solvetax.sync_customer_services() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
 
+
+
     -- Create ONLY generic services (no entity)
+
     INSERT INTO solvetax.customer_services
+
     (
+
         customer_id,
+
         service_id,
+
         service_status,
+
         rm_id,
+
         op_id,
+
         entity_type,
+
         entity_id
+
     )
+
     SELECT
+
         NEW.customer_id,
+
         s.id,
+
         CASE
+
             WHEN s.service_code = ANY(NEW.service_provided)
+
             THEN 'PROVIDED'
+
             ELSE 'PENDING'
+
         END,
+
         NEW.rm_id,
+
         NEW.op_id,
+
         NULL,
+
         NULL
+
     FROM solvetax.service_config s
+
     WHERE
+
         s.is_active = TRUE
+
         AND (
+
             s.service_code = ANY(NEW.service_required)
+
             OR
+
             s.service_code = ANY(NEW.service_provided)
+
         )
+
+
 
     ON CONFLICT DO NOTHING;
 
+
+
     RETURN NEW;
 
+
+
 END;
+
 $$;
 
 
@@ -637,31 +1042,57 @@ $$;
 CREATE FUNCTION solvetax.sync_gst_to_customer_service() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.gstin IS NOT NULL
+
        AND NEW.username IS NOT NULL
+
        AND NEW.password IS NOT NULL THEN
 
+
+
         UPDATE solvetax.customer_services cs
+
         SET service_status = 'PROVIDED',
+
             provided_at = NOW()
+
         WHERE cs.customer_id = NEW.customer_id
+
           AND cs.entity_type = 'GST_REGISTRATION'
+
           AND cs.entity_id = NEW.id
+
           AND cs.status = 'ACTIVE';
 
+
+
         UPDATE solvetax.customers c
+
         SET service_provided = ARRAY(
+
             SELECT DISTINCT UNNEST(
+
                 COALESCE(c.service_provided, ARRAY[]::text[])
+
                 || ARRAY['GST_REGISTRATION']
+
             )
+
         )
+
         WHERE c.customer_id = NEW.customer_id;
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -672,10 +1103,15 @@ $$;
 CREATE FUNCTION solvetax.touch_customer_services_updated_at() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
   NEW.updated_at := now();
+
   RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -686,21 +1122,37 @@ $$;
 CREATE FUNCTION solvetax.trg_gst_approved_to_crm_stage() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
   IF NEW.registration_status = 'APPROVED'
+
      AND NEW.is_active IS TRUE
+
      AND (TG_OP = 'INSERT' OR OLD.registration_status IS DISTINCT FROM NEW.registration_status)
+
   THEN
+
     UPDATE solvetax.crm_leads l
+
        SET stage = 'GST_REGISTRATION_DONE',
+
            updated_at = NOW()
+
      WHERE l.entity_type = 'GST_REGISTRATION'
+
        AND l.entity_id = NEW.id
+
        AND l.is_active IS TRUE
+
        AND l.stage IS DISTINCT FROM 'GST_REGISTRATION_DONE';
+
   END IF;
+
   RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -711,21 +1163,37 @@ $$;
 CREATE FUNCTION solvetax.validate_customer_service_entity() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+
 BEGIN
+
     IF NEW.entity_type IS NOT NULL AND NEW.entity_id IS NULL THEN
+
         RAISE EXCEPTION 'entity_id required when entity_type is provided';
+
     END IF;
+
+
 
     IF NEW.entity_type IS NULL AND NEW.entity_id IS NOT NULL THEN
+
         RAISE EXCEPTION 'entity_type required when entity_id is provided';
+
     END IF;
+
+
 
     IF NEW.entity_type = '' THEN
+
         RAISE EXCEPTION 'entity_type cannot be empty';
+
     END IF;
 
+
+
     RETURN NEW;
+
 END;
+
 $$;
 
 
@@ -1171,7 +1639,7 @@ ALTER SEQUENCE solvetax.crm_ui_mappings_id_seq OWNED BY solvetax.crm_stage_statu
 
 CREATE TABLE solvetax.customer_services (
     id bigint NOT NULL,
-    customer_id bigint NOT NULL,
+    customer_id bigint,
     service_code character varying(50) NOT NULL,
     service_status character varying(20) DEFAULT 'PENDING'::character varying NOT NULL,
     provided_at timestamp with time zone,
@@ -1395,6 +1863,40 @@ CREATE TABLE solvetax.employee_roles (
     is_active boolean DEFAULT true,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: employee_tasks; Type: TABLE; Schema: solvetax; Owner: -
+--
+
+CREATE TABLE solvetax.employee_tasks (
+    id bigint NOT NULL,
+    emp_id bigint NOT NULL,
+    title character varying(200) NOT NULL,
+    description text,
+    scheduled_at timestamp with time zone NOT NULL,
+    status character varying(20) DEFAULT 'PENDING'::character varying NOT NULL,
+    followup_at timestamp with time zone,
+    followup_note text,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    time_slots timestamp with time zone[] NOT NULL
+);
+
+
+--
+-- Name: employee_tasks_id_seq; Type: SEQUENCE; Schema: solvetax; Owner: -
+--
+
+ALTER TABLE solvetax.employee_tasks ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME solvetax.employee_tasks_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
 );
 
 
@@ -1972,6 +2474,41 @@ CREATE SEQUENCE solvetax.income_tax_id_seq
 --
 
 ALTER SEQUENCE solvetax.income_tax_id_seq OWNED BY solvetax.income_tax.id;
+
+
+--
+-- Name: issue_reports; Type: TABLE; Schema: solvetax; Owner: -
+--
+
+CREATE TABLE solvetax.issue_reports (
+    id bigint NOT NULL,
+    reporter_emp_id bigint NOT NULL,
+    title character varying(200) NOT NULL,
+    description text NOT NULL,
+    priority character varying(20) DEFAULT 'MEDIUM'::character varying NOT NULL,
+    status character varying(20) DEFAULT 'OPEN'::character varying NOT NULL,
+    photo_urls text[] DEFAULT ARRAY[]::text[] NOT NULL,
+    resolved_by_emp_id bigint,
+    resolved_at timestamp with time zone,
+    resolution_note text,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: issue_reports_id_seq; Type: SEQUENCE; Schema: solvetax; Owner: -
+--
+
+ALTER TABLE solvetax.issue_reports ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME solvetax.issue_reports_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
 
 
 --
@@ -2735,6 +3272,14 @@ ALTER TABLE ONLY solvetax.employee_roles
 
 
 --
+-- Name: employee_tasks employee_tasks_pkey; Type: CONSTRAINT; Schema: solvetax; Owner: -
+--
+
+ALTER TABLE ONLY solvetax.employee_tasks
+    ADD CONSTRAINT employee_tasks_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: employees employees_pkey; Type: CONSTRAINT; Schema: solvetax; Owner: -
 --
 
@@ -2852,6 +3397,14 @@ ALTER TABLE ONLY solvetax.income_tax_config
 
 ALTER TABLE ONLY solvetax.income_tax
     ADD CONSTRAINT income_tax_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: issue_reports issue_reports_pkey; Type: CONSTRAINT; Schema: solvetax; Owner: -
+--
+
+ALTER TABLE ONLY solvetax.issue_reports
+    ADD CONSTRAINT issue_reports_pkey PRIMARY KEY (id);
 
 
 --
@@ -3407,6 +3960,20 @@ CREATE INDEX idx_email_verifications_email ON solvetax.employee_email_verificati
 
 
 --
+-- Name: idx_employee_tasks_emp_sched; Type: INDEX; Schema: solvetax; Owner: -
+--
+
+CREATE INDEX idx_employee_tasks_emp_sched ON solvetax.employee_tasks USING btree (emp_id, scheduled_at);
+
+
+--
+-- Name: idx_employee_tasks_followup; Type: INDEX; Schema: solvetax; Owner: -
+--
+
+CREATE INDEX idx_employee_tasks_followup ON solvetax.employee_tasks USING btree (followup_at) WHERE (followup_at IS NOT NULL);
+
+
+--
 -- Name: idx_employees_created_at; Type: INDEX; Schema: solvetax; Owner: -
 --
 
@@ -3701,6 +4268,34 @@ CREATE INDEX idx_income_tax_config_type_active_sort ON solvetax.income_tax_confi
 
 
 --
+-- Name: idx_issue_reports_created_at; Type: INDEX; Schema: solvetax; Owner: -
+--
+
+CREATE INDEX idx_issue_reports_created_at ON solvetax.issue_reports USING btree (created_at DESC);
+
+
+--
+-- Name: idx_issue_reports_priority; Type: INDEX; Schema: solvetax; Owner: -
+--
+
+CREATE INDEX idx_issue_reports_priority ON solvetax.issue_reports USING btree (priority);
+
+
+--
+-- Name: idx_issue_reports_reporter; Type: INDEX; Schema: solvetax; Owner: -
+--
+
+CREATE INDEX idx_issue_reports_reporter ON solvetax.issue_reports USING btree (reporter_emp_id);
+
+
+--
+-- Name: idx_issue_reports_status; Type: INDEX; Schema: solvetax; Owner: -
+--
+
+CREATE INDEX idx_issue_reports_status ON solvetax.issue_reports USING btree (status);
+
+
+--
 -- Name: idx_password_reset_emp; Type: INDEX; Schema: solvetax; Owner: -
 --
 
@@ -3858,7 +4453,7 @@ CREATE UNIQUE INDEX uq_crm_ui_stage_pitch ON solvetax.crm_stage_status_mappings 
 -- Name: uq_customer_services_customer_service_code; Type: INDEX; Schema: solvetax; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_customer_services_customer_service_code ON solvetax.customer_services USING btree (customer_id, service_code);
+CREATE UNIQUE INDEX uq_customer_services_customer_service_code ON solvetax.customer_services USING btree (customer_id, service_code) NULLS NOT DISTINCT;
 
 
 --
@@ -4186,6 +4781,14 @@ ALTER TABLE ONLY solvetax.employee_roles
 
 
 --
+-- Name: employee_tasks employee_tasks_emp_id_fkey; Type: FK CONSTRAINT; Schema: solvetax; Owner: -
+--
+
+ALTER TABLE ONLY solvetax.employee_tasks
+    ADD CONSTRAINT employee_tasks_emp_id_fkey FOREIGN KEY (emp_id) REFERENCES solvetax.employees(emp_id);
+
+
+--
 -- Name: crm_leads fk_crm_leads_op; Type: FK CONSTRAINT; Schema: solvetax; Owner: -
 --
 
@@ -4338,6 +4941,22 @@ ALTER TABLE ONLY solvetax.gst_registration
 
 
 --
+-- Name: issue_reports issue_reports_reporter_emp_id_fkey; Type: FK CONSTRAINT; Schema: solvetax; Owner: -
+--
+
+ALTER TABLE ONLY solvetax.issue_reports
+    ADD CONSTRAINT issue_reports_reporter_emp_id_fkey FOREIGN KEY (reporter_emp_id) REFERENCES solvetax.employees(emp_id);
+
+
+--
+-- Name: issue_reports issue_reports_resolved_by_emp_id_fkey; Type: FK CONSTRAINT; Schema: solvetax; Owner: -
+--
+
+ALTER TABLE ONLY solvetax.issue_reports
+    ADD CONSTRAINT issue_reports_resolved_by_emp_id_fkey FOREIGN KEY (resolved_by_emp_id) REFERENCES solvetax.employees(emp_id);
+
+
+--
 -- Name: gst_registration_documents registration_documents_person_id_fkey; Type: FK CONSTRAINT; Schema: solvetax; Owner: -
 --
 
@@ -4396,6 +5015,3 @@ ALTER TABLE ONLY solvetax.versions
 --
 -- PostgreSQL database dump complete
 --
-
-\unrestrict 4fPNcwzFzixVSH4NuxWwcXe1UT6CUBebj0XcEfyqs2eotSX9ec0bzPbppIQJClo
-

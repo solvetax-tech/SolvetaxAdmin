@@ -43,6 +43,8 @@ logs/
 Thumbs.db
 README.md
 deploy/
-db/
+# db/ IS needed in the image now: the container runs db/migrate/run_migrations.py
+# at startup (see docker-entrypoint.sh). Only dev-only check scripts stay out.
+db/checks/
 .claude/
 .gstack/
