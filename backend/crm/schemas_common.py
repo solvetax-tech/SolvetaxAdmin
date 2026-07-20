@@ -39,6 +39,41 @@ class CRMLeadEntityIdPatchIn(CRMBaseSchema):
         return v
 
 
+class CRMLeadCreateIn(CRMBaseSchema):
+    """Internal (authenticated) manual lead intake, used by the CRM "Create Lead"
+    button. ``entity_type`` and ``stage`` are set server-side (stage=FRESH_LEAD),
+    so they are NOT accepted from the client. Only ``mobile`` is required — a rep
+    can create a lead from just a phone number and fill the rest later.
+    """
+
+    mobile: str = Field(..., min_length=10, max_length=20)
+    full_name: Optional[str] = Field(default=None, max_length=200)
+    email: Optional[str] = Field(default=None, max_length=255)
+    preferred_language: Optional[str] = Field(default=None, max_length=50)
+    lead_type: Optional[str] = Field(default=None, max_length=50)
+    tag: Optional[str] = Field(default=None, max_length=100)
+    lead_source: Optional[str] = Field(default=None, max_length=100)
+    remarks: Optional[str] = Field(default=None, max_length=2000)
+    ay: Optional[str] = Field(default=None, max_length=20, description="Assessment year (ITR only, e.g. 2024-25).")
+    # Assignment. Server enforces the rules by role: an RM's rm_id is forced to
+    # self, an OP's op_id to self; managers pick both. Both end up required.
+    rm_id: Optional[int] = Field(default=None, gt=0, description="Assigned RM emp_id.")
+    op_id: Optional[int] = Field(default=None, gt=0, description="Assigned OP emp_id.")
+
+    @field_validator("mobile", mode="before")
+    @classmethod
+    def normalize_mobile(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("full_name", "email", "preferred_language", "lead_type", "tag", "lead_source", "remarks", mode="before")
+    @classmethod
+    def blank_to_none(cls, v):
+        if isinstance(v, str):
+            s = v.strip()
+            return s if s else None
+        return v
+
+
 class CRMLeadMarketingCreateIn(CRMBaseSchema):
     """
     External / digital-marketing intake: persists only ``crm_leads`` (no gst_registration / income_tax row).

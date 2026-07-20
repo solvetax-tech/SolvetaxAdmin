@@ -1,5 +1,5 @@
 import api from './api';
-import { parseActiveUsernamesFromApi } from './activeEmployees';
+import { parseActiveEmployeesFromApi } from './activeEmployees';
 
 const EMPTY = { states: [], activeRMs: [], activeOps: [], activeEmps: [], languages: [] };
 
@@ -21,8 +21,11 @@ export async function fetchIncomeTaxConfigs() {
         .then(([statesRes, rmsRes, opsRes, empsRes, languagesRes]) => {
             cached = {
                 states: statesRes.data || [],
-                activeRMs: parseActiveUsernamesFromApi(rmsRes),
-                activeOps: parseActiveUsernamesFromApi(opsRes),
+                // emp_id-bearing rows so RM/OP <select> option values are emp_ids:
+                // the ITR filter parseInt()s the value (usernames → NaN → dropped)
+                // and the edit form pre-fills form.rm_id/op_id with emp_ids.
+                activeRMs: parseActiveEmployeesFromApi(rmsRes),
+                activeOps: parseActiveEmployeesFromApi(opsRes),
                 activeEmps: Array.isArray(empsRes.data)
                     ? empsRes.data
                     : (empsRes.data?.data || empsRes.data?.items || []),

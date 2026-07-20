@@ -1,5 +1,6 @@
 import React from 'react';
-import { Filter, RotateCcw } from 'lucide-react';
+import { Filter, RotateCcw, Plus } from 'lucide-react';
+import Button from '../ui/Button';
 import {
     CRM_TIMESTAMP_FILTER_FIELDS,
     getTimestampFilterSummary,
@@ -17,10 +18,11 @@ export default function CrmLeadFiltersToolbar({
     showFiltersButton = true,
     contextPill = null,
     pushFeedback = null,
+    onCreateLead = null,
 }) {
     const filtersActive = hasActiveLeadFilters(appliedFilters);
 
-    if (!showFiltersButton && !filtersActive && !contextPill) {
+    if (!showFiltersButton && !filtersActive && !contextPill && !onCreateLead) {
         return null;
     }
 
@@ -89,7 +91,7 @@ export default function CrmLeadFiltersToolbar({
                     </button>
                 )}
             </div>
-            {showFiltersButton && (
+            {(showFiltersButton || onCreateLead) && (
                 <div className="crm-lead-filters-toolbar-actions">
                     {pushFeedback && (
                         <span
@@ -99,10 +101,16 @@ export default function CrmLeadFiltersToolbar({
                             {pushFeedback.text}
                         </span>
                     )}
-                    <button type="button" className="btn-filter-trigger" onClick={onOpenFilters}>
-                        <Filter size={16} />
-                        Filters
-                    </button>
+                    {showFiltersButton && (
+                        <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={onOpenFilters}>
+                            Filters
+                        </Button>
+                    )}
+                    {onCreateLead && (
+                        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={onCreateLead}>
+                            Create Lead
+                        </Button>
+                    )}
                 </div>
             )}
         </div>

@@ -7,6 +7,7 @@ import CrmLeadViewDrawer from '../CrmLeadViewDrawer';
 import CrmLeadCallActionDrawer from '../CrmLeadCallActionDrawer';
 import CrmLeadFilterDrawer from '../CrmLeadFilterDrawer';
 import CrmLeadFiltersToolbar from '../CrmLeadFiltersToolbar';
+import CreateLeadModal from '../CreateLeadModal';
 import CrmLeadHistorySummary from '../CrmLeadHistorySummary';
 import './Leads.css';
 import '../crmLeadsBoard.css';
@@ -45,7 +46,12 @@ const Leads = ({
   targetView = 'action',
   targetCallStatus = null,
   onLeadOpened = null,
+  currentRole = null,
+  currentEmpId = null,
 }) => {
+  // Create Lead is only offered on the main Leads tab (which passes the current
+  // user's role), not on the derived boards (payment-pending, today-assigned).
+  const canCreateLead = Boolean(currentRole) && !boardPreset && !hideFilters;
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [totalLeads, setTotalLeads] = useState(0);
@@ -74,6 +80,7 @@ const Leads = ({
   const { wrapFetch } = useListLoading();
 
   const [errors, setErrors] = useState({});
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const deepLinkConsumedKeyRef = useRef(null);
 
   const getCrmLeadsApiBases = useCallback((entityTypeNorm) => (
@@ -627,6 +634,15 @@ const Leads = ({
 
   return (
     <>
+      {showCreateModal && (
+        <CreateLeadModal
+          entityType={entityType}
+          currentRole={currentRole}
+          currentEmpId={currentEmpId}
+          onClose={() => setShowCreateModal(false)}
+          onCreated={() => fetchLeads()}
+        />
+      )}
       <div className="leads-module-container">
         {viewMode === 'list' ? (
           <>
@@ -637,6 +653,7 @@ const Leads = ({
                 onResetFilters={handleResetFilters}
                 showFiltersButton={!hideFilters}
                 pushFeedback={pushFeedback}
+                onCreateLead={canCreateLead ? () => setShowCreateModal(true) : null}
               />
             )}
 

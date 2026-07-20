@@ -33,3 +33,39 @@ export function canSeeGstFilingsDashboard(profileData) {
   const role = normalizeRole(profileData);
   return role === 'ADMIN' || role === 'OP_MANAGER';
 }
+
+// --------------------------------------------------------------------------- //
+// Platform RBAC — mirrors the backend's require_permission / assert_platform_
+// permission. The JWT carries permissions.platform.{FEATURE} = [PERMS].
+// Features: EMPLOYEE, USER_ACCESS, SETTINGS. Perms: READ, WRITE, DELETE, SPECIAL.
+// WRITE implies READ (same rule as the backend).
+// --------------------------------------------------------------------------- //
+
+function decodeSessionToken() {
+  try {
+    const token = localStorage.getItem('session_token');
+    if (!token) return null;
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(window.atob(b64));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the current user holds `permission` on `feature`, read from the JWT
+ * permissions claim. If the token carries no permissions claim at all (legacy
+ * token), falls back to the ADMIN role so an admin is never locked out.
+ */
+export function hasPermission(feature, permission) {
+  const payload = decodeSessionToken();
+  const platform = payload?.permissions?.platform;
+  if (!platform || typeof platform !== 'object' || Object.keys(platform).length === 0) {
+    return String(payload?.role || '').toUpperCase() === 'ADMIN';
+  }
+  const perms = Array.isArray(platform[feature]) ? platform[feature] : [];
+  if (permission === 'READ' && perms.includes('WRITE')) return true;
+  return perms.includes(permission);
+}

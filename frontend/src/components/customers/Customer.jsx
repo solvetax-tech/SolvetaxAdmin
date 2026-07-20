@@ -26,7 +26,7 @@ import ManageCustomerServicesModal from './ManageCustomerServicesModal';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromConfig, optionsFromPairs } from '../common/selectOptionUtils';
 import {
-    parseActiveUsernamesFromApi,
+    parseActiveEmployeesFromApi,
     buildRmOpSelectOptions,
 } from '../../utils/activeEmployees';
 import { fetchStaffServiceConfig } from '../../utils/staffServiceConfigApi';
@@ -148,8 +148,10 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                     api.get(`/api/v1/gst-registration/config/STATE`),
                     api.get(`/api/v1/gst-registration/config/BUSINESS_TYPE`),
                 ]);
-                if (rmRes.status === 'fulfilled') setActiveRMs(parseActiveUsernamesFromApi(rmRes.value));
-                if (opRes.status === 'fulfilled') setActiveOps(parseActiveUsernamesFromApi(opRes.value));
+                // emp_id-bearing rows so the RM/OP filter option values are emp_ids
+                // (the backend filters rm_id/op_id as int) — usernames would 422.
+                if (rmRes.status === 'fulfilled') setActiveRMs(parseActiveEmployeesFromApi(rmRes.value));
+                if (opRes.status === 'fulfilled') setActiveOps(parseActiveEmployeesFromApi(opRes.value));
                 if (statesRes.status === 'fulfilled') setStates(statesRes.value.data || []);
                 if (bizTypeRes.status === 'fulfilled') setBusinessTypes(bizTypeRes.value.data || []);
                 try {

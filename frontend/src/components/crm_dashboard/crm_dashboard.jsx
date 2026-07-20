@@ -1147,15 +1147,17 @@ const CrmDashboard = ({ onLogout }) => {
             </div>
           )}
           {activeCrmTab === 'leads' && (
-            <Leads 
+            <Leads
               key={`leads-tab-${activeEntityType}-${activeSearchTerm}-${leadOpenSeq}`}
-              entityType={activeEntityType} 
+              entityType={activeEntityType}
               initialFilters={leadsInitialFilters}
               targetLeadId={targetLeadId}
               targetEntityId={targetEntityId}
               targetView={targetView}
               targetCallStatus={targetCallStatus}
               onLeadOpened={handleLeadOpened}
+              currentRole={profileData?.role}
+              currentEmpId={profileData?.emp_id}
             />
           )}
           {activeCrmTab === CRM_TAB_PAYMENT_PENDING && isIncomeTaxCrm && (

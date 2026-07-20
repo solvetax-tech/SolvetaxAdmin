@@ -16,7 +16,11 @@ from backend.gst_registration.gst_registration_helpers import (
     GST_CRM_ENTITY_TYPE,
 )
 from backend.common.status_constants import REGISTRATION_STATUSES
-from backend.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
+from backend.crm.crm_leads_common import (
+    _fetch_valid_stage_codes,
+    _invalidate_crm_cache,
+    advance_crm_lead_stage_system,
+)
 from backend.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from backend.security.rbac import require_permission
 from backend.logger import logger
@@ -84,6 +88,31 @@ async def _customer_exists_and_active(conn: asyncpg.Connection, customer_id: int
         customer_id,
     )
     return row is not None
+
+
+async def _sync_crm_leads_on_gst_approval(
+    conn: asyncpg.Connection, gst_id: int
+) -> List[int]:
+    """
+    A GST registration reaching APPROVED means the registration is complete, so
+    advance its linked CRM lead(s) to GST_REGISTRATION_DONE and log a SYSTEM
+    crm_activities row. Forward-only: a lead already further along the funnel
+    (GST_REGISTRATION_DONE, SCHEDULED_PAYMENTS, SUBSCRIBED, NOT_INTERESTED) is
+    left untouched. entity_type NULL is treated as GST_REGISTRATION.
+    """
+    return await advance_crm_lead_stage_system(
+        conn,
+        entity_id=gst_id,
+        entity_type=GST_CRM_ENTITY_TYPE,
+        from_stages=(
+            "FRESH_LEAD",
+            "PENDING_REGISTRATION_DATA",
+            "FOLLOW_UP",
+            "INTERESTED",
+        ),
+        to_stage="GST_REGISTRATION_DONE",
+        remarks="Auto stage sync from GST registration update",
+    )
 
 
 # -------------------------------------------------------------------
@@ -605,6 +634,13 @@ async def create_gst_registration_lead(
                 if rm_id is None:
                     _raise_gst_validation_error(
                         {"rm_id": "rm_id is required (or sign in as RM to default to yourself)."},
+                        status_code=400,
+                    )
+                # OP must carry over too: a lead with no OP would otherwise push
+                # into a GST registration with a blank OP. Require it (mirrors rm).
+                if created_by_val is None:
+                    _raise_gst_validation_error(
+                        {"op_id": "op_id is required — assign an OP to the lead first (or sign in as OP)."},
                         status_code=400,
                     )
 
@@ -1799,21 +1835,52 @@ async def edit_gst_registration(
                     json.dumps(dict(new_row), default=str),
                 )
 
+                # --------------------------------------------------
+                # 4️⃣.1 CRM funnel sync
+                #   APPROVED registration ⇒ advance the linked CRM lead to
+                #   GST_REGISTRATION_DONE and log a SYSTEM crm_activities row.
+                #   Forward-only; see _sync_crm_leads_on_gst_approval.
+                # --------------------------------------------------
+                synced_crm_lead_ids: List[int] = []
+                if (
+                    "registration_status" in update_data
+                    and str(new_row.get("registration_status") or "").strip().upper()
+                    == "APPROVED"
+                ):
+                    synced_crm_lead_ids = await _sync_crm_leads_on_gst_approval(
+                        conn, gst_id
+                    )
+                    for _lid in synced_crm_lead_ids:
+                        log.info(
+                            "CRM lead advanced to GST_REGISTRATION_DONE | "
+                            "lead_id=%s | gst_id=%s",
+                            _lid,
+                            gst_id,
+                        )
+
                 log.info(
                     "GST updated successfully | gst_id=%s | fields=%s",
                     gst_id,
                     list(update_data.keys()),
                 )
-                await _invalidate_gst_registration_cache(
-                    new_row.get("customer_id"),
-                    new_row.get("id"),
-                )
 
-                return {
-                    **dict(new_row),
-                    "message": "GST registration updated successfully.",
-                    "request_id": request_id,
-                }
+            # Transaction has committed here (the `async with conn.transaction()`
+            # block just exited). Invalidate caches now — NOT inside the txn —
+            # so a concurrent read during the commit window cannot repopulate a
+            # cache entry with pre-commit (stale) data and leave the UI showing
+            # an old stage after the row has actually changed.
+            await _invalidate_gst_registration_cache(
+                new_row.get("customer_id"),
+                new_row.get("id"),
+            )
+            for _lid in synced_crm_lead_ids:
+                await _invalidate_crm_cache(_lid)
+
+            return {
+                **dict(new_row),
+                "message": "GST registration updated successfully.",
+                "request_id": request_id,
+            }
 
         # --------------------------------------------------
         # UNIQUE CONSTRAINTS

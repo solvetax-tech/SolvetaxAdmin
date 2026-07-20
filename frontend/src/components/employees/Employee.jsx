@@ -34,6 +34,7 @@ import Toast from '../common/Toast';
 import './EmployeeDetailsModal.css';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromPairs } from '../common/selectOptionUtils';
+import { hasPermission } from '../../utils/rbac';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -209,7 +210,8 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
         }
     }, [autoOpenEmpId, data]);
 
-    const canEditEmployee = isAdmin || canSignup;
+    // RBAC: gate by the EMPLOYEE feature permission (was role-only `isAdmin`).
+    const canEditEmployee = hasPermission('EMPLOYEE', 'WRITE');
 
     const openEmployeeView = (item, e) => {
         e?.stopPropagation();
@@ -425,7 +427,7 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                     <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={() => setShowFilterModal(true)}>
                         Filters
                     </Button>
-                    {canSignup && (
+                    {canEditEmployee && (
                         <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setIsModalOpen(true)}>
                             New Employee
                         </Button>

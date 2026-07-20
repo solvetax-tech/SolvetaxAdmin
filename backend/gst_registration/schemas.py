@@ -394,6 +394,25 @@ class GSTRegistrationEditIn(BaseModel):
             return v.upper()
         return v
 
+    @field_validator("registration_status", mode="before")
+    @classmethod
+    def normalize_registration_status(cls, v):
+        # UI sends the display label (e.g. "Approved"); the Literal wants
+        # "APPROVED". Upper-case it (matches how the other coded fields normalize).
+        if isinstance(v, str):
+            s = v.strip()
+            return s.upper() if s else None
+        return v
+
+    @field_validator("customer_id", "rm_id", "created_by", mode="before")
+    @classmethod
+    def empty_int_to_none(cls, v):
+        # An empty form field ("") must not be parsed as an int — treat it as
+        # "not provided" rather than raising a validation error.
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
     @field_validator("email", "secondary_email", mode="before")
     @classmethod
     def normalize_email(cls, v):

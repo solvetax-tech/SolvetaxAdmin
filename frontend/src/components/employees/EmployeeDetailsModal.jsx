@@ -21,8 +21,9 @@ import {
 } from '../common/AppDrawerEditFooter';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromPairs } from '../common/selectOptionUtils';
+import { hasPermission } from '../../utils/rbac';
 
-const EmployeeDetailsModal = ({ isOpen, onClose, empId, isAdmin, initialEditMode = false, onUpdated }) => {
+const EmployeeDetailsModal = ({ isOpen, onClose, empId, initialEditMode = false, onUpdated }) => {
     const [employee, setEmployee] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -328,7 +329,7 @@ const EmployeeDetailsModal = ({ isOpen, onClose, empId, isAdmin, initialEditMode
                                         </div>
                                         <div className="form-group-v4">
                                             <label className="modal-label-caps">Role</label>
-                                            {editMode ? (
+                                            {editMode && hasPermission('USER_ACCESS', 'WRITE') ? (
                                                 <FormCustomSelect
                                                     name="role"
                                                     value={formData.role || ''}
@@ -411,12 +412,12 @@ const EmployeeDetailsModal = ({ isOpen, onClose, empId, isAdmin, initialEditMode
 
                     {showEditFooter && !loading && (
                         <AppDrawerModalFooter>
-                            {isAdmin && employee?.is_active && (
+                            {hasPermission('EMPLOYEE', 'DELETE') && employee?.is_active && (
                                 <AppDrawerBtnDelete onClick={() => handleToggleStatus(false)} disabled={subLoading || loading}>
                                     Deactivate
                                 </AppDrawerBtnDelete>
                             )}
-                            {isAdmin && !employee?.is_active && (
+                            {hasPermission('EMPLOYEE', 'WRITE') && !employee?.is_active && (
                                 <AppDrawerBtnSave
                                     onClick={() => handleToggleStatus(true)}
                                     icon={Check}
