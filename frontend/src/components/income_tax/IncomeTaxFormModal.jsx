@@ -835,7 +835,10 @@ const IncomeTaxFormModal = ({
                                         value={form.rm_id}
                                         onChange={handleChange}
                                         options={optionsFromPairs(
-                                            buildRmOpSelectOptions(configs?.activeRMs || []),
+                                            buildRmOpSelectOptions(configs?.activeRMs || [], {
+                                                id: editingRecord?.rm_id,
+                                                label: editingRecord?.rm_name || editingRecord?.rm_username,
+                                            }),
                                             'Select RM'
                                         )}
                                         placeholder="Select RM"
@@ -851,7 +854,10 @@ const IncomeTaxFormModal = ({
                                         value={form.op_id}
                                         onChange={handleChange}
                                         options={optionsFromPairs(
-                                            buildRmOpSelectOptions(configs?.activeOps || []),
+                                            buildRmOpSelectOptions(configs?.activeOps || [], {
+                                                id: editingRecord?.op_id,
+                                                label: editingRecord?.op_name || editingRecord?.op_username,
+                                            }),
                                             'Select OP'
                                         )}
                                         placeholder="Select OP"

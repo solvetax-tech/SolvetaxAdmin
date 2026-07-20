@@ -23,6 +23,10 @@ from backend.utils import (
 from backend.logger import logger
 from backend.text_search_filters import append_fuzzy_name_or_filter
 from backend.payments.payment_cache_invalidation import invalidate_payment_related_caches
+from backend.crm.crm_leads_common import (
+    advance_crm_lead_stage_system,
+    _invalidate_crm_cache,
+)
 from backend.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -156,6 +160,24 @@ async def create_registration_payment(
                     None,
                 )
 
+                # --------------------------------------------------
+                # CRM funnel sync
+                #   Payment fully settled (entity remaining = 0 ⇒ payment_status
+                #   PAID) means the customer subscribed: advance the linked CRM
+                #   lead SCHEDULED_PAYMENTS / GST_REGISTRATION_DONE -> SUBSCRIBED
+                #   and log a SYSTEM crm_activities row. Forward-only.
+                # --------------------------------------------------
+                synced_crm_lead_ids: List[int] = []
+                if payment_row["payment_status"] == "PAID":
+                    synced_crm_lead_ids = await advance_crm_lead_stage_system(
+                        conn,
+                        entity_id=payload.entity_id,
+                        entity_type=entity_type,
+                        from_stages=("GST_REGISTRATION_DONE", "SCHEDULED_PAYMENTS"),
+                        to_stage="SUBSCRIBED",
+                        remarks="Auto stage sync from payment completion",
+                    )
+
             # --------------------------------------------------
             # RESPONSE
             # --------------------------------------------------
@@ -164,6 +186,10 @@ async def create_registration_payment(
                 gst_registration_id=payload.entity_id,
                 crm=True,
             )
+            # Per-lead CRM caches (History / stage timeline) aren't covered by the
+            # crm=True bundle above, so clear them for each advanced lead.
+            for _lid in synced_crm_lead_ids:
+                await _invalidate_crm_cache(_lid)
             return {
                 **dict(payment_row),
                 "message": "Payment created successfully.",

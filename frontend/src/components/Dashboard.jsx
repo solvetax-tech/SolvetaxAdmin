@@ -54,7 +54,7 @@ import DataTableLoader from './common/DataTableLoader';
 import ThemeToggle from './common/ThemeToggle';
 import useFollowupReminders from '../hooks/useFollowupReminders';
 import useGstFilingFollowupReminders from '../hooks/useGstFilingFollowupReminders';
-import { canSeeGstFilingsDashboard, isTrueAdmin } from '../utils/rbac';
+import { canSeeGstFilingsDashboard, isTrueAdmin, hasPermission } from '../utils/rbac';
 
 class DashboardErrorBoundary extends React.Component {
   constructor(props) {
@@ -1426,6 +1426,7 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-label">Dashboard</span>
           </div>
 
+          {hasPermission('EMPLOYEE', 'READ') && (
           <div
             className={`nav-item ${activeTab === 'employees' ? 'active' : ''}`}
             onClick={() => handleTabChange('employees')}
@@ -1434,6 +1435,7 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-icon"><Users size={18} /></span>
             <span className="nav-label">Employees</span>
           </div>
+          )}
 
           <div
             className={`nav-item ${activeTab === 'customers' ? 'active' : ''}`}
@@ -1522,6 +1524,7 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-label">Knowledge</span>
           </div>
 
+          {hasPermission('SETTINGS', 'READ') && (
           <div
             className={`nav-item footer-item ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => handleTabChange('settings')}
@@ -1530,6 +1533,7 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-icon"><SettingsIcon size={18} /></span>
             <span className="nav-label">Settings</span>
           </div>
+          )}
 
           <div
             className={`nav-item footer-item ${activeTab === 'profile' ? 'active' : ''}`}

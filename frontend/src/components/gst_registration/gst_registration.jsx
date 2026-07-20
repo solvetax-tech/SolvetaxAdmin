@@ -22,6 +22,7 @@ import {
     fetchActiveRmUsernames,
     fetchActiveOpUsernames,
     fetchActiveRmEmployees,
+    fetchActiveOpEmployees,
     buildRmOpSelectOptions,
     withAssignmentFormFields,
 } from '../../utils/activeEmployees';
@@ -892,9 +893,12 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                     const data = response.data?.items || response.data?.data || response.data || [];
                     updatedConfigs[source.key] = Array.isArray(data) ? data : [];
                 });
+                // Edit drawer needs emp_id-bearing rows (not username strings) so the
+                // RM/OP <select> option values match formData.rm_id / created_by (emp_ids)
+                // — both to DISPLAY the current assignee and to SAVE an int, not a name.
                 const [activeRMs, activeOps] = await Promise.all([
-                    fetchActiveRmUsernames(),
-                    fetchActiveOpUsernames(),
+                    fetchActiveRmEmployees(),
+                    fetchActiveOpEmployees(),
                 ]);
                 updatedConfigs.activeRMs = activeRMs;
                 updatedConfigs.activeOps = activeOps;
@@ -1102,7 +1106,8 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
         const rmId = record.rm_id;
         if (!rmId) return '-';
         if (typeof rmId === 'string' && Number.isNaN(parseInt(rmId, 10))) return rmId;
-        if (configs.activeRMs.includes(rmId) || configs.activeRMs.includes(String(rmId))) return String(rmId);
+        const rmMatch = (configs.activeRMs || []).find((e) => e?.emp_id != null && String(e.emp_id) === String(rmId));
+        if (rmMatch) return rmMatch.username || rmMatch.email || `ID: ${rmId}`;
         return `ID: ${rmId}`;
     };
 
@@ -1114,7 +1119,8 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
         const opId = record.created_by;
         if (!opId) return '-';
         if (typeof opId === 'string' && Number.isNaN(parseInt(opId, 10))) return opId;
-        if (configs.activeOps.includes(opId) || configs.activeOps.includes(String(opId))) return String(opId);
+        const opMatch = (configs.activeOps || []).find((e) => e?.emp_id != null && String(e.emp_id) === String(opId));
+        if (opMatch) return opMatch.username || opMatch.email || `ID: ${opId}`;
         return `ID: ${opId}`;
     };
 
@@ -1644,6 +1650,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                                     onChange={handleChange}
                                                     options={optionsFromPairs(
                                                         buildRmOpSelectOptions(configs.activeRMs, {
+                                                            id: item?.rm_id,
                                                             username: item?.rm_username || item?.rm_name || getRmDisplayName(item),
                                                             label: item?.rm_username || item?.rm_name || getRmDisplayName(item),
                                                         }),
@@ -1666,6 +1673,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                                     onChange={handleChange}
                                                     options={optionsFromPairs(
                                                         buildRmOpSelectOptions(configs.activeOps, {
+                                                            id: item?.created_by,
                                                             username: item?.op_username || item?.created_by_name || getOpDisplayName(item),
                                                             label: item?.op_username || item?.created_by_name || getOpDisplayName(item),
                                                         }),

@@ -4,7 +4,7 @@ import io
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 import asyncpg
@@ -18,6 +18,7 @@ from backend.crm.schemas_common import (
     CRMBulkAutoAssignConfigIn,
     CRMBulkAutoAssignEnabledPatchIn,
     CRMBulkImportIn,
+    CRMLeadCreateIn,
     CRMLeadMarketingCreateIn,
     CRMLeadStagesOut,
     CRMLeadStageItem,
@@ -110,6 +111,85 @@ def _entity_type_query(value: Optional[str]) -> str:
     """Normalize entity_type for CRM reference data and lead filters (default GST registration CRM)."""
     v = (value or DEFAULT_CRM_ENTITY_TYPE).strip().upper()
     return v if v else DEFAULT_CRM_ENTITY_TYPE
+
+
+async def advance_crm_lead_stage_system(
+    conn: asyncpg.Connection,
+    entity_id: int,
+    entity_type: str,
+    from_stages: Sequence[str],
+    to_stage: str,
+    remarks: str,
+) -> List[int]:
+    """
+    Forward-only CRM lead stage advance driven by a downstream SYSTEM event
+    (GST registration approved, payment fully settled, ...).
+
+    For every active lead linked to (entity_id, entity_type) whose stage is in
+    ``from_stages``: set stage to ``to_stage``, close any open follow-up
+    (``follow_up_status='COMPLETED'`` — followup_at kept as history), and log a
+    SYSTEM ``crm_activities`` row (old_stage -> to_stage, ``performed_by`` NULL).
+    For the GST funnel (entity_type == 'GST_REGISTRATION') a NULL/blank lead
+    entity_type is treated as GST_REGISTRATION, mirroring the read path.
+
+    Runs inside the caller's transaction; the caller invalidates the CRM cache
+    for each returned lead id after commit. Returns the synced lead ids.
+    """
+    et = (entity_type or "").strip().upper()
+    rows = await conn.fetch(
+        f"""
+        SELECT id, stage
+          FROM {DB_SCHEMA}.crm_leads
+         WHERE entity_id = $1
+           AND (
+               upper(trim(entity_type)) = $2
+               OR (NULLIF(trim(entity_type), '') IS NULL AND $2 = 'GST_REGISTRATION')
+           )
+           AND is_active = TRUE
+           AND stage = ANY($3::text[])
+         FOR UPDATE
+        """,
+        entity_id,
+        et,
+        list(from_stages),
+    )
+
+    synced_ids: List[int] = []
+    for row in rows:
+        # Reaching this milestone (service done / subscribed) closes any open
+        # follow-up: the RM shouldn't be prompted to call again. follow_up_status
+        # is NOT NULL (DEFAULT 'PENDING'), so 'COMPLETED' is the "no open
+        # follow-up" state — every follow-up alert/board excludes it. followup_at
+        # is kept as history (the new stage is not a follow-up stage anyway).
+        await conn.execute(
+            f"""
+            UPDATE {DB_SCHEMA}.crm_leads
+               SET stage = $1,
+                   follow_up_status = 'COMPLETED',
+                   completed_at = COALESCE(completed_at, NOW()),
+                   updated_at = NOW()
+             WHERE id = $2
+            """,
+            to_stage,
+            row["id"],
+        )
+        # SYSTEM activity (no user actor) — mirrors the call-flow SYSTEM inserts.
+        await conn.execute(
+            f"""
+            INSERT INTO {DB_SCHEMA}.crm_activities (
+                lead_id, entity_type, activity_type, old_stage, new_stage,
+                remarks, performed_by, performed_at, created_at
+            )
+            VALUES ($1, $2, 'SYSTEM', $3, $4, $5, NULL, NOW(), NOW())
+            """,
+            row["id"],
+            et,
+            row["stage"],
+            to_stage,
+            remarks,
+        )
+        synced_ids.append(int(row["id"]))
+    return synced_ids
 
 
 def _crm_entity_type_match_sql(et_value: str, param_no: int, alias: str = "l") -> str:
@@ -2894,6 +2974,98 @@ async def get_crm_lead_followup_alerts(
         stage=stage,
         current_user=current_user,
     )
+
+
+async def _svc_create_crm_lead(entity_type: str, payload: CRMLeadCreateIn, role: str, emp_id: int) -> dict:
+    """Create one crm_leads row for an internal (authenticated) manual intake.
+
+    stage=FRESH_LEAD, follow_up_status=PENDING, is_active=true, entity_id=NULL.
+    entity_type is fixed by the caller (GST_REGISTRATION / INCOME_TAX), never
+    client-sent. Deduplicates on (mobile + entity_type): if an active lead already
+    exists it is returned idempotently with ``duplicate=True``.
+
+    Assignment (rm_id + op_id are both REQUIRED on every created lead):
+      - RM creating -> rm_id is forced to the creator (self); they pick op_id.
+      - OP creating -> op_id is forced to the creator (self); they pick rm_id.
+      - ADMIN / SALES_MANAGER / OP_MANAGER (and other roles) -> pick both.
+    rm_assigned_at / op_assigned_at are set by the DB trigger from rm_id / op_id.
+    """
+    entity_norm = _normalize_code(entity_type)
+    mobile = payload.mobile.strip()
+    full_name_val = (payload.full_name or "").strip()[:200] or None
+    email_val = payload.email or None
+    preferred_lang = (payload.preferred_language or "").strip()[:50] or None
+    lead_type_u = (payload.lead_type or "").strip().upper()[:50] or None
+    tag_v = (payload.tag or "").strip()[:100] or None
+    # Default the source to MANUAL so admin-created leads are traceable.
+    lead_source_u = ((payload.lead_source or "MANUAL").strip().upper()[:100]) or "MANUAL"
+    # ay only applies to the ITR funnel.
+    ay_val = _normalize_ay(payload.ay) if entity_norm == "INCOME_TAX" else None
+    remarks = payload.remarks
+
+    # Role-based RM/OP assignment.
+    role_u = (role or "").strip().upper()
+    if role_u == "RM":
+        rm_id, op_id = emp_id, payload.op_id
+    elif role_u == "OP":
+        rm_id, op_id = payload.rm_id, emp_id
+    else:  # ADMIN / SALES_MANAGER / OP_MANAGER / other staff -> assign both
+        rm_id, op_id = payload.rm_id, payload.op_id
+    missing = {}
+    if not rm_id:
+        missing["rm_id"] = "RM is required."
+    if not op_id:
+        missing["op_id"] = "OP is required."
+    if missing:
+        raise _validation_error("RM and OP are required.", missing)
+
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        valid_stages = await _fetch_valid_stage_codes(conn, entity_norm)
+        if valid_stages and "FRESH_LEAD" not in valid_stages:
+            raise _validation_error(
+                "Stage configuration missing.",
+                {"entity_type": f"FRESH_LEAD must be configured for {entity_norm} in crm_lead_stages."},
+            )
+        async with conn.transaction():
+            existing = await conn.fetchrow(
+                f"""
+                SELECT * FROM {DB_SCHEMA}.crm_leads
+                WHERE trim(mobile) = trim($1) AND entity_type = $2 AND is_active = TRUE
+                ORDER BY id DESC LIMIT 1 FOR UPDATE
+                """,
+                mobile, entity_norm,
+            )
+            if existing is not None:
+                await _invalidate_crm_cache(existing["id"])
+                return {
+                    "message": "CRM lead already exists.",
+                    "lead_id": existing["id"],
+                    "lead": dict(existing),
+                    "duplicate": True,
+                }
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {DB_SCHEMA}.crm_leads (
+                    mobile, full_name, email, entity_id, entity_type, preferred_language,
+                    stage, follow_up_status, rm_id, op_id, rm_assigned_at, op_assigned_at,
+                    remarks, is_active, lead_type, tag, lead_source, ay, created_at, updated_at
+                )
+                VALUES (
+                    $1, $2, $3, NULL, $4, $5,
+                    'FRESH_LEAD', 'PENDING', $6, $7, NULL, NULL,
+                    $8, TRUE, $9, $10, $11, $12, NOW(), NOW()
+                )
+                RETURNING *
+                """,
+                mobile, full_name_val, email_val, entity_norm, preferred_lang,
+                rm_id, op_id, remarks, lead_type_u, tag_v, lead_source_u, ay_val,
+            )
+
+    lead_id = row["id"]
+    await _invalidate_crm_cache(lead_id)
+    logger.info("crm_lead_created id=%s entity_type=%s", lead_id, entity_norm)
+    return {"message": "CRM lead created.", "lead_id": lead_id, "lead": dict(row), "duplicate": False}
 
 
 @router.post(

@@ -26,12 +26,13 @@ from backend.crm.crm_leads_common import (
     _normalize_code,
     _performed_by_emp_id,
     _require_crm_row_context,
+    _svc_create_crm_lead,
     _closed_stage_blocks_call_update,
     _validate_call_config,
     _validate_crm_call_against_mappings,
     _validation_error,
 )
-from backend.crm.schemas_common import CRMLeadEntityIdPatchIn
+from backend.crm.schemas_common import CRMLeadCreateIn, CRMLeadEntityIdPatchIn
 from backend.crm.schemas_gst import CRMCallUpdateIn, CRMFollowupStatusUpdateIn, CRMLeadEditIn
 from backend.logger import logger
 from backend.redis_cache import build_cache_key, get_or_set_json as redis_get_or_set_json
@@ -39,6 +40,18 @@ from backend.security.rbac import require_permission
 from backend.utils import DB_SCHEMA, generate_uuid, get_db_pool
 
 router = APIRouter(prefix="/api/v1/crm/leads", tags=["CRM Leads GST"])
+
+
+@router.post("/create", status_code=status.HTTP_201_CREATED, summary="Create a GST CRM lead (FRESH_LEAD)")
+async def create_gst_crm_lead(
+    payload: CRMLeadCreateIn,
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
+):
+    """Create a GST_REGISTRATION funnel lead at stage FRESH_LEAD. entity_type is
+    fixed here (never client-sent); dedups on (mobile + GST_REGISTRATION)."""
+    role, emp_id = _get_user_context(current_user)
+    return await _svc_create_crm_lead("GST_REGISTRATION", payload, role, emp_id)
+
 
 # --- GST funnel call transitions ---
 
