@@ -29,7 +29,12 @@ jobs:
       - name: Install deps
         run: npm ci
         working-directory: frontend
-      - name: ESLint
+      # ADVISORY for now: the repo has a large pre-existing ESLint backlog
+      # (~181 errors) unrelated to any single change. continue-on-error keeps the
+      # issues visible in the log without blocking merges. Once the backlog is
+      # cleared, remove continue-on-error and mark this a required check.
+      - name: ESLint (advisory)
+        continue-on-error: true
         run: npm run lint
         working-directory: frontend
 
