@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Users, ChevronRight, Settings as SettingsIcon } from 'lucide-react';
 import Version from '../versions/Version';
-import { History } from 'lucide-react';
+import { History, Bug } from 'lucide-react';
 import CustomerServiceBulkAssign from '../customers/CustomerServiceBulkAssign';
+import IssuesPage from '../issues/IssuesPage';
 import './SettingsTab.css';
 
 const SettingsTab = ({ isAdmin, setToastMessage }) => {
@@ -30,6 +31,14 @@ const SettingsTab = ({ isAdmin, setToastMessage }) => {
             icon: <History size={24} className="option-icon" />,
             allowed: isAdmin,
             action: () => setCurrentView('versions'),
+        },
+        {
+            id: 'issues',
+            title: 'Issues',
+            description: 'Review and resolve reported issues. Scoped to what your role can see.',
+            icon: <Bug size={24} className="option-icon" />,
+            allowed: true,
+            action: () => setCurrentView('issues'),
         },
     ];
 
@@ -67,6 +76,21 @@ const SettingsTab = ({ isAdmin, setToastMessage }) => {
                     <span className="breadcrumb-current">Bulk Assign</span>
                 </div>
                 <CustomerServiceBulkAssign setToastMessage={setToastMessage} />
+            </div>
+        );
+    }
+
+    if (currentView === 'issues') {
+        return (
+            <div className="settings-page-wrapper">
+                <div className="settings-breadcrumb">
+                    <button onClick={() => setCurrentView('hub')} className="breadcrumb-link">
+                        <SettingsIcon size={14} /> Settings
+                    </button>
+                    <ChevronRight size={14} className="breadcrumb-separator" />
+                    <span className="breadcrumb-current">Issues</span>
+                </div>
+                <IssuesPage isAdmin={isAdmin} setToastMessage={setToastMessage} />
             </div>
         );
     }

@@ -73,7 +73,7 @@ import GSTFilingsReturns from './GSTFilingsReturns';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromConfig, optionsFromConfigOnly, optionsFromPairs } from '../common/selectOptionUtils';
 import {
-    parseActiveUsernamesFromApi,
+    parseActiveEmployeesFromApi,
     buildRmOpSelectOptions,
 } from '../../utils/activeEmployees';
 import Button from '../ui/Button';
@@ -774,8 +774,10 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
 
             setConfigs({
                 states: statesRes.data || [],
-                activeRMs: parseActiveUsernamesFromApi(rmsRes),
-                activeOps: parseActiveUsernamesFromApi(opsRes),
+                // emp_id-bearing rows so RM/OP <select> option values are emp_ids
+                // (filter + create/edit form both send rm_id/op_id as int).
+                activeRMs: parseActiveEmployeesFromApi(rmsRes),
+                activeOps: parseActiveEmployeesFromApi(opsRes),
                 employees: adminList,
                 businessTypes: btRes.data?.data || btRes.data || [],
                 entityTypes: entityRes.data?.items || entityRes.data?.data || entityRes.data || []
@@ -1162,6 +1164,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
 
             // Cleanup numeric/optional fields
             if (payload.rent) payload.rent = parseFloat(payload.rent);
+            if (payload.rm_id) payload.rm_id = parseInt(payload.rm_id);
             if (payload.op_id) payload.op_id = parseInt(payload.op_id);
 
             // 🔥 STRICT LITERAL NORMALIZATION: Ensure backend-required literals are correct uppercase
@@ -2718,7 +2721,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                 name="rm_id"
                                                 value={createForm.rm_id}
                                                 onChange={(e) => setCreateForm({ ...createForm, rm_id: e.target.value })}
-                                                options={optionsFromPairs(buildRmOpSelectOptions(configs.activeRMs), 'Select RM')}
+                                                options={optionsFromPairs(buildRmOpSelectOptions(configs.activeRMs, { id: editingFiling?.rm_id }), 'Select RM')}
                                                 placeholder="Select RM"
                                                 ariaLabel="Relationship manager"
                                             />
@@ -2731,7 +2734,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                 name="op_id"
                                                 value={createForm.op_id}
                                                 onChange={(e) => setCreateForm({ ...createForm, op_id: e.target.value })}
-                                                options={optionsFromPairs(buildRmOpSelectOptions(configs.activeOps), 'Select Ops')}
+                                                options={optionsFromPairs(buildRmOpSelectOptions(configs.activeOps, { id: editingFiling?.op_id }), 'Select Ops')}
                                                 placeholder="Select Ops"
                                                 ariaLabel="Operations personnel"
                                             />

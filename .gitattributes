@@ -1,0 +1,7 @@
+# Shell scripts MUST stay LF — they run under /bin/sh in the Linux container,
+# and a CRLF shebang (`#!/bin/sh\r`) fails with "bad interpreter".
+*.sh text eol=lf
+
+# Migration SQL: keep line endings stable so file checksums are reproducible
+# across machines (the runner hard-fails on checksum drift).
+*.sql text eol=lf

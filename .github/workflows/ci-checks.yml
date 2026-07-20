@@ -1,0 +1,66 @@
+# CI gate for the PROD path. Runs on every PR into `prod` (and on demand).
+# Nothing here pushes or deploys — it only proves the change is sound. Pair it
+# with branch protection on `prod` (require these checks + 1 review) so a PR
+# can't merge until they're green. The real deploy runs after merge, in
+# deploy-prod.yml.
+#
+# NOTE: this repo has no unit-test suite (no pytest/vitest). These are the checks
+# that are meaningful today: lint, a backend syntax compile, and a full image
+# build (which itself runs `vite build` + `pip install`). If you add real tests
+# later, drop a `test` job here and mark it required too.
+
+name: CI checks (PR to prod)
+
+on:
+  pull_request:
+    branches: [prod]
+  workflow_dispatch:
+
+jobs:
+  frontend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install deps
+        run: npm ci
+        working-directory: frontend
+      # ADVISORY for now: the repo has a large pre-existing ESLint backlog
+      # (~181 errors) unrelated to any single change. continue-on-error keeps the
+      # issues visible in the log without blocking merges. Once the backlog is
+      # cleared, remove continue-on-error and mark this a required check.
+      - name: ESLint (advisory)
+        continue-on-error: true
+        run: npm run lint
+        working-directory: frontend
+
+  backend-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Compiles every .py in backend/ and the migration runner — catches syntax
+      # errors without needing a database or the full dependency install.
+      - name: Syntax compile (backend + migration runner)
+        run: python -m compileall -q backend db
+
+  image-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Building the image is the comprehensive gate: npm ci + vite build
+      # (frontend), pip install (backend deps incl. the migration runner's
+      # asyncpg/pyyaml), and the COPY of db/ + entrypoint. If this is green, the
+      # exact artifact that would ship to PROD packages cleanly. No push.
+      - name: Build production image
+        run: |
+          docker build \
+            --build-arg VITE_PUBLIC_API_KEY="${{ secrets.VITE_PUBLIC_API_KEY }}" \
+            -t solvetax-admin:ci \
+            .

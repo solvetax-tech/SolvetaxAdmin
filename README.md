@@ -50,3 +50,4 @@ cd frontend && npm install && npm run dev
 docker compose up --build
 # http://localhost:8000/health
 ```
+.

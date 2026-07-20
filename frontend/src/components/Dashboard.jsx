@@ -18,7 +18,7 @@ import {
   CreditCard,
   BookOpen,
   History,
-  Briefcase, Camera, Edit2, Shield, Clock, Activity, Mail, Phone, Hash, Calendar, CalendarCheck, ShieldCheck, CheckCircle2, XCircle, MoreVertical, Loader2, X, AlertCircle, ArrowRight, Lock, Landmark, ListTodo, Headphones, Sun, Moon
+  Briefcase, Camera, Edit2, Shield, Clock, Activity, Mail, Phone, Hash, Calendar, CalendarCheck, ShieldCheck, CheckCircle2, XCircle, MoreVertical, Loader2, X, AlertCircle, ArrowRight, Lock, Landmark, ListTodo, Headphones, Sun, Moon, Bug
 } from 'lucide-react';
 import './Dashboard.css';
 import './common/AppSideDrawer.css';
@@ -39,6 +39,9 @@ import Followups from './follow_ups/Followups';
 import ServiceDonePaymentPending from './dashboard/ServiceDonePaymentPending';
 import GstFilingMonthlyMatrix from './dashboard/GstFilingMonthlyMatrix';
 import ContactSupportLeads from './contact_support/ContactSupportLeads';
+import RaiseIssueModal from './issues/RaiseIssueModal';
+import TasksPage from './tasks/TasksPage';
+import useTaskReminders from '../hooks/useTaskReminders';
 import api from '../utils/api';
 import { fetchCustomerServiceProgressTracker } from '../utils/customerServiceApi';
 import { dispatchGstFilingFocusOpen, resolveGstFocusFromAction } from '../utils/dashboardApi';
@@ -51,7 +54,7 @@ import DataTableLoader from './common/DataTableLoader';
 import ThemeToggle from './common/ThemeToggle';
 import useFollowupReminders from '../hooks/useFollowupReminders';
 import useGstFilingFollowupReminders from '../hooks/useGstFilingFollowupReminders';
-import { canSeeGstFilingsDashboard, isTrueAdmin } from '../utils/rbac';
+import { canSeeGstFilingsDashboard, isTrueAdmin, hasPermission } from '../utils/rbac';
 
 class DashboardErrorBoundary extends React.Component {
   constructor(props) {
@@ -91,7 +94,7 @@ class DashboardErrorBoundary extends React.Component {
   }
 }
 
-const DASHBOARD_SUB_TABS = ['followups', 'progress', 'service-done-payment', 'gst-filing-matrix'];
+const DASHBOARD_SUB_TABS = ['followups', 'progress', 'service-done-payment', 'gst-filing-matrix', 'today-tasks'];
 const DEFAULT_DASHBOARD_SUB_TAB = 'followups';
 
 function resolveDashboardSubTab(sub, tab) {
@@ -210,10 +213,12 @@ const Dashboard = ({ onLogout }) => {
   const [toasts, setToasts] = useState([]);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [hasNotifications, setHasNotifications] = useState(false);
+  const [showRaiseIssue, setShowRaiseIssue] = useState(false);
   const [showCrmDropdown, setShowCrmDropdown] = useState(false);
 
   // --- Follow-up Reminders (service + payment only; GST filings are separate) ---
   useFollowupReminders(profileData);
+  useTaskReminders(profileData);
   useGstFilingFollowupReminders(profileData);
 
   const removeToast = useCallback((id) => {
@@ -1031,6 +1036,13 @@ const Dashboard = ({ onLogout }) => {
             GST Filings
           </button>
         ) : null}
+        <button
+          type="button"
+          className={`sub-nav-btn-v4 ${effectiveDashboardSubTab === 'today-tasks' ? 'active' : ''}`}
+          onClick={() => handleTabChange('dashboard', 'today-tasks')}
+        >
+          Tasks
+        </button>
       </div>
 
       <div className="dashboard-sub-page-v4">
@@ -1047,6 +1059,9 @@ const Dashboard = ({ onLogout }) => {
           ) : null}
           {effectiveDashboardSubTab === 'gst-filing-matrix' ? (
             <GstFilingMonthlyMatrix />
+          ) : null}
+          {effectiveDashboardSubTab === 'today-tasks' ? (
+            <TasksPage setToastMessage={setToastMessage} />
           ) : null}
         </div>
     </>
@@ -1411,6 +1426,7 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-label">Dashboard</span>
           </div>
 
+          {hasPermission('EMPLOYEE', 'READ') && (
           <div
             className={`nav-item ${activeTab === 'employees' ? 'active' : ''}`}
             onClick={() => handleTabChange('employees')}
@@ -1419,6 +1435,7 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-icon"><Users size={18} /></span>
             <span className="nav-label">Employees</span>
           </div>
+          )}
 
           <div
             className={`nav-item ${activeTab === 'customers' ? 'active' : ''}`}
@@ -1507,6 +1524,7 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-label">Knowledge</span>
           </div>
 
+          {hasPermission('SETTINGS', 'READ') && (
           <div
             className={`nav-item footer-item ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => handleTabChange('settings')}
@@ -1515,6 +1533,7 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-icon"><SettingsIcon size={18} /></span>
             <span className="nav-label">Settings</span>
           </div>
+          )}
 
           <div
             className={`nav-item footer-item ${activeTab === 'profile' ? 'active' : ''}`}
@@ -1677,6 +1696,13 @@ const Dashboard = ({ onLogout }) => {
 
           <div className="workspace-actions">
             <div className="topbar-actions-group">
+              <button
+                className="topbar-icon-btn v4-btn"
+                onClick={() => setShowRaiseIssue(true)}
+                title="Report an issue"
+              >
+                <Bug size={20} />
+              </button>
               <button
                 className={`topbar-icon-btn v4-btn ${activeTab === 'notifications' ? 'active' : ''}`}
                 onClick={() => handleTabChange('notifications')}
@@ -2015,6 +2041,14 @@ const Dashboard = ({ onLogout }) => {
         empId={profileData?.emp_id}
         setToastMessage={setToastMessage}
       />
+
+      {/* Report-an-issue drawer (opened from the topbar bug button) */}
+      {showRaiseIssue && (
+        <RaiseIssueModal
+          onClose={() => setShowRaiseIssue(false)}
+          onCreated={() => setToastMessage('Issue reported. Thank you!')}
+        />
+      )}
 
       {/* Global Toast Notification Engine (Stacked v4 Architecture) - 15s Persistence */}
       <div className="st-toast-stack-container">

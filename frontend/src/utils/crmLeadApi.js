@@ -27,6 +27,17 @@ export function getFollowupStatusApiPath(entityType, leadId) {
     return `${getCrmLeadsMutationApiBase(entityType)}/${leadId}/followup-status`;
 }
 
+/**
+ * Create a CRM lead at stage FRESH_LEAD. entity_type is implied by the endpoint:
+ * GST → /api/v1/crm/leads/create, ITR → /api/v1/crm/itr/leads/create.
+ * Returns { message, lead_id, lead, duplicate }.
+ */
+export async function createCrmLead(entityType, body) {
+    const base = getCrmLeadsMutationApiBase(entityType);
+    const res = await api.post(`${base}/create`, body);
+    return res.data;
+}
+
 export function getCallUpdateApiPath(entityType, leadId) {
     return `${getCrmLeadsMutationApiBase(entityType)}/${leadId}/call-update`;
 }

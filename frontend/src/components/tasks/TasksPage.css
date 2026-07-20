@@ -1,0 +1,62 @@
+/* Tasks page chrome: Today/All sub-tabs + status filter pills. */
+
+.tasks-page { width: 100%; box-sizing: border-box; }
+
+.tasks-page-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Today / All switch */
+.tasks-subtabs {
+    display: inline-flex;
+    gap: 4px;
+    padding: 3px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+}
+.tasks-subtab {
+    padding: 6px 16px;
+    background: transparent;
+    border: none;
+    border-radius: calc(var(--radius-md) - 2px);
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+.tasks-subtab:hover { color: var(--text-primary); }
+.tasks-subtab.active {
+    background: var(--accent);
+    color: var(--text-inverse);
+}
+
+/* Status filter */
+.tasks-filter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tasks-filter-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.tasks-status-pills { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.tasks-pill {
+    padding: 5px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+.tasks-pill:hover { color: var(--text-primary); border-color: var(--border-strong); }
+.tasks-pill.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--text-inverse);
+}
