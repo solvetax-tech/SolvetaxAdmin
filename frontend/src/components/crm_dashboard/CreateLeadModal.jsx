@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { XCircle } from 'lucide-react';
+import { XCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import api from '../../utils/api';
 import { createCrmLead, extractCrmApiErrorMessage } from '../../utils/crmLeadApi';
+import { sanitizeGovIdInput } from '../../utils/inputSanitizers';
 
 const unwrapList = (res) => {
     const d = res?.data;
@@ -36,6 +37,8 @@ export default function CreateLeadModal({ entityType, currentRole, onClose, onCr
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
     const [fieldErrors, setFieldErrors] = useState({});
+    // Lead source / type / tag / remarks are advanced — collapsed by default.
+    const [showMore, setShowMore] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -55,7 +58,8 @@ export default function CreateLeadModal({ entityType, currentRole, onClose, onCr
 
     const change = (e) => {
         const { name, value } = e.target;
-        setForm((prev) => ({ ...prev, [name]: value }));
+        // Mobile restricted to 10 digits as they type (backend requires >= 10).
+        setForm((prev) => ({ ...prev, [name]: sanitizeGovIdInput(name, value) }));
         setFieldErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev));
     };
 
@@ -104,6 +108,12 @@ export default function CreateLeadModal({ entityType, currentRole, onClose, onCr
     };
     const roReadonly = { ...fieldStyle, opacity: 0.7, cursor: 'not-allowed' };
     const req = <span style={{ color: 'var(--danger)' }}>*</span>;
+    const moreToggleStyle = {
+        display: 'inline-flex', alignItems: 'center', gap: '6px',
+        background: 'transparent', border: 'none', padding: '4px 0',
+        color: 'var(--accent, #8b5cf6)', fontSize: '13px', fontWeight: 600,
+        cursor: 'pointer', fontFamily: 'inherit',
+    };
 
     return (
         <div className="gst-filters-drawer-overlay" onClick={() => !saving && onClose?.()}>
@@ -122,7 +132,7 @@ export default function CreateLeadModal({ entityType, currentRole, onClose, onCr
                         <div className="filter-section-v4">
                             <div className="filter-group-v4" style={{ marginBottom: '12px' }}>
                                 <label>Mobile {req}</label>
-                                <input type="tel" name="mobile" value={form.mobile} onChange={change} placeholder="10-digit mobile" maxLength={20} />
+                                <input type="tel" name="mobile" value={form.mobile} onChange={change} placeholder="10-digit mobile" maxLength={10} inputMode="numeric" />
                                 {fieldErrors.mobile && <span className="field-error-msg">{fieldErrors.mobile}</span>}
                             </div>
                             <div className="filter-group-v4" style={{ marginBottom: '12px' }}>
@@ -169,35 +179,43 @@ export default function CreateLeadModal({ entityType, currentRole, onClose, onCr
                                 </div>
                             </div>
 
-                            <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '12px', marginBottom: '12px' }}>
-                                <div className="filter-group-v4">
-                                    <label>Lead source</label>
-                                    <input type="text" name="lead_source" value={form.lead_source} onChange={change} placeholder="Default: MANUAL" maxLength={100} />
+                            {/* Assessment year (ITR only) stays visible */}
+                            {isItr && (
+                                <div className="filter-group-v4" style={{ marginBottom: '12px' }}>
+                                    <label>Assessment year</label>
+                                    <input type="text" name="ay" value={form.ay} onChange={change} placeholder="e.g. 2024-25 (optional)" maxLength={20} />
                                 </div>
-                                <div className="filter-group-v4">
-                                    <label>Lead type</label>
-                                    <input type="text" name="lead_type" value={form.lead_type} onChange={change} placeholder="Optional" maxLength={50} />
-                                </div>
-                            </div>
+                            )}
 
-                            <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: isItr ? 'minmax(0,1fr) minmax(0,1fr)' : 'minmax(0,1fr)', gap: '12px', marginBottom: '12px' }}>
-                                <div className="filter-group-v4">
-                                    <label>Tag</label>
-                                    <input type="text" name="tag" value={form.tag} onChange={change} placeholder="Optional" maxLength={100} />
-                                </div>
-                                {isItr && (
-                                    <div className="filter-group-v4">
-                                        <label>Assessment year</label>
-                                        <input type="text" name="ay" value={form.ay} onChange={change} placeholder="e.g. 2024-25 (optional)" maxLength={20} />
+                            {/* Advanced fields — collapsed by default, shown on demand */}
+                            <button type="button" onClick={() => setShowMore((v) => !v)} style={moreToggleStyle}>
+                                {showMore ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                                {showMore ? 'Hide extra details' : 'Add more details'}
+                            </button>
+
+                            {showMore && (
+                                <div style={{ marginTop: '12px' }}>
+                                    <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '12px', marginBottom: '12px' }}>
+                                        <div className="filter-group-v4">
+                                            <label>Lead source</label>
+                                            <input type="text" name="lead_source" value={form.lead_source} onChange={change} placeholder="Default: MANUAL" maxLength={100} />
+                                        </div>
+                                        <div className="filter-group-v4">
+                                            <label>Lead type</label>
+                                            <input type="text" name="lead_type" value={form.lead_type} onChange={change} placeholder="Optional" maxLength={50} />
+                                        </div>
                                     </div>
-                                )}
-                            </div>
-
-                            <div className="filter-group-v4">
-                                <label>Remarks</label>
-                                <textarea name="remarks" value={form.remarks} onChange={change} rows={2} placeholder="Optional" maxLength={2000}
-                                    style={{ ...fieldStyle, resize: 'vertical' }} />
-                            </div>
+                                    <div className="filter-group-v4" style={{ marginBottom: '12px' }}>
+                                        <label>Tag</label>
+                                        <input type="text" name="tag" value={form.tag} onChange={change} placeholder="Optional" maxLength={100} />
+                                    </div>
+                                    <div className="filter-group-v4">
+                                        <label>Remarks</label>
+                                        <textarea name="remarks" value={form.remarks} onChange={change} rows={2} placeholder="Optional" maxLength={2000}
+                                            style={{ ...fieldStyle, resize: 'vertical' }} />
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
 

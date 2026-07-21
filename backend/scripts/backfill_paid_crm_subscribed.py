@@ -70,7 +70,7 @@ async def main() -> None:
                     entity_type=GST_CRM_ENTITY_TYPE,
                     from_stages=_PAID_FROM_STAGES,
                     to_stage="SUBSCRIBED",
-                    remarks="Auto stage sync from payment completion",
+                    # No system remark — user's crm_leads.remarks is left untouched.
                 )
             for lid in ids:
                 print(

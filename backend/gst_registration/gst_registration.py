@@ -111,7 +111,8 @@ async def _sync_crm_leads_on_gst_approval(
             "INTERESTED",
         ),
         to_stage="GST_REGISTRATION_DONE",
-        remarks="Auto stage sync from GST registration update",
+        # No system remark — never pollute the lead's remark history; the user's
+        # crm_leads.remarks is left untouched.
     )
 
 
@@ -1253,7 +1254,27 @@ async def list_gst_registrations(
             SELECT g.*,
                    e_rm.first_name AS rm_name,
                    e_creator.first_name AS created_by_name,
-                   e_op.first_name AS op_name
+                   e_op.first_name AS op_name,
+                   -- One-time action signals for the row actions (Record / Schedule
+                   -- Payment): whether this registration is already fully paid, and
+                   -- the linked CRM lead's funnel stage (already scheduled?).
+                   EXISTS (
+                       SELECT 1
+                         FROM {DB_SCHEMA}.payments p
+                        WHERE p.entity_id = g.id
+                          AND p.entity_type = 'GST_REGISTRATION'
+                          AND p.is_active = TRUE
+                          AND p.payment_status = 'PAID'
+                   ) AS has_paid_payment,
+                   (
+                       SELECT cl.stage
+                         FROM {DB_SCHEMA}.crm_leads cl
+                        WHERE cl.entity_id = g.id
+                          AND (cl.entity_type = 'GST_REGISTRATION' OR cl.entity_type IS NULL)
+                          AND cl.is_active = TRUE
+                        ORDER BY (cl.entity_type = 'GST_REGISTRATION') DESC, cl.id DESC
+                        LIMIT 1
+                   ) AS crm_lead_stage
               FROM {DB_SCHEMA}.gst_registration g
               LEFT JOIN {DB_SCHEMA}.customers c
                      ON g.customer_id = c.customer_id

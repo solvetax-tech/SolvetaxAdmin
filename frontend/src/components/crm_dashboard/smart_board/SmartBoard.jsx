@@ -520,6 +520,17 @@ const SmartBoard = ({ entityType = 'GST_REGISTRATION', initialStage = null, init
               <CrmLeadHistorySummary
                 lead={historyLead}
                 onCallStatus={() => handleRowClick(historyLead, { completeFollowup: true })}
+                onPaymentRecorded={async () => {
+                  if (!historyLead?.id) return;
+                  const apiBase = entityType === 'INCOME_TAX' ? '/api/v1/crm/itr/leads' : '/api/v1/crm/leads';
+                  try {
+                    const res = await api.get(`${apiBase}/filter?id=${historyLead.id}&limit=1&entity_type=${encodeURIComponent(entityType)}`);
+                    const fresh = res.data?.items?.[0];
+                    if (fresh) setHistoryLead(fresh);
+                  } catch (err) { console.warn('Refresh lead after payment failed:', err); }
+                  fetchHistory(historyLead.id, historyCurrentPage);
+                  fetchLeads();
+                }}
               />
 
               {detailsLoading && (
