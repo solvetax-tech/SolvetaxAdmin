@@ -107,6 +107,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
     const [createError, setCreateError] = useState(null);
     const [createFieldErrors, setCreateFieldErrors] = useState({});
     const [showAddPayment, setShowAddPayment] = useState(false);
+    const [paymentEntityId, setPaymentEntityId] = useState(null);
     const [filterInputs, setFilterInputs] = useState(() => readFiltersFromSearch(location.search));
     const [appliedFilters, setAppliedFilters] = useState(() => readFiltersFromSearch(location.search));
 
@@ -564,14 +565,6 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                         </button>
                     )}
                     <button
-                        type="button"
-                        className="btn-cs-payments-entry"
-                        onClick={() => setShowAddPayment(true)}
-                        title="Create customer service payment"
-                    >
-                        <CreditCard size={13} /> Record Payment
-                    </button>
-                    <button
                         className="btn-filter-trigger"
                         onClick={() => setShowFilterModal(true)}
                     >
@@ -1000,6 +993,19 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                                         >
                                             <Pencil size={14} />
                                         </button>
+                                        <button
+                                            type="button"
+                                            className="btn-edit-action"
+                                            title="Record Payment"
+                                            aria-label="Record Payment"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setPaymentEntityId(item.id);
+                                                setShowAddPayment(true);
+                                            }}
+                                        >
+                                            <CreditCard size={14} />
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -1083,8 +1089,10 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
             {showAddPayment && (
                 <AddPayment
                     initialServiceType="CUSTOMER_SERVICE"
+                    initialEntityId={paymentEntityId}
                     onBack={() => {
                         setShowAddPayment(false);
+                        setPaymentEntityId(null);
                         fetchServices();
                     }}
                 />

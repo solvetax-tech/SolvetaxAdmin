@@ -202,6 +202,15 @@ class GSTRegistrationIn(BaseModel):
             return v.upper()
         return v
 
+    @field_validator("customer_id", "rm_id", "created_by", mode="before")
+    @classmethod
+    def empty_int_to_none(cls, v):
+        # An empty form field ("") must not be parsed as an int — treat it as
+        # "not provided" so customer_id / rm_id / created_by stay optional.
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
     # =====================================================
     # Workflow Business Logic
     # =====================================================

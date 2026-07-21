@@ -423,16 +423,6 @@ export const IncomeTax = ({ profileData }) => {
                             </button>
                         )}
                         <button
-                            type="button"
-                            className="btn-itr-payments-entry"
-                            onClick={() =>
-                                navigate('/dashboard?tab=add-payment&service_type=INCOME_TAX&return_tab=income-tax')
-                            }
-                            title="Create Income Tax payment"
-                        >
-                            <CreditCard size={13} /> Record Payment
-                        </button>
-                        <button 
                             className="btn-filter-trigger"
                             onClick={openFilterDrawer}
                         >
@@ -798,6 +788,17 @@ export const IncomeTax = ({ profileData }) => {
                                                     }}
                                                 >
                                                     <Pencil size={14} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="btn-view-action"
+                                                    title="Record Payment"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate(`/dashboard?tab=add-payment&service_type=INCOME_TAX&entity_id=${item.id}&return_tab=income-tax`);
+                                                    }}
+                                                >
+                                                    <CreditCard size={14} />
                                                 </button>
                                             </div>
                                         </div>

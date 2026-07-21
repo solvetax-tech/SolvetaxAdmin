@@ -49,6 +49,7 @@ import {
 } from '../common/AppDrawerEditFooter';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromConfig, optionsFromPairs } from '../common/selectOptionUtils';
+import { sanitizeGovIdInput } from '../../utils/inputSanitizers';
 import GSTRegistrationSignup from './GSTRegistrationSignup';
 import { GSTPeople } from './gst_people';
 import { GSTDocuments } from './gst_documents';
@@ -57,21 +58,72 @@ import '../gst_filings/gst_filings.css';
 import GSTRegistrationViewPanel from './GSTRegistrationViewPanel';
 const BASE_URL = import.meta.env.VITE_API_URL;
 
+const GST_FIELD_LABELS = {
+    gstin: 'GSTIN', pan: 'PAN', mobile: 'Mobile', referral_phone_number: 'Referral phone',
+    email: 'Email', secondary_email: 'Secondary email', business_name: 'Business Name',
+    registration_type: 'Registration Type', ownership_category: 'Ownership Category',
+    state: 'State', turnover_details: 'Turnover Details', customer_id: 'Customer ID',
+    rm_id: 'Relationship Manager', created_by: 'Assigned OP', registration_status: 'Registration Status',
+    suspension_reason: 'Suspension reason', cancellation_reason: 'Cancellation reason',
+};
+
+/** Turn one FastAPI/Pydantic error entry into a clear, field-named message. */
+const gstFieldErrorFromEntry = (entry) => {
+    const rawField = Array.isArray(entry?.loc) ? entry.loc[entry.loc.length - 1] : 'field';
+    const field = String(rawField);
+    const label = GST_FIELD_LABELS[field] || field.replace(/_/g, ' ');
+    const type = entry?.type || '';
+    const rawMsg = String(entry?.msg || '');
+    let msg;
+    if (type === 'missing' || rawMsg.toLowerCase().includes('field required')) {
+        msg = `${label} is required.`;
+    } else if (type === 'string_pattern_mismatch' || rawMsg.toLowerCase().includes('match pattern')) {
+        if (field === 'gstin') msg = 'GSTIN must be a valid 15-character GSTIN (e.g. 29ABCDE1234F1Z5).';
+        else if (field === 'pan') msg = 'PAN must be 10 characters (e.g. ABCDE1234F).';
+        else if (field === 'mobile' || field === 'referral_phone_number') msg = `${label} must be exactly 10 digits.`;
+        else msg = `${label} has an invalid format.`;
+    } else {
+        msg = `${label}: ${rawMsg || 'invalid value'}`;
+    }
+    return { field, msg };
+};
+
+/** All field-level errors from a GST API error, keyed by field name (for inline display). */
+const extractGstFieldErrors = (err) => {
+    const data = err?.response?.data;
+    const out = {};
+    const custom = data?.detail?.error?.fields;
+    if (custom && typeof custom === 'object') Object.assign(out, custom);
+    const pyErrors = Array.isArray(data?.errors)
+        ? data.errors
+        : (Array.isArray(data?.detail) ? data.detail : null);
+    if (pyErrors) {
+        for (const entry of pyErrors) {
+            const { field, msg } = gstFieldErrorFromEntry(entry);
+            if (field && field !== 'field') out[field] = msg;
+        }
+    }
+    return out;
+};
+
 const extractGstRegistrationError = (err) => {
-    const detail = err?.response?.data?.detail;
+    const data = err?.response?.data;
+    const detail = data?.detail;
+    // Custom {detail: {error: {fields}}} format.
     if (detail && typeof detail === 'object' && detail.error && detail.error.fields) {
         const fields = detail.error.fields || {};
         const messages = Object.values(fields).filter(Boolean);
         if (messages.length) return messages.join('\n');
         if (detail.error.message) return detail.error.message;
     }
-    if (Array.isArray(detail)) {
-        const first = detail[0];
-        const field = Array.isArray(first?.loc) ? first.loc[first.loc.length - 1] : 'field';
-        if (first?.type === 'missing' || String(first?.msg || '').toLowerCase().includes('field required')) {
-            return `${String(field).replace(/_/g, ' ')} is required.`;
-        }
-        return first?.msg || 'Validation failed.';
+    // Global RequestValidationError handler: {detail: "Request validation failed",
+    // errors: [<pydantic>]}. Also handle FastAPI's default where `detail` is the array.
+    const pyErrors = Array.isArray(data?.errors)
+        ? data.errors
+        : (Array.isArray(detail) ? detail : null);
+    if (pyErrors && pyErrors.length) {
+        const msgs = pyErrors.map((e) => gstFieldErrorFromEntry(e).msg);
+        return [...new Set(msgs)].join('\n');
     }
     if (typeof detail === 'string') return detail;
     return err?.message || 'Request failed.';
@@ -276,6 +328,20 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
         setSelectedGstItem(item);
         setEditModalMode(true);
         setShowEditModal(true);
+    };
+
+    // Schedule Payment → jump to the linked CRM lead and (when its stage allows)
+    // open the SCHEDULED_PAYMENT action drawer, so the RM schedules it in the CRM.
+    const handleRowSchedulePayment = async (e, item) => {
+        e.stopPropagation();
+        let openSchedulePaymentDrawer = false;
+        try {
+            const lead = await getCrmLeadByGstRegistrationId(item.id);
+            openSchedulePaymentDrawer = isGstCrmStageForSchedulePayment(lead?.stage);
+        } catch (err) {
+            console.warn('Could not load CRM lead for schedule payment:', err);
+        }
+        navigate(`/crm-dashboard?${buildGstCrmLeadActionSearchParams(item.id, openSchedulePaymentDrawer).toString()}`);
     };
 
     const handleSearch = () => {
@@ -606,18 +672,6 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                 <div className="gst-portal-top-actions">
                     {activeTab === 'registrations' && (
                     <>
-                        <button
-                            type="button"
-                            className="btn-gst-payments-entry"
-                            onClick={() =>
-                                navigate(
-                                    '/dashboard?tab=add-payment&service_type=GST_REGISTRATION&return_tab=gst&return_sub=registrations'
-                                )
-                            }
-                            title="Create GST registration payment"
-                        >
-                            <CreditCard size={13} /> Record Payment
-                        </button>
                         <button type="button" className="btn-filter-trigger" onClick={() => setShowFilterDrawer(true)}>
                             <Filter size={13} /> Filters
                         </button>
@@ -739,16 +793,43 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                                     >
                                                         <Eye size={14} />
                                                     </button>
-                                                    <button 
-                                                        className="btn-edit-action" 
-                                                        title="Edit Record" 
-                                                        onClick={(e) => { 
-                                                            e.stopPropagation(); 
+                                                    <button
+                                                        className="btn-edit-action"
+                                                        title="Edit Record"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
                                                             openEditModal(item);
                                                         }}
                                                     >
-                                                        <Pencil size={14} /> 
+                                                        <Pencil size={14} />
                                                     </button>
+                                                    {/* One-time actions — only for APPROVED registrations.
+                                                        Record Payment hides once fully paid; Schedule Payment
+                                                        hides once the CRM lead is already scheduled/subscribed. */}
+                                                    {String(item.registration_status || '').toUpperCase() === 'APPROVED' && !item.has_paid_payment && (
+                                                        <button
+                                                            className="btn-view-action"
+                                                            title="Record Payment"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                navigate(
+                                                                    `/dashboard?tab=add-payment&service_type=GST_REGISTRATION&entity_id=${item.id}&return_tab=gst&return_sub=registrations`
+                                                                );
+                                                            }}
+                                                        >
+                                                            <CreditCard size={14} />
+                                                        </button>
+                                                    )}
+                                                    {String(item.registration_status || '').toUpperCase() === 'APPROVED'
+                                                        && !['SCHEDULED_PAYMENTS', 'SUBSCRIBED'].includes(String(item.crm_lead_stage || '').toUpperCase()) && (
+                                                        <button
+                                                            className="btn-view-action"
+                                                            title="Schedule Payment (CRM)"
+                                                            onClick={(e) => handleRowSchedulePayment(e, item)}
+                                                        >
+                                                            <CalendarClock size={14} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
@@ -1126,7 +1207,9 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
-        const newValue = type === 'checkbox' ? checked : value;
+        // Restrict mobile/phone to 10 digits, PAN to 10 & GSTIN to 15 uppercase
+        // alphanumerics as they type — mirrors the backend field patterns.
+        const newValue = type === 'checkbox' ? checked : sanitizeGovIdInput(name, value);
         setFormData(prev => {
             const updated = { ...prev, [name]: newValue };
             
@@ -1241,7 +1324,12 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
             setItem(updatedItem);
             setFormData(withAssignmentFormFields(updatedItem));
             setEditMode(false);
-        } catch (err) { setMessage({ type: 'error', text: extractGstRegistrationError(err) }); }
+        } catch (err) {
+            // Surface per-field errors inline (red border + message) AND a clear
+            // banner naming the offending field(s), e.g. an invalid 14-char GSTIN.
+            setFieldErrors(prev => ({ ...prev, ...extractGstFieldErrors(err) }));
+            setMessage({ type: 'error', text: extractGstRegistrationError(err) });
+        }
         finally { setActionLoading(''); }
     };
 
@@ -1406,14 +1494,14 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                         <div className="form-group-v4" style={{ gridColumn: 'span 2' }}>
                                             <label className="modal-label-caps">GSTIN</label>
                                             {editMode ? (
-                                                <input name="gstin" value={formData.gstin || ''} onChange={handleChange} className={`modal-input-v4 mono-v4 ${fieldErrors.gstin ? 'error' : ''}`} style={{ color: 'var(--text-primary)' }} />
+                                                <input name="gstin" value={formData.gstin || ''} onChange={handleChange} maxLength="15" placeholder="15-char GSTIN" className={`modal-input-v4 mono-v4 ${fieldErrors.gstin ? 'error' : ''}`} style={{ color: 'var(--text-primary)' }} />
                                             ) : (
                                                 <div className="gst-form-value-box mono-v4" style={{ color: 'var(--text-primary)' }}>{item.gstin || '-'}</div>
                                             )}
                                             {fieldErrors.gstin && <span className="field-error-msg">{fieldErrors.gstin}</span>}
                                         </div>
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Business Name</label>
+                                            <label className="modal-label-caps">Business Name*</label>
                                             {editMode ? (
                                                 <input name="business_name" value={formData.business_name || ''} onChange={handleChange} className={`modal-input-v4 ${fieldErrors.business_name ? 'error' : ''}`} />
                                             ) : (
@@ -1430,7 +1518,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                             )}
                                         </div>
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">PAN</label>
+                                            <label className="modal-label-caps">PAN*</label>
                                             {editMode ? (
                                                 <input name="pan" value={formData.pan || ''} onChange={handleChange} maxLength="10" className={`modal-input-v4 ${fieldErrors.pan ? 'error' : ''}`} />
                                             ) : (
@@ -1483,7 +1571,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                     <h3 className="section-title">2. Business Configuration</h3>
                                     <div className="form-grid-3">
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Registration Type</label>
+                                            <label className="modal-label-caps">Registration Type*</label>
                                             {editMode ? (
                                                 <FormCustomSelect
                                                     name="registration_type"
@@ -1497,7 +1585,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                             )}
                                         </div>
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Ownership Category</label>
+                                            <label className="modal-label-caps">Ownership Category*</label>
                                             {editMode ? (
                                                 <FormCustomSelect
                                                     name="ownership_category"
@@ -1525,7 +1613,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                             )}
                                         </div>
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">State</label>
+                                            <label className="modal-label-caps">State*</label>
                                             {editMode ? (
                                                 <FormCustomSelect
                                                     name="state"
@@ -1539,7 +1627,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                             )}
                                         </div>
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Turnover Details</label>
+                                            <label className="modal-label-caps">Turnover Details*</label>
                                             {editMode ? (
                                                 <FormCustomSelect
                                                     name="turnover_details"
@@ -1687,7 +1775,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                         </div>
                                         )}
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Mobile</label>
+                                            <label className="modal-label-caps">Mobile*</label>
                                             {editMode ? (
                                                 <input type="tel" name="mobile" value={formData.mobile || ''} onChange={handleChange} maxLength="10" className="modal-input-v4" />
                                             ) : (
@@ -1695,7 +1783,7 @@ export const GSTRegistrationDetails = ({ onLogout, itemData, isOpen = true, onCl
                                             )}
                                         </div>
                                         <div className="form-group-v4">
-                                            <label className="modal-label-caps">Email</label>
+                                            <label className="modal-label-caps">Email*</label>
                                             {editMode ? (
                                                 <input type="email" name="email" value={formData.email || ''} onChange={handleChange} className="modal-input-v4" />
                                             ) : (
