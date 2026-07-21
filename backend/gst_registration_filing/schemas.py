@@ -144,6 +144,17 @@ class GSTFilingIn(BaseSchema):
     def sanitize_remarks(cls, v):
         return v.strip() if isinstance(v, str) else v
 
+    @field_validator(
+        "customer_id", "gst_registration_id", "referral_id", "rm_id", "op_id",
+        mode="before",
+    )
+    @classmethod
+    def empty_int_to_none(cls, v):
+        # Empty form fields ("") stay optional instead of failing int parsing.
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
     # =====================================================
     # VALIDATION (NO MUTATION ❌)
     # =====================================================

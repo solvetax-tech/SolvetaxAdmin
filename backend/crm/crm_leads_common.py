@@ -119,7 +119,7 @@ async def advance_crm_lead_stage_system(
     entity_type: str,
     from_stages: Sequence[str],
     to_stage: str,
-    remarks: str,
+    remarks: Optional[str] = None,
 ) -> List[int]:
     """
     Forward-only CRM lead stage advance driven by a downstream SYSTEM event
@@ -131,6 +131,10 @@ async def advance_crm_lead_stage_system(
     SYSTEM ``crm_activities`` row (old_stage -> to_stage, ``performed_by`` NULL).
     For the GST funnel (entity_type == 'GST_REGISTRATION') a NULL/blank lead
     entity_type is treated as GST_REGISTRATION, mirroring the read path.
+
+    NOTE: this NEVER writes ``crm_leads.remarks`` — the user's own remark is
+    preserved. ``remarks`` here is only the activity-row note and defaults to
+    NULL (no auto-generated system text pollutes the lead's remark history).
 
     Runs inside the caller's transaction; the caller invalidates the CRM cache
     for each returned lead id after commit. Returns the synced lead ids.

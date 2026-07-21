@@ -8,7 +8,8 @@ import {
     appendDueDateRulesToParams,
 } from '../../utils/gstFilterRulesConstants';
 import Pagination from '../common/Pagination';
-import { Calendar, History, RotateCcw, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Calendar, History, RotateCcw, X, CreditCard } from 'lucide-react';
 import './GSTFilingsReturns.css';
 
 const RETURN_FIELD_MAP = {
@@ -341,6 +342,7 @@ const isReturnFieldApplicable = (item, fieldPrefix) => {
 };
 
 const GSTFilingsReturns = ({ filters, rowsPerPage, setError, onOpenStatusUpdate, refreshTrigger, currentPage, setCurrentPage, setHasMore }) => {
+    const navigate = useNavigate();
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -510,6 +512,17 @@ const GSTFilingsReturns = ({ filters, rowsPerPage, setError, onOpenStatusUpdate,
                                         }}
                                     >
                                         Update Status
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="ledger-action-btn"
+                                        title="Record Payment"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            navigate(`/dashboard?tab=add-payment&service_type=GST_FILING_RETURN_DETAILS&entity_id=${item.id}&return_tab=gst&return_sub=filings&return_view=returns`);
+                                        }}
+                                    >
+                                        <CreditCard size={14} />
                                     </button>
                                 </div>
                             </div>

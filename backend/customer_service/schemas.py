@@ -106,6 +106,14 @@ class CustomerServiceCreateIn(CustomerServiceBaseSchema):
             return v.strip().upper()
         return v
 
+    @field_validator("customer_id", "rm_id", "op_id", mode="before")
+    @classmethod
+    def empty_int_to_none(cls, v):
+        # Empty form fields ("") stay optional instead of failing int parsing.
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
 
 class CustomerServiceCreateOut(CustomerServiceBaseSchema):
     id: int

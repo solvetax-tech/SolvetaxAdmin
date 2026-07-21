@@ -1348,31 +1348,6 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                             Reset Filters
                         </Button>
                     )}
-                    {(activeSubTab === 'GST Filings' || activeSubTab === 'GST Filings Returns') && (
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            icon={<CreditCard size={13} />}
-                            onClick={() => {
-                                const serviceType =
-                                    activeSubTab === 'GST Filings Returns'
-                                        ? 'GST_FILING_RETURN_DETAILS'
-                                        : 'GST_FILING';
-                                const returnView =
-                                    activeSubTab === 'GST Filings Returns' ? '&return_view=returns' : '';
-                                navigate(
-                                    `/dashboard?tab=add-payment&service_type=${serviceType}&return_tab=gst&return_sub=filings${returnView}`
-                                );
-                            }}
-                            title={
-                                activeSubTab === 'GST Filings Returns'
-                                    ? 'Create GST filing return detail payment'
-                                    : 'Create GST filing payment'
-                            }
-                        >
-                            Record Payment
-                        </Button>
-                    )}
                     <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={() => setShowFilterDrawer(true)}>
                         Filters
                         {activeFilterCount > 0 && <span className="filter-badge-count">{activeFilterCount}</span>}
@@ -1592,6 +1567,15 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         handleEditFiling(item);
+                                                    }}
+                                                />
+                                                <Button
+                                                    variant="ghost"
+                                                    icon={<CreditCard size={14} />}
+                                                    title="Record Payment"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        navigate(`/dashboard?tab=add-payment&service_type=GST_FILING&entity_id=${item.id}&return_tab=gst&return_sub=filings`);
                                                     }}
                                                 />
                                             </div>

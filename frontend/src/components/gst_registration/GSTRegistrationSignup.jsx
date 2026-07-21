@@ -20,6 +20,7 @@ import {
 import { X, AlertCircle, CheckCircle2, RotateCcw, ChevronDown, User, Plus, Users, FileText } from 'lucide-react';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromConfig, optionsFromPairs } from '../common/selectOptionUtils';
+import { sanitizeGovIdInput } from '../../utils/inputSanitizers';
 import { extractErrorMessage, extractFieldErrors } from '../../utils/apiErrors';
 
 const BASE_URL = import.meta.env.VITE_API_URL;
@@ -258,7 +259,9 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
-        const newValue = type === 'checkbox' ? checked : value;
+        // Restrict mobile/phone to 10 digits, PAN to 10 & GSTIN to 15 uppercase
+        // alphanumerics as they type — mirrors the backend field patterns.
+        const newValue = type === 'checkbox' ? checked : sanitizeGovIdInput(name, value);
         setFormData((prev) => {
             const updated = { ...prev, [name]: newValue };
             
@@ -477,12 +480,12 @@ const GSTRegistrationSignup = ({ isOpen = true, onClose, onSuccess, profileData 
                                         </div>
                                         <div className="form-group-v4">
                                             <label className="modal-label-caps">PAN*</label>
-                                            <input type="text" name="pan" value={formData.pan} onChange={handleChange} required placeholder="ABCDE1234F" className="modal-input-v4" />
+                                            <input type="text" name="pan" value={formData.pan} onChange={handleChange} required maxLength="10" placeholder="ABCDE1234F" className="modal-input-v4" />
                                             {fieldErrors.pan && <span className="field-error-msg">{fieldErrors.pan}</span>}
                                         </div>
                                         <div className="form-group-v4" style={{ gridColumn: 'span 2' }}>
                                             <label className="modal-label-caps">GSTIN</label>
-                                            <input type="text" name="gstin" value={formData.gstin} onChange={handleChange} className="modal-input-v4 mono-v4" style={{ color: 'var(--accent)' }} placeholder="Optional" />
+                                            <input type="text" name="gstin" value={formData.gstin} onChange={handleChange} maxLength="15" className="modal-input-v4 mono-v4" style={{ color: 'var(--accent)' }} placeholder="15-char GSTIN (optional)" />
                                             {fieldErrors.gstin && <span className="field-error-msg">{fieldErrors.gstin}</span>}
                                         </div>
                                     </div>

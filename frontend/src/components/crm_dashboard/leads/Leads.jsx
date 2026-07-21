@@ -698,6 +698,14 @@ const Leads = ({
               <CrmLeadHistorySummary
                 lead={historyLead}
                 onCallStatus={() => handleRowClick(historyLead, { completeFollowup: true })}
+                onPaymentRecorded={async () => {
+                  if (!historyLead?.id) return;
+                  const et = String(historyLead.entity_type || entityType || 'GST_REGISTRATION').toUpperCase();
+                  const fresh = await fetchLeadForDeepLink(et, historyLead.id, null);
+                  if (fresh) setHistoryLead(fresh);
+                  fetchHistory(historyLead.id, historyCurrentPage);
+                  fetchLeads();
+                }}
               />
 
               {detailsLoading && (

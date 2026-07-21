@@ -175,7 +175,7 @@ async def create_registration_payment(
                         entity_type=entity_type,
                         from_stages=("GST_REGISTRATION_DONE", "SCHEDULED_PAYMENTS"),
                         to_stage="SUBSCRIBED",
-                        remarks="Auto stage sync from payment completion",
+                        # No system remark — the user's crm_leads.remarks stays intact.
                     )
 
             # --------------------------------------------------
