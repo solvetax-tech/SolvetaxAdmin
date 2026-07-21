@@ -93,7 +93,7 @@
     --itr-col-9: 108px;  /* Record year */
     --itr-col-10: 140px; /* RM */
     --itr-col-11: 140px; /* OP */
-    --itr-col-12: 88px; /* Actions (compact) */
+    --itr-col-12: 156px; /* Actions — snug fit for View + Edit + Record + Schedule Payment */
 
     overflow-x: auto;
     overflow-y: visible;

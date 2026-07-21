@@ -22,7 +22,11 @@ from backend.Income_tax.income_tax_helpers import (
     normalize_query_str_list,
 )
 from backend.common.status_constants import normalize_filed_status, normalize_priority
-from backend.crm.crm_leads_common import _fetch_valid_stage_codes, _invalidate_crm_cache
+from backend.crm.crm_leads_common import (
+    _fetch_valid_stage_codes,
+    _invalidate_crm_cache,
+    advance_crm_lead_stage_system,
+)
 from backend.logger import logger
 from backend.text_search_filters import append_fuzzy_name_filter, append_ilike_contains
 from backend.redis_cache import (
@@ -922,7 +926,27 @@ async def filter_income_tax(
                     f"""
                     SELECT {income_tax_select_columns("i")},
                            e_rm.first_name AS rm_name,
-                           e_op.first_name AS op_name
+                           e_op.first_name AS op_name,
+                           -- One-time action signals for the row actions (Record /
+                           -- Schedule Payment): already fully paid, and the linked
+                           -- CRM lead's funnel stage (already scheduled?).
+                           EXISTS (
+                               SELECT 1
+                                 FROM {DB_SCHEMA}.payments p
+                                WHERE p.entity_id = i.id
+                                  AND p.entity_type = 'INCOME_TAX'
+                                  AND p.is_active = TRUE
+                                  AND p.payment_status = 'PAID'
+                           ) AS has_paid_payment,
+                           (
+                               SELECT cl.stage
+                                 FROM {DB_SCHEMA}.crm_leads cl
+                                WHERE cl.entity_id = i.id
+                                  AND upper(trim(cl.entity_type)) = 'INCOME_TAX'
+                                  AND cl.is_active = TRUE
+                                ORDER BY cl.id DESC
+                                LIMIT 1
+                           ) AS crm_lead_stage
                     FROM {DB_SCHEMA}.income_tax i
                     LEFT JOIN {DB_SCHEMA}.employees e_rm ON e_rm.emp_id = i.rm_id
                     LEFT JOIN {DB_SCHEMA}.employees e_op ON e_op.emp_id = i.op_id
@@ -1037,6 +1061,7 @@ async def edit_income_tax(
 
     try:
         pool = await get_db_pool()
+        synced_crm_lead_ids = []
         async with pool.acquire() as conn:
             async with conn.transaction():
                 # IDOR guard: a WRITE holder may only mutate income-tax records
@@ -1217,7 +1242,29 @@ async def edit_income_tax(
                     json.dumps(income_tax_row_to_dict(old), default=str),
                     json.dumps(income_tax_row_to_dict(new), default=str),
                 )
+
+                # CRM funnel sync: ITR filed ⇒ advance the linked lead to ITR_DONE
+                # (mirror of GST APPROVED ⇒ GST_REGISTRATION_DONE). Forward-only;
+                # closes any open follow-up; SYSTEM activity remark stays NULL.
+                if (
+                    "filed_status" in update_data
+                    and str(new.get("filed_status") or "").strip().upper() == "FILED"
+                ):
+                    synced_crm_lead_ids = await advance_crm_lead_stage_system(
+                        conn,
+                        entity_id=income_tax_id,
+                        entity_type="INCOME_TAX",
+                        from_stages=(
+                            "FRESH_LEAD",
+                            "PENDING_ITR_DATA",
+                            "FOLLOW_UP",
+                            "INTERESTED",
+                        ),
+                        to_stage="ITR_DONE",
+                    )
         await _invalidate_income_tax_cache(income_tax_id)
+        for _lid in synced_crm_lead_ids:
+            await _invalidate_crm_cache(_lid)
         msg = "Income tax record updated successfully."
         if "is_active" in update_data:
             if bool(update_data["is_active"]):

@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    Plus, Filter, AlertCircle, FileText, XCircle, RotateCcw, CreditCard, Eye, Pencil
+    Plus, Filter, AlertCircle, FileText, XCircle, RotateCcw, CreditCard, Eye, Pencil, CalendarClock
 } from 'lucide-react';
 import {
     fetchIncomeTaxes,
     fetchIncomeTaxById,
     extractIncomeTaxListMeta,
     unwrapIncomeTaxRecord,
+    buildIncomeTaxCrmLeadActionSearchParams,
+    getCrmLeadByIncomeTaxId,
+    isItrCrmStageForSchedulePayment,
 } from '../../utils/incomeTaxApi';
 import { fetchIncomeTaxConfigs } from '../../utils/incomeTaxConfigs';
 import { formatDateIST, dateLocalToIstIso, formatEnumLabel } from '../../utils/formatDateTimeIST';
@@ -157,6 +160,20 @@ export const IncomeTax = ({ profileData }) => {
         setShowEditDrawer(true);
         ensureConfigs();
     }, [ensureConfigs]);
+
+    // Schedule Payment → jump to the linked CRM lead and (when its stage allows)
+    // open the SCHEDULED_PAYMENT action drawer, so the RM schedules it in the CRM.
+    const handleRowSchedulePayment = useCallback(async (e, item) => {
+        e.stopPropagation();
+        let openSchedulePaymentDrawer = false;
+        try {
+            const lead = await getCrmLeadByIncomeTaxId(item.id);
+            openSchedulePaymentDrawer = isItrCrmStageForSchedulePayment(lead?.stage);
+        } catch (err) {
+            console.warn('Could not load CRM lead for schedule payment:', err);
+        }
+        navigate(`/crm-dashboard?${buildIncomeTaxCrmLeadActionSearchParams(item.id, openSchedulePaymentDrawer).toString()}`);
+    }, [navigate]);
 
     const openEditById = useCallback(async (incomeTaxId) => {
         setViewingRecordId(null);
@@ -789,17 +806,32 @@ export const IncomeTax = ({ profileData }) => {
                                                 >
                                                     <Pencil size={14} />
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    className="btn-view-action"
-                                                    title="Record Payment"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        navigate(`/dashboard?tab=add-payment&service_type=INCOME_TAX&entity_id=${item.id}&return_tab=income-tax`);
-                                                    }}
-                                                >
-                                                    <CreditCard size={14} />
-                                                </button>
+                                                {/* One-time actions — only for FILED records. Record Payment
+                                                    hides once fully paid; Schedule Payment hides once the CRM
+                                                    lead is already scheduled/subscribed. */}
+                                                {String(item.filed_status || '').toUpperCase() === 'FILED' && !item.has_paid_payment && (
+                                                    <button
+                                                        type="button"
+                                                        className="btn-view-action"
+                                                        title="Record Payment"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            navigate(`/dashboard?tab=add-payment&service_type=INCOME_TAX&entity_id=${item.id}&return_tab=income-tax`);
+                                                        }}
+                                                    >
+                                                        <CreditCard size={14} />
+                                                    </button>
+                                                )}
+                                                {String(item.filed_status || '').toUpperCase() === 'FILED' && !item.has_paid_payment && (
+                                                    <button
+                                                        type="button"
+                                                        className="btn-view-action"
+                                                        title="Schedule Payment (CRM)"
+                                                        onClick={(e) => handleRowSchedulePayment(e, item)}
+                                                    >
+                                                        <CalendarClock size={14} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     </div>

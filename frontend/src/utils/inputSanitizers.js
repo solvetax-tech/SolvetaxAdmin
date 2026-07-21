@@ -18,6 +18,7 @@ export function sanitizeGovIdInput(name, value) {
         case 'referralPhoneNumber':
             return value.replace(/\D/g, '').slice(0, 10);
         case 'pan':
+        case 'pan_number':
             return value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
         case 'gstin':
             return value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 15);
