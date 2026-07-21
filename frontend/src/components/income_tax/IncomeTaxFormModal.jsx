@@ -10,6 +10,7 @@ import {
     getCrmLeadByIncomeTaxId,
     isItrCrmStageForSchedulePayment,
 } from '../../utils/incomeTaxApi';
+import { sanitizeGovIdInput } from '../../utils/inputSanitizers';
 import {
     asStringArray,
     INCOME_SOURCE_OPTIONS,
@@ -332,15 +333,9 @@ const IncomeTaxFormModal = ({
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
-        let finalValue = type === 'checkbox' ? checked : value;
-        
-        if (name === 'pan_number') {
-            finalValue = finalValue.toUpperCase();
-        }
-        if (name === 'referral_phone_number') {
-            finalValue = String(finalValue).replace(/\D/g, '').slice(0, 10);
-        }
-
+        // Restrict mobile/referral to 10 digits and pan_number to 10 uppercase
+        // alphanumerics as they type — mirrors the backend field patterns.
+        const finalValue = type === 'checkbox' ? checked : sanitizeGovIdInput(name, value);
         setForm(prev => ({ ...prev, [name]: finalValue }));
     };
 
@@ -595,7 +590,7 @@ const IncomeTaxFormModal = ({
                                 </div>
                                 <div className="form-group-v4">
                                     <label>PAN Number *</label>
-                                    <input type="text" name="pan_number" value={form.pan_number} onChange={handleChange} required placeholder="ABCDE1234F" />
+                                    <input type="text" name="pan_number" value={form.pan_number} onChange={handleChange} required maxLength={10} placeholder="ABCDE1234F" />
                                 </div>
                                 <div className="form-group-v4">
                                     <label>Priority</label>
@@ -689,7 +684,7 @@ const IncomeTaxFormModal = ({
                             <div className="form-grid-2">
                                 <div className="form-group-v4">
                                     <label>Mobile *</label>
-                                    <input type="text" name="mobile" value={form.mobile} onChange={handleChange} required placeholder="+91" />
+                                    <input type="text" name="mobile" value={form.mobile} onChange={handleChange} required maxLength={10} inputMode="numeric" placeholder="10-digit mobile" />
                                 </div>
                                 <div className="form-group-v4">
                                     <label>Email ID</label>
@@ -913,7 +908,10 @@ const IncomeTaxFormModal = ({
     );
 
     const incomeTaxId = editingRecord?.id;
-    const filedStatusNorm = String(form.filed_status || editingRecord?.filed_status || '')
+    // Gate on the SAVED filed_status (not the live form dropdown) — Schedule
+    // Payment must only appear for records that are actually FILED, not while the
+    // user is mid-edit changing the status.
+    const filedStatusNorm = String(editingRecord?.filed_status || '')
         .trim()
         .toUpperCase();
     const showSchedulePayment = variant === 'drawer'

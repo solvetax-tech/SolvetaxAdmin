@@ -896,7 +896,7 @@
         minmax(100px, 0.7fr)    /* 11. Filing Pref */
         minmax(140px, 1fr)      /* 12. RM Name */
         minmax(140px, 1fr)      /* 13. Assigned OP */
-        88px;                   /* 14. Actions (compact) */
+        156px;                  /* 14. Actions — snug fit for View + Edit + Record + Schedule Payment */
     gap: 0 !important;
     grid-column-gap: 0 !important;
     width: fit-content !important;

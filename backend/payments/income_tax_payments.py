@@ -17,6 +17,10 @@ from backend.payments.payment_ledger_db import (
 )
 from backend.security.rbac import require_permission
 from backend.utils import DB_SCHEMA, generate_uuid, get_db_pool
+from backend.crm.crm_leads_common import (
+    advance_crm_lead_stage_system,
+    _invalidate_crm_cache,
+)
 
 router = APIRouter(
     prefix="/api/v1/income-tax-payments",
@@ -130,10 +134,24 @@ async def create_income_tax_payment(
                     None,
                 )
 
+                # CRM funnel sync: payment fully settled ⇒ advance the linked CRM
+                # lead ITR_DONE / SCHEDULED_PAYMENTS -> SUBSCRIBED (mirror of GST).
+                synced_crm_lead_ids = []
+                if payment_row["payment_status"] == "PAID":
+                    synced_crm_lead_ids = await advance_crm_lead_stage_system(
+                        conn,
+                        entity_id=payload.entity_id,
+                        entity_type=entity_type,
+                        from_stages=("ITR_DONE", "SCHEDULED_PAYMENTS"),
+                        to_stage="SUBSCRIBED",
+                    )
+
             await invalidate_payment_related_caches(
                 income_tax_id=int(payload.entity_id),
                 crm=True,
             )
+            for _lid in synced_crm_lead_ids:
+                await _invalidate_crm_cache(_lid)
             return {
                 **dict(payment_row),
                 "message": "Income tax payment created successfully.",

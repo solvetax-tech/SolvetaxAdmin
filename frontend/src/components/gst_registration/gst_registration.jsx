@@ -820,8 +820,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                                             <CreditCard size={14} />
                                                         </button>
                                                     )}
-                                                    {String(item.registration_status || '').toUpperCase() === 'APPROVED'
-                                                        && !['SCHEDULED_PAYMENTS', 'SUBSCRIBED'].includes(String(item.crm_lead_stage || '').toUpperCase()) && (
+                                                    {String(item.registration_status || '').toUpperCase() === 'APPROVED' && !item.has_paid_payment && (
                                                         <button
                                                             className="btn-view-action"
                                                             title="Schedule Payment (CRM)"
