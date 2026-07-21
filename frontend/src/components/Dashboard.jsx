@@ -1845,10 +1845,12 @@ const Dashboard = ({ onLogout }) => {
                 const returnTab = params.get('return_tab') || 'payments';
                 const returnSub = params.get('return_sub') || null;
                 const returnView = params.get('return_view');
+                const returnCategory = params.get('return_category');
                 const backParams = new URLSearchParams();
                 backParams.set('tab', returnTab);
                 if (returnSub) backParams.set('sub', returnSub);
                 if (returnView) backParams.set('filing_view', returnView);
+                if (returnCategory) backParams.set('category', returnCategory);
                 navigate(`/dashboard?${backParams.toString()}`);
               }}
               isAdmin={isAdmin} 

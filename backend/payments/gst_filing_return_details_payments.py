@@ -213,11 +213,8 @@ async def soft_delete_return_detail_payment(
                 if not row["is_active"]:
                     raise HTTPException(status_code=400, detail="Payment already inactive.")
 
-                if row["payment_status"] == "PAID":
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Cannot delete a completed (PAID) payment.",
-                    )
+                # Admins may delete completed (PAID) payments; soft-delete is
+                # recoverable via /activate, so there is no PAID guard here.
 
                 deleted_row = await conn.fetchrow(
                     f"""

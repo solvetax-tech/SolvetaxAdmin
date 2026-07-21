@@ -992,6 +992,15 @@ async def patch_customer_service_status(
                     f"""
                     UPDATE {DB_SCHEMA}.customer_services
                        SET service_status = $1,
+                           -- Service delivered ⇒ close any open follow-up; the RM
+                           -- no longer needs to chase it. completed_at is required
+                           -- by chk_followup_completed_fields when status=COMPLETED.
+                           followup_status = CASE
+                               WHEN $1 = 'PROVIDED' AND followup_status IN ('PENDING', 'MISSED')
+                               THEN 'COMPLETED' ELSE followup_status END,
+                           completed_at = CASE
+                               WHEN $1 = 'PROVIDED' AND followup_status IN ('PENDING', 'MISSED')
+                               THEN COALESCE(completed_at, NOW()) ELSE completed_at END,
                            updated_at = NOW()
                      WHERE id = $2
                      RETURNING *
@@ -1098,6 +1107,18 @@ async def patch_customer_service(
                     sets.append(f"{key} = ${i}")
                     vals.append(data[key])
                     i += 1
+
+                # Service delivered ⇒ close any open follow-up (literal SQL, no
+                # bind params, so it doesn't shift the $-index above).
+                if data.get("service_status") == "PROVIDED":
+                    sets.append(
+                        "followup_status = CASE WHEN followup_status IN ('PENDING', 'MISSED') "
+                        "THEN 'COMPLETED' ELSE followup_status END"
+                    )
+                    sets.append(
+                        "completed_at = CASE WHEN followup_status IN ('PENDING', 'MISSED') "
+                        "THEN COALESCE(completed_at, NOW()) ELSE completed_at END"
+                    )
 
                 vals.append(customer_service_id)
                 upd_sql = f"""

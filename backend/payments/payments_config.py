@@ -774,6 +774,8 @@ async def compute_entity_payment_amounts(
     payment_summary = await conn.fetchrow(
         f"""
         SELECT
+            -- List price is fixed to the FIRST payment's amount (it can only be
+            -- set on the first payment; see fetch_entity_payment_totals).
             (
                 SELECT amount
                 FROM {DB_SCHEMA}.payments

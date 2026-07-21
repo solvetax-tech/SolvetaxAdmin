@@ -1914,6 +1914,10 @@ async def edit_customer(
         )
         update_data.pop("service_required", None)
 
+    # Tracks how many NEW customer_services rows the edit created (for cache
+    # invalidation after commit).
+    svc_rows_created = 0
+
     # --------------------------------------------------
     # DB Pool
     # --------------------------------------------------
@@ -2122,6 +2126,60 @@ async def edit_customer(
                     )
 
                 # --------------------------------------------------
+                # Propagate newly-added services to customer_services / crm_leads,
+                # exactly like create_customer. These helpers are idempotent
+                # (existence-checked), so ONLY services that don't already have a
+                # row get inserted — editing to add one or more services creates
+                # just those, with no duplicates for services already present.
+                # --------------------------------------------------
+                if incoming_service_required_patch is not None:
+                    merged_codes_upper = [
+                        s.strip().upper()
+                        for s in (new_row["service_required"] or [])
+                        if isinstance(s, str) and s.strip()
+                    ]
+
+                    # GST_REGISTRATION / ITR_FILING → crm_leads (only when no
+                    # active lead exists for mobile + entity_type). New leads get
+                    # their code stripped from customers.service_required (the
+                    # funnel lives on CRM), matching create.
+                    crm_strip_upper = await _sync_crm_leads_from_customer_service_required(
+                        conn,
+                        new_row,
+                        merged_codes_upper,
+                        tag=new_row.get("tag"),
+                        lead_source=new_row.get("lead_source"),
+                        lead_type=new_row.get("lead_type"),
+                    )
+                    if crm_strip_upper:
+                        stripped_sr = _service_required_minus_upper_codes(
+                            list(new_row["service_required"] or []),
+                            crm_strip_upper,
+                        )
+                        stripped_row = await conn.fetchrow(
+                            f"""
+                            UPDATE {DB_SCHEMA}.customers
+                               SET service_required = $2
+                             WHERE customer_id = $1
+                             RETURNING {_CUSTOMERS_RETURNING_SQL}
+                            """,
+                            customer_id,
+                            stripped_sr,
+                        )
+                        if stripped_row:
+                            new_row = stripped_row
+
+                    # Every other eligible catalog code → customer_services PENDING
+                    # (only when no row yet for customer_id + service_code).
+                    svc_rows_created = await _insert_pending_customer_services_for_eligible_codes(
+                        conn,
+                        customer_id,
+                        merged_codes_upper,
+                        new_row.get("rm_id"),
+                        new_row.get("op_id"),
+                    )
+
+                # --------------------------------------------------
                 # 4️⃣ Version Audit
                 # --------------------------------------------------
 
@@ -2152,6 +2210,9 @@ async def edit_customer(
                 "Customer updated successfully | customer_id=%s",
                 customer_id,
             )
+
+            if svc_rows_created > 0:
+                await _invalidate_customer_services_cache()
 
             await _invalidate_customer_cache(customer_id)
             return {

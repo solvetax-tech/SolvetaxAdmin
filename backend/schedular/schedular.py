@@ -16,6 +16,7 @@ from backend.gst_registration_filing.gst_filing_auto_policy import (
 from backend.crm.crm_bulk_auto_assign import run_due_crm_bulk_auto_assign_jobs
 from backend.crm.crm_leads_common import _invalidate_crm_cache
 from backend.payments.payment_scheduler import sync_settled_payment_entities
+from backend.payments.payment_cache_invalidation import invalidate_payment_related_caches
 from backend.gst_registration_filing.gst_filing_auto_generation import (
     build_next_row_from_source,
     chain_filing_frequency,
@@ -428,6 +429,10 @@ async def background_jobs():
 
                 lim = SCHEDULER_SQL_BATCH_LIMIT
 
+                # Track which follow-up domains had overdue → MISSED transitions
+                # this tick, so we invalidate ONLY the caches that went stale.
+                svc_fu_changed = pay_fu_changed = crm_fu_changed = False
+
                 # 1) customer_services: overdue PENDING follow-ups (>10 min past followup_at) → MISSED (+ missed_at)
                 #    Matches trg_followup_missed_if_overdue; catches rows that never get an API UPDATE.
                 result = await conn.execute(
@@ -447,6 +452,7 @@ async def background_jobs():
                     """
                 )
                 logging.info("customer_services follow-ups marked MISSED (overdue): %s", result)
+                svc_fu_changed = svc_fu_changed or _parse_cmd_rowcount(result) > 0
 
                 # 2) customer_services: MISSED rows still missing missed_at (edge cases)
                 result = await conn.execute(
@@ -488,6 +494,7 @@ async def background_jobs():
                     """
                 )
                 logging.info("payments follow-ups marked MISSED (overdue): %s", result)
+                pay_fu_changed = pay_fu_changed or _parse_cmd_rowcount(result) > 0
 
                 # 2c) payments: MISSED rows still missing missed_at (edge cases)
                 result = await conn.execute(
@@ -531,6 +538,7 @@ async def background_jobs():
                     """
                 )
                 logging.info("CRM leads follow-ups marked MISSED (overdue): %s", result)
+                crm_fu_changed = crm_fu_changed or _parse_cmd_rowcount(result) > 0
 
                 # 4) Stamp missed_at for MISSED CRM lead followups after 10 minutes (edge cases)
                 result = await conn.execute(
@@ -551,6 +559,18 @@ async def background_jobs():
                     """
                 )
                 logging.info("CRM leads stamped missed_at: %s", result)
+
+                # Invalidate the follow-up caches for the overdue → MISSED
+                # transitions above. Those dashboard views (list/counts/alerts +
+                # calendars) are otherwise only refreshed on API writes, so
+                # without this they keep showing overdue rows as still PENDING.
+                if svc_fu_changed:
+                    # covers service + payment follow-up views + customer_services list
+                    await invalidate_payment_related_caches(customer_service=True)
+                elif pay_fu_changed:
+                    await invalidate_payment_related_caches()
+                if crm_fu_changed:
+                    await _invalidate_crm_cache()
 
                 # 5) Expire session tokens
                 await conn.execute(
@@ -617,8 +637,11 @@ async def background_jobs():
                 # 12) Payments: close superseded PENDING rows when entity is PAID
                 pay_sync = await sync_settled_payment_entities(conn, batch_limit=lim)
                 if any(pay_sync.values()):
-                    await redis_invalidate_tag("registration_payments:filter:index")
-                    await redis_invalidate_tag("payments_config:get_amount:index")
+                    # Soft-closing superseded rows also removes their payment
+                    # follow-ups from the follow-up views, so invalidate the
+                    # follow-up caches (list/counts/alerts) too — not just the
+                    # payments list. invalidate_payment_related_caches covers both.
+                    await invalidate_payment_related_caches()
                     logging.info(
                         "Payment entity settlement sync: duplicate_paid_demoted=%s "
                         "latest_promoted_to_paid=%s superseded_pending_closed=%s",
