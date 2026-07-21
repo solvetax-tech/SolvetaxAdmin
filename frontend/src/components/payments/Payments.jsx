@@ -44,9 +44,23 @@ const PAYMENT_FOLLOWUP_ENTITY_TYPES = new Set([
     'CUSTOMER_SERVICE',
 ]);
 
+// The Payments list is unified across every service, but each payment type has
+// its own soft-delete endpoint. Route by entity_type so we don't call the GST
+// endpoint for a customer-service / income-tax / filing payment (which used to
+// fail with "This payment does not belong to GST registration.").
+const PAYMENT_SOFT_DELETE_ENDPOINT = {
+    GST_REGISTRATION: (id) => `/api/v1/payments/${id}/soft_delete`,
+    GST_FILING: (id) => `/api/v1/filing-payments/${id}/soft_delete`,
+    GST_FILING_RETURN_DETAILS: (id) => `/api/v1/gst-filing-return-details-payments/${id}/soft_delete`,
+    INCOME_TAX: (id) => `/api/v1/income-tax-payments/${id}/soft_delete`,
+    CUSTOMER_SERVICE: (id) => `/api/v1/customer-service-payments/${id}/soft_delete`,
+};
+
 function canSchedulePaymentFollowup(payment) {
     if (!payment) return false;
     if (payment.is_active === false) return false;
+    // Entity already fully paid (via another installment) → nothing to chase.
+    if (payment.entity_settled) return false;
     if (String(payment.payment_status || '').toUpperCase() !== 'PENDING') return false;
     return PAYMENT_FOLLOWUP_ENTITY_TYPES.has(String(payment.entity_type || '').toUpperCase());
 }
@@ -218,10 +232,16 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
         navigate('/dashboard?tab=payments', { replace: true });
     };
 
-    const handleDelete = async (id) => {
+    const handleDelete = async (id, entityType) => {
         if (!window.confirm("Are you sure you want to delete this payment?")) return;
+        const key = String(entityType || 'GST_REGISTRATION').toUpperCase();
+        const buildEndpoint = PAYMENT_SOFT_DELETE_ENDPOINT[key];
+        if (!buildEndpoint) {
+            alert(`Cannot delete: unsupported payment type "${entityType || 'unknown'}".`);
+            return;
+        }
         try {
-            await api.delete(`/api/v1/payments/${id}/soft_delete`);
+            await api.delete(buildEndpoint(id));
             fetchPayments();
         } catch (err) {
             alert(err.response?.data?.detail || "Delete failed");
@@ -460,10 +480,10 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                     <div className="payments-ledger-cell pay-col-discount justify-end"><span className="ui-num">₹{formatCurrency(p.discount)}</span></div>
                                     <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num">₹{formatCurrency(p.net_amount)}</span></div>
                                     <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num">₹{formatCurrency(p.paid_amount)}</span></div>
-                                    <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num" style={{ color: p.remaining_amount > 0 ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: p.remaining_amount > 0 ? 600 : 400 }}>₹{formatCurrency(p.remaining_amount)}</span></div>
+                                    <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num" style={{ color: (p.entity_settled ? 0 : p.remaining_amount) > 0 ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: (p.entity_settled ? 0 : p.remaining_amount) > 0 ? 600 : 400 }}>₹{formatCurrency(p.entity_settled ? 0 : p.remaining_amount)}</span></div>
                                     <div className="payments-ledger-cell pay-col-date"><span className="ui-num" style={{ color: 'var(--text-primary)' }}>{p.payment_date ? new Date(p.payment_date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '-'}</span></div>
                                     <div className="payments-ledger-cell justify-center">
-                                        <StatusPill value={p.payment_status} />
+                                        <StatusPill value={p.entity_settled ? 'PAID' : p.payment_status} />
                                     </div>
                                     <div className="payments-ledger-cell justify-center">
                                         {canSchedulePaymentFollowup(p) ? (
@@ -491,6 +511,27 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                     </div>
                                     <div className="payments-ledger-cell pay-ledger-actions-sticky">
                                         <div className="table-actions-combined">
+                                            {p.is_active && !p.entity_settled && String(p.payment_status || '').toUpperCase() === 'PENDING' && (
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    icon={<CreditCard size={14} />}
+                                                    title="Record payment"
+                                                    aria-label="Record payment"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        const params = new URLSearchParams({
+                                                            tab: 'add-payment',
+                                                            service_type: p.entity_type,
+                                                            entity_id: String(p.entity_id),
+                                                            return_tab: 'payments',
+                                                        });
+                                                        navigate(`/dashboard?${params.toString()}`);
+                                                    }}
+                                                >
+                                                    Pay
+                                                </Button>
+                                            )}
                                             <Button
                                                 variant="ghost"
                                                 icon={<Eye size={16} />}
@@ -510,7 +551,7 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                                     style={{ color: 'var(--danger)' }}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleDelete(p.id);
+                                                        handleDelete(p.id, p.entity_type);
                                                     }}
                                                 />
                                             )}

@@ -134,6 +134,22 @@ async def create_customer_service_payment(
                     None,
                 )
 
+                # Payment fully settled ⇒ close the customer service's open
+                # follow-up (the RM no longer needs to chase payment). completed_at
+                # is required by chk_followup_completed_fields when COMPLETED.
+                if payment_row["payment_status"] == "PAID":
+                    await conn.execute(
+                        f"""
+                        UPDATE {DB_SCHEMA}.customer_services
+                           SET followup_status = 'COMPLETED',
+                               completed_at = COALESCE(completed_at, NOW()),
+                               updated_at = NOW()
+                         WHERE id = $1
+                           AND followup_status IN ('PENDING', 'MISSED')
+                        """,
+                        payload.entity_id,
+                    )
+
             await invalidate_payment_related_caches(customer_service=True)
             return {
                 **dict(payment_row),
@@ -206,11 +222,8 @@ async def soft_delete_customer_service_payment(
                         detail="Payment already inactive.",
                     )
 
-                if row["payment_status"] == "PAID":
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Cannot delete a completed (PAID) payment.",
-                    )
+                # Admins may delete completed (PAID) payments; soft-delete is
+                # recoverable via /activate, so there is no PAID guard here.
 
                 deleted_row = await conn.fetchrow(
                     f"""

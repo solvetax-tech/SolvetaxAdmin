@@ -586,6 +586,15 @@ async def list_registration_payments(
             SELECT
                 rp.*,
                 rp.remaining_amount,
+                EXISTS (
+                    SELECT 1
+                      FROM {DB_SCHEMA}.payments p_s
+                     WHERE p_s.customer_id IS NOT DISTINCT FROM rp.customer_id
+                       AND p_s.entity_id = rp.entity_id
+                       AND p_s.entity_type = rp.entity_type
+                       AND p_s.is_active IS TRUE
+                       AND p_s.payment_status = 'PAID'
+                ) AS entity_settled,
                 c.full_name,
                 c.rm_id,
                 c.op_id,
@@ -763,12 +772,8 @@ async def soft_delete_registration_payment(
                         detail="Registration payment already inactive.",
                     )
 
-                # Optional protection (recommended)
-                if row["payment_status"] == "PAID":
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Cannot delete a completed (PAID) payment.",
-                    )
+                # Admins may delete completed (PAID) payments; soft-delete is
+                # recoverable via /activate, so there is no PAID guard here.
 
                 deleted_row = await conn.fetchrow(
                     f"""

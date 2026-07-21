@@ -204,8 +204,8 @@ async def soft_delete_income_tax_payment(
                     raise HTTPException(400, "This payment does not belong to income tax.")
                 if not row["is_active"]:
                     raise HTTPException(400, "Income tax payment already inactive.")
-                if row["payment_status"] == "PAID":
-                    raise HTTPException(400, "Cannot delete a completed (PAID) payment.")
+                # Admins may delete completed (PAID) payments; soft-delete is
+                # recoverable via /activate, so there is no PAID guard here.
 
                 deleted_row = await conn.fetchrow(
                     f"""

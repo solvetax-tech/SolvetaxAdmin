@@ -258,16 +258,20 @@ const AddPayment = ({ onBack, initialEntityId, initialServiceType }) => {
             
             // New discount / paid are THIS installment only (backend sums prior rows).
             const dueNow = backendInfo.remaining_amount ?? backendInfo.payable_amount ?? 0;
-            const isEditableOriginalFirst =
-                (serviceType === 'GST_FILING' || serviceType === 'GST_FILING_RETURN_DETAILS')
-                && (parseFloat(backendInfo.total_paid) || 0) === 0
+            // A "first payment" has no prior activity; there we let the user type
+            // the cash amount. On later installments we pre-fill the remaining
+            // balance as the cash to collect.
+            const isFirstPayment =
+                (parseFloat(backendInfo.total_paid) || 0) === 0
                 && (parseFloat(backendInfo.total_discount) || 0) === 0;
+            const currentOriginal = parseFloat(backendInfo.original_amount) || 0;
             setFormData({
-                original_amount: isEditableOriginalFirst
-                    ? (dueNow > 0 ? String(dueNow) : (backendInfo.original_amount > 0 ? String(backendInfo.original_amount) : ''))
-                    : '',
+                // Original amount is always editable + incremental — pre-fill with
+                // the current list price so the user can only raise it. When no
+                // price is configured yet, leave it blank for the user to enter.
+                original_amount: currentOriginal > 0 ? String(currentOriginal) : '',
                 discount: 0,
-                paid_amount: !isEditableOriginalFirst && dueNow > 0 ? dueNow : '',
+                paid_amount: !isFirstPayment && dueNow > 0 ? dueNow : '',
                 remarks: ''
             });
 
@@ -364,13 +368,19 @@ const AddPayment = ({ onBack, initialEntityId, initialServiceType }) => {
     };
 
     // UI Calculation & Validation
-    const canEditOriginalAmount = Boolean(
+    // The original (list) amount can be set/increased ONLY on the entity's FIRST
+    // payment. Once any payment exists it is fixed, so later installments show it
+    // read-only. "First payment" = no prior activity (a real installment always
+    // has paid_amount and/or discount > 0, so both sums being 0 means none yet).
+    // On the first payment it is incremental: it can be raised above the
+    // configured price (originalFloor) but not lowered below it.
+    const isFirstPaymentForEntity = Boolean(
         backendData
-        && (backendData.entity_type === 'GST_FILING'
-            || backendData.entity_type === 'GST_FILING_RETURN_DETAILS')
         && (parseFloat(backendData.total_paid) || 0) === 0
         && (parseFloat(backendData.total_discount) || 0) === 0,
     );
+    const canEditOriginalAmount = isFirstPaymentForEntity;
+    const originalFloor = backendData ? parseFloat(backendData.original_amount) || 0 : 0;
 
     const effectiveOriginal = canEditOriginalAmount
         ? parseFloat(formData.original_amount) || 0
@@ -388,9 +398,14 @@ const AddPayment = ({ onBack, initialEntityId, initialServiceType }) => {
     const payable = Math.max(0, remaining_amount - discount);
 
     const hasInstallment = discount > 0 || paidAmount > 0;
+    // Incremental-only: the entered original must be at least the current list
+    // price. (originalFloor is 0 when nothing is configured yet — then any
+    // positive amount is fine.)
+    const originalBelowFloor = canEditOriginalAmount && effectiveOriginal < originalFloor;
     const isInvalid =
         !backendData ||
         (canEditOriginalAmount && effectiveOriginal <= 0) ||
+        originalBelowFloor ||
         discount < 0 ||
         discount > remaining_amount ||
         paidAmount < 0 ||
@@ -563,7 +578,7 @@ const AddPayment = ({ onBack, initialEntityId, initialServiceType }) => {
                                                 placeholder="Enter bill amount"
                                                 value={formData.original_amount}
                                                 onChange={handleChange}
-                                                min="0.01"
+                                                min={originalFloor > 0 ? String(originalFloor) : '0.01'}
                                                 step="0.01"
                                                 disabled={isFormDisabled}
                                             />
@@ -576,11 +591,16 @@ const AddPayment = ({ onBack, initialEntityId, initialServiceType }) => {
                                             />
                                         )}
                                     </div>
-                                    {canEditOriginalAmount && (
+                                    {canEditOriginalAmount && originalBelowFloor && (
+                                        <span className="input-hint-text" style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '4px' }}>
+                                            Original amount can only be increased — it cannot be less than ₹{originalFloor.toFixed(2)}.
+                                        </span>
+                                    )}
+                                    {canEditOriginalAmount && !originalBelowFloor && (
                                         <span className="input-hint-text" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                            {backendData?.entity_type === 'GST_FILING_RETURN_DETAILS'
-                                                ? 'Enter the service fee for this return period when no price is configured'
-                                                : 'Enter the service fee when no price is configured for this filing'}
+                                            {originalFloor > 0
+                                                ? `Set the total for this service (min ₹${originalFloor.toFixed(2)}). It is locked after this first payment.`
+                                                : 'Enter the service fee. It is locked after this first payment.'}
                                         </span>
                                     )}
                                 </div>

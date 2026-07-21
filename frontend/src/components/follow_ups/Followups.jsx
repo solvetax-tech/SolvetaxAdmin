@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
 import {
     listCustomerServiceFollowups,
@@ -115,6 +115,7 @@ const getServiceTypeDisplay = (item) => {
  
 const Followups = ({ isAdmin, profileData, setToastMessage }) => {
     const [searchParams, setSearchParams] = useSearchParams();
+    const navigate = useNavigate();
 
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -1474,11 +1475,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                             <button
                                                 className={`btn-alert-action ${updatingStatusId === item.id ? 'loading' : ''}`}
                                                 disabled={updatingStatusId === item.id}
-                                                onClick={() => {
-                                                    setSelectedTask(item);
-                                                    setShowCompleteModal(true);
-                                                    fetchTaskHistory(item);
-                                                }}
+                                                onClick={() => handleStatusUpdate(item, 'COMPLETED')}
                                             >
                                                 {updatingStatusId === item.id ? (
                                                     <Loader2 size={14} className="spin" />
@@ -1731,148 +1728,9 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
 
 
 
-    const renderCompleteTaskModal = (closeHandler = closeCompleteModal) => {
-        if (!selectedTask) return null;
-
-        const templates = [
-            "Documents Received",
-            "Call Answered - Discussed",
-            "Left Voicemail",
-            "Payment Confirmed",
-            "Revision Requested",
-            "Meeting Scheduled"
-        ];
-
-        return (
-            <>
-                <div className="filter-drawer-overlay" style={{ zIndex: 2000 }} onClick={closeHandler} />
-                <div className="followups-complete-modal" ref={completeModalRef}>
-                    <div className="modal-header-v2">
-                        <div className="header-title-wrap">
-                            <CalendarCheck size={24} className="header-icon-glow" />
-                            <div>
-                                <h2>Complete Follow-up</h2>
-                                <p className="drawer-task-identity">
-                                    <span className="task-id-pill">{selectedTask.id}</span>
-                                    <span className="task-service-text">{selectedTask.service_name}</span>
-                                </p>
-                            </div>
-                        </div>
-                        <button className="btn-close-v3" onClick={closeHandler}>
-                            <X size={20} />
-                        </button>
-                    </div>
-
-                    <div className="modal-content-grid">
-                        <div className="history-sidebar">
-                            <div className="sidebar-label">
-                                <Clock size={14} className="icon-bright" style={{ marginRight: '8px' }} />
-                                <span>Follow-up History</span>
-                            </div>
-
-                            {loadingHistory ? (
-                                <div className="history-loader">
-                                    <Loader2 size={24} className="animate-spin" />
-                                </div>
-                            ) : taskHistory.length === 0 ? (
-                                <div className="history-empty">No previous history found.</div>
-                            ) : (
-                                <div className="timeline-container">
-                                    {taskHistory.map((h) => (
-                                        <div key={h.id} className={`timeline-item ${selectedTask?.id === h.id ? 'active' : ''}`}>
-                                            <div className="timeline-marker"></div>
-                                            <div className="timeline-content">
-                                                <div className="timeline-meta">
-                                                    <span>{formatDate(h.followup_at)}</span>
-                                                    <span className="timeline-status">{h.status}</span>
-                                                </div>
-                                                {h.remarks && h.remarks.includes('\n[COMPLETED]: ') ? (
-                                                    <div className="timeline-remarks-split">
-                                                        <div className="sub-remark"><span className="tiny-label">Instr:</span> {h.remarks.split('\n[COMPLETED]: ')[0]}</div>
-                                                        <div className="sub-remark outcome"><span className="tiny-label">Outcome:</span> {h.remarks.split('\n[COMPLETED]: ')[1]}</div>
-                                                    </div>
-                                                ) : (
-                                                    <p className="timeline-remark">{h.remarks || 'No remarks'}</p>
-                                                )}
-                                                <div className="timeline-assignee">
-                                                    <User size={10} />
-                                                    <span>{h.assigned_to_name || 'System'}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="completion-form">
-                            <div className="completion-scroll-area">
-                                {selectedTask.remarks && (
-                                    <div className="form-section instruction-section">
-                                        <label className="input-label instruction-label">
-                                            Original Instruction
-                                        </label>
-                                        <div className="task-instruction-box">
-                                            {selectedTask.remarks.includes('\n[COMPLETED]: ') ? (
-                                                <div className="remarks-split-simple">
-                                                    <div className="instr-part"><strong>Initial:</strong> {selectedTask.remarks.split('\n[COMPLETED]: ')[0]}</div>
-                                                    <div className="out-part"><strong>Outcome:</strong> {selectedTask.remarks.split('\n[COMPLETED]: ')[1]}</div>
-                                                </div>
-                                            ) : (
-                                                <span>{selectedTask.remarks}</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="form-section">
-                                    <label className="input-label">Completion Remark</label>
-                                    <textarea
-                                        className="remarks-textarea"
-                                        placeholder="Enter details about this follow-up..."
-                                        value={completionRemark}
-                                        onChange={(e) => setCompletionRemark(e.target.value)}
-                                    />
-                                    <div className="template-chips">
-                                        {templates.map(t => (
-                                            <button
-                                                key={t}
-                                                className="template-chip"
-                                                onClick={() => setCompletionRemark(t)}
-                                            >
-                                                {t}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="modal-footer-v2">
-                                <button
-                                    className="btn-modal-secondary"
-                                    onClick={closeCompleteModal}
-                                    disabled={updatingStatusId === selectedTask.id}
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    className={`btn-modal-primary ${updatingStatusId === selectedTask.id ? 'loading' : ''}`}
-                                    disabled={updatingStatusId === selectedTask.id}
-                                    onClick={() => handleStatusUpdate(selectedTask, 'COMPLETED', completionRemark)}
-                                >
-                                    {updatingStatusId === selectedTask.id ? (
-                                        <><Loader2 size={16} className="animate-spin" /> Confirming...</>
-                                    ) : (
-                                        <>Confirm Completion</>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </>
-        );
-    };
+    // The middle-of-screen "Complete Follow-up" pop-up modal was removed.
+    // Follow-ups now complete directly via the API (handleStatusUpdate) from the
+    // Follow-up Details drawer and the Task Insights alerts card — no pop-up.
 
     const renderDetailDrawer = () => {
         if (!selectedDetailTask) return null;
@@ -2057,20 +1915,19 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                         )}
                     </div>
 
-                    {/* Footer buttons */}
+                    {/* Footer: completes the follow-up DIRECTLY via the API (no pop-up modal) */}
                     {(isPending || isMissed || (!isCompleted && new Date(task.followup_at) < new Date())) && (
                         <div className="calendar-drawer-footer" style={{ borderTop: '1px solid rgba(var(--fg-rgb), 0.08)', padding: '16px 20px', display: 'flex', gap: '10px', background: 'rgba(var(--fg-rgb),0.01)' }}>
                             <button
-                                className="btn-modal-primary"
+                                className={`btn-modal-primary ${updatingStatusId === task.id ? 'loading' : ''}`}
                                 style={{ flex: 1, padding: '10px 14px', fontSize: '12px' }}
-                                onClick={() => {
-                                    setSelectedTask(task);
-                                    setShowCompleteModal(true);
-                                    fetchTaskHistory(task);
-                                    setShowDetailDrawer(false);
+                                disabled={updatingStatusId === task.id}
+                                onClick={async () => {
+                                    await handleStatusUpdate(task, 'COMPLETED');
+                                    closeDetailDrawer();
                                 }}
                             >
-                                Complete Now
+                                {updatingStatusId === task.id ? 'Completing…' : 'Complete Now'}
                             </button>
                         </div>
                     )}
@@ -2137,7 +1994,15 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
             setShowCompleteModal(false);
             setCompletionRemark('Completed');
         } catch (err) {
-            const errorMsg = err.response?.data?.detail || err.message;
+            // detail can be a string, a custom {error:{message}} object, or a
+            // Pydantic errors array — coerce to a string so the catch itself never
+            // throws (that was swallowing real errors and looking like a no-op).
+            const detail = err?.response?.data?.detail;
+            const errorMsg =
+                typeof detail === 'string' ? detail
+                : detail?.error?.message ? detail.error.message
+                : Array.isArray(detail) ? (detail[0]?.msg || 'Validation failed')
+                : (err?.message || 'Request failed');
             if (errorMsg.includes("Finalized followup cannot be modified")) {
                 await Promise.all([fetchRecentActivities(), fetchAlerts()]);
                 setShowCompleteModal(false);
@@ -2517,22 +2382,29 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                     )}
                                 </div>
 
-                                {/* Direct Actions block */}
-                                {(act.activity_type === 'PENDING' || act.activity_type === 'MISSED') && (
+                                {/* Payment follow-ups: record the payment directly. Fully
+                                    paying the entity auto-completes this follow-up (backend). */}
+                                {activeFollowupCategory === 'payments' && !isTaskCompleted
+                                    && act.originalItem?.entity_id && act.originalItem?.entity_type && (
                                     <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
                                         <button
                                             className="btn-modal-primary"
                                             style={{ padding: '4px 10px', fontSize: '10px', minHeight: '26px', width: 'fit-content' }}
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (act.originalItem) {
-                                                    setSelectedTask(act.originalItem);
-                                                    setShowCompleteModal(true);
-                                                    fetchTaskHistory(act.originalItem);
-                                                }
+                                                const it = act.originalItem;
+                                                const params = new URLSearchParams({
+                                                    tab: 'add-payment',
+                                                    service_type: it.entity_type,
+                                                    entity_id: String(it.entity_id),
+                                                    return_tab: 'dashboard',
+                                                    return_sub: 'followups',
+                                                    return_category: 'payments',
+                                                });
+                                                navigate(`/dashboard?${params.toString()}`);
                                             }}
                                         >
-                                            Complete Now
+                                            Record Payment
                                         </button>
                                     </div>
                                 )}
@@ -2739,7 +2611,6 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
             {showAlertsDrawer && renderAlertsDrawer()}
             {showFilterModal && renderFilterDrawer()}
 
-            {showCompleteModal && renderCompleteTaskModal(closeCompleteModal)}
             {showAddPaymentFollowup && renderAddPaymentFollowupDrawer()}
             {showDetailDrawer && renderDetailDrawer()}
         </div>

@@ -145,7 +145,10 @@ async def fetch_entity_payment_totals(
     """
     Load totals for an entity before inserting a new payment row.
 
-    - amount: first row's list price (or first_payment_amount when none)
+    - amount: the entity's list price. It is set ONCE by the first payment and
+      FIXED thereafter — later installments always reuse the first row's amount
+      and the caller's requested value is ignored, so it can never change after
+      the first payment.
     - total_discount_prior: SUM(discount) — each row must store incremental discount
     - total_paid_prior: SUM(paid_amount)
     """
@@ -169,9 +172,12 @@ async def fetch_entity_payment_totals(
     )
 
     if not base_row or base_row["original_amount"] is None:
+        # First payment: the requested amount sets (and locks) the list price.
         original_amount = money(first_payment_amount)
         total_discount_prior = 0.0
     else:
+        # Already has payments: the list price is fixed to the first row's
+        # amount; ignore any requested value so it cannot change afterwards.
         original_amount = money(base_row["original_amount"])
         total_discount_prior = money(base_row["total_discount"] or 0)
 
@@ -230,7 +236,7 @@ async def insert_payment_from_ledger(
       net_amount      — amount - sum(all discounts including this row)
       remaining_amount — net - sum(all paid including this row)
     """
-    return await conn.fetchrow(
+    row = await conn.fetchrow(
         f"""
         INSERT INTO {schema}.payments (
             transaction_id,
@@ -263,3 +269,40 @@ async def insert_payment_from_ledger(
         ledger["payment_status"],
         remarks,
     )
+
+    # When this installment settles the entity (remaining <= 0 ⇒ PAID), reflect
+    # the completed state on every OTHER row for the entity. Otherwise an earlier
+    # installment keeps its historical PENDING snapshot and the payments list
+    # shows a fully-paid entity as part PENDING / part PAID. Inactive (soft-
+    # deleted) rows are included on purpose — the list shows them
+    # (include_inactive) and the ledger already ignores them (is_active filter),
+    # so this is a display-only reconciliation with no effect on the math.
+    if ledger["payment_status"] == "PAID":
+        # NOTE: earlier installment rows KEEP their historical PENDING snapshot
+        # in the DB. The uq_payments_paid unique index allows only ONE active
+        # PAID row per entity, so we must not stamp siblings PAID here. The
+        # payments list instead shows a settled entity's rows as PAID/remaining-0
+        # via a display-level override (the `entity_settled` column), which keeps
+        # the data model + integrity index intact while the UI reads "all paid".
+
+        # Collecting the full amount closes any open payment-collection
+        # follow-up for the entity — there is nothing left to chase. The
+        # trg_payments_followup_completed_at trigger stamps completed_at when
+        # followup_status flips to COMPLETED (satisfying chk_followup_completed_fields).
+        await conn.execute(
+            f"""
+            UPDATE {schema}.payments
+               SET followup_status = 'COMPLETED',
+                   updated_at = NOW()
+             WHERE customer_id IS NOT DISTINCT FROM $1
+               AND entity_id = $2
+               AND entity_type = $3
+               AND is_active = TRUE
+               AND followup_status IN ('PENDING', 'MISSED')
+            """,
+            customer_id,
+            entity_id,
+            entity_type,
+        )
+
+    return row
