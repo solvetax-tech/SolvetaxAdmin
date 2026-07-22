@@ -543,7 +543,7 @@ async def list_registration_documents(
 async def edit_registration_document(
     document_id: int,
     payload: RegistrationDocumentEditIn,
-    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
 
     request_id = generate_uuid()

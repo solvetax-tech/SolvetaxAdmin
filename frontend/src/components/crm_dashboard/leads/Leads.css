@@ -402,6 +402,18 @@
     flex-wrap: nowrap;
 }
 
+/* Row actions are icon-only; labels live in title/aria-label. Scoped to the
+   container so btn-history-mini keeps its padded look where it still has text
+   (the "Details" button in CrmLeadsTable). */
+.crm-row-actions button {
+    gap: 0;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
 .btn-push-mini {
     display: inline-flex;
     align-items: center;

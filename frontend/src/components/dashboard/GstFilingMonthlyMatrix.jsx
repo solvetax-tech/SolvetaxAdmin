@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, CreditCard, ExternalLink, Link2, RotateCcw, Search } from 'lucide-react';
+import api from '../../utils/api';
+import { CheckCircle2, CreditCard, Eye, EyeOff, ExternalLink, Link2, Loader2, Pencil, RotateCcw, Search, X } from 'lucide-react';
 import AddDocumentLinkModal from '../gst_filings/AddDocumentLinkModal';
 import { fetchGstFilingMonthlyMatrix, parseGstFilingFocusFromSearch } from '../../utils/dashboardApi';
 import { patchReturnDetailStatus, resolveReturnDetailIdForForm } from '../../utils/gstFilingReturnApi';
@@ -326,11 +328,227 @@ function getRowFilingTarget(row, months) {
             return {
                 filingId: cell.filing_id,
                 documentUrl: cell.document_url || null,
+                // Portal login lives on the filing; identical across its returns.
+                emailId: cell.filing_email_id || '',
+                username: cell.filing_username || '',
+                password: cell.filing_password || '',
                 period,
             };
         }
     }
     return null;
+}
+
+/**
+ * Portal login for the row's filing, shown under the customer name.
+ * Password is masked until revealed, matching the filing form's own toggle.
+ */
+/**
+ * Editor for the portal login on one filing. PATCHes only the three credential
+ * fields — GSTFilingEditIn is a partial update, so nothing else is touched.
+ */
+function GfmIdentityEditor({ target, onClose, onSaved }) {
+    const [form, setForm] = useState({ email_id: '', username: '', password: '' });
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState(null);
+    const [revealed, setRevealed] = useState(false);
+
+    useEffect(() => {
+        if (!target) return;
+        setForm({
+            email_id: target.emailId || '',
+            username: target.username || '',
+            password: target.password || '',
+        });
+        setError(null);
+        setRevealed(false);
+    }, [target]);
+
+    if (!target) return null;
+
+    const submit = async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        setError(null);
+        try {
+            // Dedicated endpoint: writes the filing and mirrors the same
+            // credentials onto its linked GST registration in one transaction.
+            // Blank values are normalised to null server-side, i.e. cleared.
+            await api.patch(`/api/v1/gst-filings/${target.filingId}/portal-login`, {
+                email_id: form.email_id,
+                username: form.username,
+                password: form.password,
+            });
+            onSaved?.();
+        } catch (err) {
+            const detail = err?.response?.data?.detail;
+            setError(
+                typeof detail === 'string'
+                    ? detail
+                    : (Array.isArray(detail) && detail[0]?.msg) || 'Failed to update portal login.',
+            );
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return createPortal(
+        <div className="gst-modal-overlay-v4 app-side-drawer-mode" onClick={onClose}>
+            <div
+                className="gst-modal-card-v4 app-drawer-panel gst-reg-side-drawer-shell"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="modal-header-v4">
+                    <div className="header-content-v4">
+                        <div className="header-icon-box-v4"><Pencil size={20} /></div>
+                        <div className="modal-title-box">
+                            <h2>Portal Login</h2>
+                            <p className="modal-subtitle-v4">
+                                Filing ID {target.filingId} · {target.period} · also updates the linked GST registration
+                            </p>
+                        </div>
+                    </div>
+                    <button className="btn-drawer-close" onClick={onClose}><X size={20} /></button>
+                </div>
+
+                <form onSubmit={submit} className="modal-form-v4">
+                    <div className="form-scroll-container">
+                        {error && <p className="error-text-v4">{error}</p>}
+                        <div className="form-section-group">
+                            <h3 className="section-title">Filing Identity</h3>
+                            <div className="form-group-v4 full-width" style={{ width: '100%', marginBottom: '18px' }}>
+                                <label className="modal-label-caps">Email ID (Portal)</label>
+                                <input
+                                    type="email"
+                                    className="modal-input-v4"
+                                    placeholder="portal@example.com"
+                                    value={form.email_id}
+                                    onChange={(e) => setForm((p) => ({ ...p, email_id: e.target.value }))}
+                                />
+                            </div>
+                            <div className="form-group-v4 full-width" style={{ width: '100%', marginBottom: '18px' }}>
+                                <label className="modal-label-caps">Username</label>
+                                <input
+                                    type="text"
+                                    className="modal-input-v4"
+                                    placeholder="Portal username"
+                                    value={form.username}
+                                    onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+                                />
+                            </div>
+                            <div className="form-group-v4 full-width" style={{ width: '100%' }}>
+                                <label className="modal-label-caps">Password (Internal)</label>
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        type={revealed ? 'text' : 'password'}
+                                        className="modal-input-v4"
+                                        placeholder="Portal password"
+                                        value={form.password}
+                                        onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setRevealed((v) => !v)}
+                                        aria-label={revealed ? 'Hide password' : 'Reveal password'}
+                                        style={{
+                                            position: 'absolute', right: '10px', top: '50%',
+                                            transform: 'translateY(-50%)', background: 'none',
+                                            border: 'none', cursor: 'pointer', color: 'var(--text-secondary)',
+                                            display: 'flex', alignItems: 'center',
+                                        }}
+                                    >
+                                        {revealed ? <EyeOff size={15} /> : <Eye size={15} />}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="modal-footer-v4">
+                        <div className="footer-actions-v4">
+                            <button type="button" className="dark-outline" onClick={onClose}>Cancel</button>
+                            <button
+                                type="submit"
+                                className="minimal-btn"
+                                disabled={saving}
+                                style={{
+                                    background: 'var(--emerald-success)', color: 'var(--text-primary)',
+                                    border: 'none', borderRadius: '100px', fontWeight: '700',
+                                    padding: '10px 24px', display: 'flex', alignItems: 'center',
+                                    gap: '8px', cursor: saving ? 'not-allowed' : 'pointer',
+                                    opacity: saving ? 0.7 : 1,
+                                }}
+                            >
+                                {saving ? (<><Loader2 size={16} className="refresh-spin" /> Saving…</>) : 'Save'}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>,
+        document.body,
+    );
+}
+
+function GfmFilingIdentity({ target, onEdit }) {
+    const [revealed, setRevealed] = useState(false);
+
+    if (!target) return null;
+    const { emailId, username, password } = target;
+    if (!emailId && !username && !password) {
+        return (
+            <button
+                type="button"
+                className="gfm-identity-add"
+                title={`Add portal login for filing ${target.filingId}`}
+                onClick={() => onEdit(target)}
+            >
+                <Pencil size={11} /> Add login
+            </button>
+        );
+    }
+
+    return (
+        <div className="gfm-identity">
+            {emailId && (
+                <span className="gfm-identity-row" title={emailId}>
+                    <span className="gfm-identity-label">Email</span>
+                    <span className="gfm-identity-value">{emailId}</span>
+                </span>
+            )}
+            {username && (
+                <span className="gfm-identity-row" title={username}>
+                    <span className="gfm-identity-label">User</span>
+                    <span className="gfm-identity-value">{username}</span>
+                </span>
+            )}
+            {password && (
+                <span className="gfm-identity-row">
+                    <span className="gfm-identity-label">Pass</span>
+                    <span className="gfm-identity-value">
+                        {revealed ? password : '••••••••'}
+                    </span>
+                    <button
+                        type="button"
+                        className="gfm-identity-icon-btn"
+                        title={revealed ? 'Hide password' : 'Reveal password'}
+                        aria-label={revealed ? 'Hide password' : 'Reveal password'}
+                        onClick={() => setRevealed((v) => !v)}
+                    >
+                        {revealed ? <EyeOff size={11} /> : <Eye size={11} />}
+                    </button>
+                </span>
+            )}
+            <button
+                type="button"
+                className="gfm-identity-add"
+                title={`Edit portal login for filing ${target.filingId}`}
+                onClick={() => onEdit(target)}
+            >
+                <Pencil size={11} /> Edit login
+            </button>
+        </div>
+    );
 }
 
 function formatMonthHeader(period) {
@@ -772,6 +990,8 @@ const GstFilingMonthlyMatrix = () => {
     const [months, setMonths] = useState([]);
     // { gst_filing_id, gstin } while the Add Document Link drawer is open.
     const [docModalPreset, setDocModalPreset] = useState(null);
+    // Row filing target while the portal-login editor is open.
+    const [identityEditor, setIdentityEditor] = useState(null);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -1008,7 +1228,8 @@ const GstFilingMonthlyMatrix = () => {
     );
 
     const gridStyle = useMemo(() => ({
-        gridTemplateColumns: `minmax(180px, 1.25fr) minmax(64px, 0.5fr) minmax(92px, 0.6fr) minmax(120px, 0.75fr) repeat(${months.length || MONTH_COUNT}, minmax(176px, 1.35fr)) minmax(88px, 0.5fr)`,
+        // Login Creds | Follow-up | …months… | Actions
+        gridTemplateColumns: `minmax(240px, 1.6fr) minmax(120px, 0.75fr) repeat(${months.length || MONTH_COUNT}, minmax(176px, 1.35fr)) minmax(88px, 0.5fr)`,
     }), [months.length]);
 
     const openStatusEditor = useCallback((event, context) => {
@@ -1241,9 +1462,7 @@ const GstFilingMonthlyMatrix = () => {
                         <div className="gfm-table-wrap">
                             <div className="gfm-table">
                                 <div className="gfm-table-head gfm-table-row" style={gridStyle}>
-                                    <div className="gfm-table-cell gfm-table-cell--customer">Customer</div>
-                                    <div className="gfm-table-cell">Cust. ID</div>
-                                    <div className="gfm-table-cell">Mobile</div>
+                                    <div className="gfm-table-cell gfm-table-cell--customer">Login Creds</div>
                                     <div className="gfm-table-cell gfm-table-cell--followup-col">Follow-up</div>
                                     {(months.length ? months : [...Array(MONTH_COUNT)]).map((m) => (
                                         <div key={m || Math.random()} className="gfm-table-cell gfm-table-cell--month">
@@ -1257,7 +1476,7 @@ const GstFilingMonthlyMatrix = () => {
                                     <div className="gfm-table-body">
                                         {[...Array(8)].map((_, i) => (
                                             <div key={i} className="gfm-table-row" style={gridStyle}>
-                                                {[...Array(5 + (months.length || MONTH_COUNT))].map((__, j) => (
+                                                {[...Array(3 + (months.length || MONTH_COUNT))].map((__, j) => (
                                                     <div key={j} className="gfm-table-cell">
                                                         <div className="gfm-skeleton" />
                                                     </div>
@@ -1282,29 +1501,33 @@ const GstFilingMonthlyMatrix = () => {
                                                 data-gfm-group-key={row.groupKey}
                                             >
                                                 <div className="gfm-table-cell gfm-table-cell--customer">
-                                                    {row.isFirstGroupRow ? (
-                                                        <div className="customer-info-mini-v4">
-                                                            <span className="customer-name-v4">
-                                                                {row.display_name || row.business_name || '—'}
-                                                            </span>
-                                                            {row.gstin && (
-                                                                <span className="customer-mobile-v4">{row.gstin}</span>
-                                                            )}
-                                                        </div>
-                                                    ) : (
+                                                    {row.isFirstGroupRow ? (() => {
+                                                        const identityTarget = getRowFilingTarget(row, months);
+                                                        return (
+                                                            <div className="customer-info-mini-v4">
+                                                                <span className="customer-name-v4">
+                                                                    {row.display_name || row.business_name || '—'}
+                                                                </span>
+                                                                <span className="gfm-identity-meta">
+                                                                    {row.gstin && <span className="customer-mobile-v4">{row.gstin}</span>}
+                                                                    {identityTarget?.filingId && (
+                                                                        <span className="gfm-entity-chip">ID {identityTarget.filingId}</span>
+                                                                    )}
+                                                                </span>
+                                                                {row.mobile && (
+                                                                    <span className="gfm-identity-row">
+                                                                        <span className="gfm-identity-label">Mob</span>
+                                                                        <span className="gfm-identity-value">{row.mobile}</span>
+                                                                    </span>
+                                                                )}
+                                                                <GfmFilingIdentity
+                                                                    target={identityTarget}
+                                                                    onEdit={setIdentityEditor}
+                                                                />
+                                                            </div>
+                                                        );
+                                                    })() : (
                                                         <span className="gfm-customer-continuation" aria-hidden="true">↳</span>
-                                                    )}
-                                                </div>
-                                                <div className="gfm-table-cell gfm-table-cell--center">
-                                                    {row.isFirstGroupRow ? (
-                                                        <span className="customer-id-green-v4">{row.customer_id}</span>
-                                                    ) : (
-                                                        <span className="gfm-cell-empty">·</span>
-                                                    )}
-                                                </div>
-                                                <div className="gfm-table-cell gfm-table-cell--center">
-                                                    {row.isFirstGroupRow ? (row.mobile || '—') : (
-                                                        <span className="gfm-cell-empty">·</span>
                                                     )}
                                                 </div>
                                                 {(() => {
@@ -1429,6 +1652,15 @@ const GstFilingMonthlyMatrix = () => {
                 onPageChange={setPage}
                 hasMore={page * ROWS_PER_PAGE < total}
                 loading={loading}
+            />
+
+            <GfmIdentityEditor
+                target={identityEditor}
+                onClose={() => setIdentityEditor(null)}
+                onSaved={() => {
+                    setIdentityEditor(null);
+                    loadRows();
+                }}
             />
 
             <AddDocumentLinkModal

@@ -874,7 +874,7 @@ def mask_gstin(gstin: str) -> str:
 async def edit_registration_person(
     person_id: int,
     payload: RegistrationPersonEditIn,
-    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
 
     request_id = generate_uuid()

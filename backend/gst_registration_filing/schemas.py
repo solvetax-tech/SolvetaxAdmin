@@ -345,6 +345,27 @@ class GSTFilingYearlyIn(BaseSchema):
         return self
 
 
+class GSTFilingPortalLoginIn(BaseSchema):
+    """
+    Portal login for a filing. Applied to the filing and mirrored onto its
+    linked GST registration (username/password/email) when one exists.
+
+    All fields optional; only those sent are written. Send an empty string to
+    clear a value.
+    """
+
+    email_id: Optional[EmailStr] = None
+    username: Optional[str] = Field(None, max_length=100)
+    password: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("email_id", "username", "password", mode="before")
+    @classmethod
+    def _blank_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v.strip() if isinstance(v, str) else v
+
+
 class GSTFilingEditIn(BaseSchema):
     """
     Partial update for GST filing. Only sent fields are applied; assignment fields override when provided.

@@ -20,6 +20,9 @@ const GST_PUSH_STAGE = 'PENDING_REGISTRATION_DATA';
 
 /**
  * Actions: Push (ITR / GST) + View + Call status + History.
+ *
+ * Icon-only — each button carries its label in `title` (hover tooltip) and
+ * `aria-label` (screen readers), so dropping the visible text loses nothing.
  */
 export default function CrmLeadRowActions({
     lead,
@@ -59,13 +62,13 @@ export default function CrmLeadRowActions({
                                 ? 'Create GST registration and link this lead'
                                 : 'Create income tax record and link this lead'
                     }
+                    aria-label={pushed ? 'Pushed' : 'Push'}
                 >
                     {isPushing ? (
-                        <Loader2 size={12} className="spin" />
+                        <Loader2 size={14} className="spin" />
                     ) : (
-                        <Upload size={12} />
+                        <Upload size={14} />
                     )}
-                    <span>{pushed ? 'Pushed' : 'Push'}</span>
                 </button>
             )}
             <button
@@ -73,9 +76,9 @@ export default function CrmLeadRowActions({
                 className="btn-view-mini"
                 onClick={onView}
                 title="View all lead fields"
+                aria-label="View lead"
             >
-                <Eye size={12} />
-                <span>View</span>
+                <Eye size={14} />
             </button>
             {showCallStatus && (
                 <button
@@ -83,9 +86,9 @@ export default function CrmLeadRowActions({
                     className="btn-edit-mini"
                     onClick={onEdit}
                     title="Update call status"
+                    aria-label="Update call status"
                 >
-                    <Edit3 size={12} />
-                    <span>call_status</span>
+                    <Edit3 size={14} />
                 </button>
             )}
             <button
@@ -93,9 +96,9 @@ export default function CrmLeadRowActions({
                 className="btn-history-mini"
                 onClick={onHistory}
                 title="Call history and linked registration"
+                aria-label="Call history"
             >
-                <History size={12} />
-                <span>History</span>
+                <History size={14} />
             </button>
         </div>
     );

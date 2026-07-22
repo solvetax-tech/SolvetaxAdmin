@@ -1571,6 +1571,102 @@
     font-weight: 600;
 }
 
+/* GSTIN + filing id on one line under the name. */
+.gfm-identity-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.gfm-entity-chip {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border-radius: 100px;
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+}
+
+/* Portal login shown under the customer name. */
+.gfm-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 6px;
+}
+
+.gfm-identity-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    line-height: 1.4;
+    min-width: 0;
+}
+
+.gfm-identity-label {
+    flex: 0 0 auto;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.5;
+    font-size: 9px;
+}
+
+.gfm-identity-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--text-secondary);
+}
+
+.gfm-identity-icon-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.gfm-identity-icon-btn:hover {
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.1);
+}
+
+.gfm-identity-add {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    padding: 2px 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 100px;
+    background: transparent;
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.gfm-identity-add:hover {
+    background: rgba(var(--accent-rgb), 0.12);
+}
+
 /* Last column: view-or-add the sheet linked to the row's filing. */
 .gfm-cell-actions {
     display: flex;

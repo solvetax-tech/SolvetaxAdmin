@@ -678,12 +678,38 @@ async def _fetch_filing_document_map(
     }
 
 
+async def _fetch_filing_identity_map(
+    conn: asyncpg.Connection,
+    filing_ids: list[int],
+) -> dict[int, Dict[str, Any]]:
+    """Portal login stored on each filing (same credentials across its returns)."""
+    if not filing_ids:
+        return {}
+    rows = await conn.fetch(
+        f"""
+        SELECT id::int AS id, email_id, username, password
+          FROM {DB_SCHEMA}.gst_filings
+         WHERE id = ANY($1::int[])
+        """,
+        filing_ids,
+    )
+    return {
+        int(row["id"]): {
+            "email_id": row["email_id"],
+            "username": row["username"],
+            "password": row["password"],
+        }
+        for row in rows
+    }
+
+
 def _build_month_cell(
     forms_raw: Dict[str, Dict[str, Any]],
     filing_id: Optional[int],
     return_detail_id: Optional[int] = None,
     payment: Optional[Dict[str, Any]] = None,
     document_url: Optional[str] = None,
+    identity: Optional[Dict[str, Any]] = None,
 ) -> GstFilingMatrixMonthCell:
     form_cells: Dict[str, GstFilingMatrixFormCell] = {}
     tones: list[str] = []
@@ -727,6 +753,9 @@ def _build_month_cell(
         payment_paid_amount=paid_amount,
         payment_net_amount=net_amount,
         document_url=document_url,
+        filing_email_id=(identity or {}).get("email_id"),
+        filing_username=(identity or {}).get("username"),
+        filing_password=(identity or {}).get("password"),
         forms=form_cells,
     )
 
@@ -1049,6 +1078,7 @@ async def list_gst_filing_monthly_matrix(
                 if meta.get("filing_id") is not None
             })
             document_map = await _fetch_filing_document_map(conn, filing_ids)
+            identity_map = await _fetch_filing_identity_map(conn, filing_ids)
 
             data: List[GstFilingMatrixRow] = []
             for crow in customer_rows:
@@ -1072,6 +1102,9 @@ async def list_gst_filing_monthly_matrix(
                             meta.get("return_detail_id"),
                             payment_info,
                             document_map.get(int(cell_filing_id))
+                            if cell_filing_id is not None
+                            else None,
+                            identity_map.get(int(cell_filing_id))
                             if cell_filing_id is not None
                             else None,
                         )

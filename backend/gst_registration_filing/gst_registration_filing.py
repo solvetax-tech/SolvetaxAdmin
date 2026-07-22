@@ -1,12 +1,13 @@
 import logging
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query, Depends, status
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import date, datetime, timedelta
 from backend.gst_registration_filing.schemas import (
     GSTFilingIn,
     GSTFilingYearlyIn,
     GSTFilingEditIn,
+    GSTFilingPortalLoginIn,
     GSTReturnStatusUpdateIn,
     GSTReturnDetailsBulkDeleteIn,
     GSTRegistrationFilingPrefillOut,
@@ -1880,6 +1881,142 @@ async def create_gst_filing_yearly(
 # -------------------------------------------------------------------
 # UPDATE GST FILING (FINAL - WITH USERNAME + PASSWORD + RENT + EMAIL 
 # -------------------------------------------------------------------
+@router.patch(
+    "/{filing_id}/portal-login",
+    summary="Update portal login on a filing and mirror it to the linked GST registration",
+)
+async def update_gst_filing_portal_login(
+    filing_id: int,
+    payload: GSTFilingPortalLoginIn,
+    current_user=Depends(require_permission("EMPLOYEE", "SPECIAL")),
+):
+    """
+    Same credentials apply to every return on a filing, so this writes the
+    filing row and — when the filing is linked to a registration — mirrors
+    username/password/email onto gst_registration in the same transaction.
+    """
+    request_id = generate_uuid()
+
+    emp_id_raw = current_user.get("emp_id") or current_user.get("sub")
+    emp_id = int(emp_id_raw) if str(emp_id_raw).isdigit() else None
+    role = current_user.get("role")
+    role_norm = str(role).strip().upper() if role is not None else None
+
+    log = logging.LoggerAdapter(
+        logger,
+        {"request_id": request_id, "emp_id": emp_id, "api": "update_gst_filing_portal_login"},
+    )
+
+    fields = payload.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(400, GstFilingApiMessages.UPDATE_NO_CHANGES)
+
+    try:
+        pool = await get_db_pool()
+    except Exception:
+        log.exception("DB connection error")
+        raise HTTPException(500, GstFilingApiMessages.DB_UNAVAILABLE)
+
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                # Same IDOR guard as the general PATCH: non-admins may only
+                # touch filings their visibility scope already exposes.
+                visibility_sql, visibility_values, _vidx = build_gst_filing_visibility(
+                    role_norm, emp_id, 2, DB_SCHEMA,
+                )
+                conditions = ["f.id = $1"]
+                values: list[Any] = [filing_id]
+                if visibility_sql:
+                    conditions.append(f"({visibility_sql})")
+                    values.extend(visibility_values)
+
+                existing = await conn.fetchrow(
+                    f"""
+                    SELECT f.id, f.gst_registration_id
+                      FROM {DB_SCHEMA}.gst_filings f
+                     WHERE {' AND '.join(conditions)}
+                     FOR UPDATE
+                    """,
+                    *values,
+                )
+                if not existing:
+                    raise HTTPException(404, GstFilingApiMessages.FILING_NOT_FOUND)
+
+                set_parts = []
+                set_values: list[Any] = []
+                for column in ("email_id", "username", "password"):
+                    if column in fields:
+                        set_values.append(fields[column])
+                        set_parts.append(f"{column} = ${len(set_values)}")
+
+                set_values.append(filing_id)
+                await conn.execute(
+                    f"""
+                    UPDATE {DB_SCHEMA}.gst_filings
+                       SET {', '.join(set_parts)}, updated_at = NOW()
+                     WHERE id = ${len(set_values)}
+                    """,
+                    *set_values,
+                )
+
+                # Mirror onto the registration. Column names differ: the filing
+                # calls it email_id, the registration calls it email.
+                registration_id = existing["gst_registration_id"]
+                mirrored = False
+                if registration_id is not None:
+                    reg_parts = []
+                    reg_values: list[Any] = []
+                    for filing_col, reg_col in (
+                        ("email_id", "email"),
+                        ("username", "username"),
+                        ("password", "password"),
+                    ):
+                        if filing_col in fields:
+                            reg_values.append(fields[filing_col])
+                            reg_parts.append(f"{reg_col} = ${len(reg_values)}")
+
+                    if reg_parts:
+                        reg_values.append(registration_id)
+                        await conn.execute(
+                            f"""
+                            UPDATE {DB_SCHEMA}.gst_registration
+                               SET {', '.join(reg_parts)}, updated_at = NOW()
+                             WHERE id = ${len(reg_values)}
+                            """,
+                            *reg_values,
+                        )
+                        mirrored = True
+
+            await _invalidate_gst_filing_cache(registration_id)
+            if mirrored:
+                await redis_invalidate_tag("gst_registration:filter:index")
+                await redis_invalidate_tag(
+                    f"gst_registration:detail:index:{registration_id}"
+                )
+
+            log.info(
+                "Portal login updated (filing=%s, registration=%s, mirrored=%s)",
+                filing_id, registration_id, mirrored,
+            )
+            return {
+                "filing_id": filing_id,
+                "gst_registration_id": registration_id,
+                "mirrored_to_registration": mirrored,
+                "updated_fields": sorted(fields.keys()),
+                "request_id": request_id,
+            }
+
+        except HTTPException:
+            raise
+        except asyncpg.PostgresError:
+            log.exception("Database error")
+            raise HTTPException(500, GstFilingApiMessages.DB_SAVE_FAILED)
+        except Exception:
+            log.exception("Unexpected error")
+            raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
+
+
 @router.patch("/{filing_id}")
 async def update_gst_filing(
     filing_id: int,

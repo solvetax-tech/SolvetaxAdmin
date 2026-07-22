@@ -105,10 +105,14 @@
     z-index: 6;
     background-color: var(--bg-surface) !important;
     border-left: 1px solid var(--border-subtle);
-    box-shadow: none;
-    min-width: 320px;
-    width: 320px;
-    max-width: 320px;
+    /* Reads as a pinned layer rather than a column sitting on top of the one it
+       overlaps when the table scrolls horizontally. */
+    box-shadow: -6px 0 12px -8px rgba(0, 0, 0, 0.28);
+    /* Sized for icon-only row actions: 4 buttons x 30px + 3 x 6px gaps + 24px
+       padding = 162px. Was 320px back when the buttons carried text labels. */
+    min-width: 170px;
+    width: 170px;
+    max-width: 170px;
     overflow: visible;
     padding: 8px 12px !important;
     text-align: center !important;
@@ -121,19 +125,59 @@
     background-color: var(--bg-surface-2) !important;
 }
 
+/* Fixed 4-slot grid, not flex: Push and Call-status are conditional, so a
+   centred flex row would place View/History at a different x on every row and
+   the column would read as ragged. Each action owns a slot, so icons line up
+   vertically down the whole table regardless of how many a row shows. */
 .crm-leads-table .crm-col-sticky-details .crm-row-actions {
-    display: flex;
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: repeat(4, 30px);
+    gap: 6px;
     align-items: center;
     justify-content: center;
-    gap: 6px;
     width: 100%;
     margin: 0 auto;
 }
 
+.crm-leads-table .crm-row-actions .btn-push-mini { grid-column: 1; }
+.crm-leads-table .crm-row-actions .btn-view-mini { grid-column: 2; }
+.crm-leads-table .crm-row-actions .btn-edit-mini { grid-column: 3; }
+.crm-leads-table .crm-row-actions .btn-history-mini { grid-column: 4; }
+
+/* Icon-only squares. Specificity must beat `.crm-leads-table .btn-history-mini`,
+   which sets its own padding/gap. */
 .crm-leads-table .crm-row-actions button {
-    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    width: 30px;
+    height: 30px;
+    padding: 0;
     white-space: nowrap;
+}
+
+/* One resting treatment for all four — a strip of differently-tinted chips
+   reads as noise at this size. Colour is reserved for hover, so the row stays
+   quiet until you interact with it. */
+.crm-leads-table .crm-row-actions button:not(:disabled):not(.is-done) {
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    border-radius: 6px;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.crm-leads-table .crm-row-actions button:not(:disabled):not(.is-done):hover {
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: var(--accent);
+    box-shadow: none;
+}
+
+.crm-leads-table .crm-row-actions button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
 }
 
 .crm-leads-table .btn-history-mini {

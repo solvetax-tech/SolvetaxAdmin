@@ -1492,7 +1492,7 @@ async def get_gst_registration_full(
 async def edit_gst_registration(
     gst_id: int,
     payload: GSTRegistrationEditIn,
-    current_user=Depends(require_permission("USER_ACCESS", "WRITE")),
+    current_user=Depends(require_permission("EMPLOYEE", "WRITE")),
 ):
     """
     ✔ Dynamic update

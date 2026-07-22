@@ -319,10 +319,21 @@ const Dashboard = ({ onLogout }) => {
       return;
     }
 
+    // GST Filings is ADMIN + OP_MANAGER only. Guard the URL too, so a pasted or
+    // bookmarked link can't reach it. Waits for profileData — otherwise an admin
+    // would be bounced on first paint, before their role is known.
+    // Computed inline rather than via showGstFilingsTab: that const is declared
+    // further down, so naming it in the dep array would be a temporal dead zone.
+    if (tab === 'gst' && rawSub === 'filings' && profileData
+        && !canSeeGstFilingsDashboard(profileData)) {
+      navigate('/dashboard?tab=gst&sub=registrations', { replace: true });
+      return;
+    }
+
     setActiveTab(tab);
     setActiveSubTab(rawSub || (tab === 'contact-leads' ? 'contact_support' : 'registrations'));
     if (tab === 'gst') setIsGstExpanded(true);
-  }, [location.search, navigate]);
+  }, [location.search, navigate, profileData]);
 
 
 
@@ -1465,12 +1476,17 @@ const Dashboard = ({ onLogout }) => {
                 >
                   Registrations
                 </div>
-                <div
-                  onClick={() => handleTabChange('gst', 'filings')}
-                  className={`sub-item ${activeSubTab === 'filings' ? 'active' : ''}`}
-                >
-                  Filings
-                </div>
+                {/* Filings is ADMIN + OP_MANAGER only — RM/OP have no write
+                    access to any filing endpoint, so the section is hidden
+                    rather than shown read-only. */}
+                {showGstFilingsTab && (
+                  <div
+                    onClick={() => handleTabChange('gst', 'filings')}
+                    className={`sub-item ${activeSubTab === 'filings' ? 'active' : ''}`}
+                  >
+                    Filings
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1814,12 +1830,12 @@ const Dashboard = ({ onLogout }) => {
                 initialSubTab={activeSubTab} 
               />
             ) :
-              activeSubTab === 'filings' ? (
-                <GSTFilings 
-                  handleLogout={handleLogout} 
-                  isAdmin={isAdmin} 
-                  profileData={profileData} 
-                  onNewPayment={() => handleTabChange('add-payment')} 
+              activeSubTab === 'filings' && showGstFilingsTab ? (
+                <GSTFilings
+                  handleLogout={handleLogout}
+                  isAdmin={isAdmin}
+                  profileData={profileData}
+                  onNewPayment={() => handleTabChange('add-payment')}
                 />
               ) : null
           ) : activeTab === 'employees' ? (

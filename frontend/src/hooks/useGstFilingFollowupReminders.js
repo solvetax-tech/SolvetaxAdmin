@@ -31,9 +31,15 @@ const alertKey = (returnDetailId, formKey, followupAt) =>
 const alertKeyPrefix = (returnDetailId, formKey) =>
     `gst_filings:${returnDetailId}:${formKey}:`;
 
-const canViewFollowup = (item, empId, role) => {
-    const normalizedRole = String(role || '').toUpperCase();
-    if (normalizedRole === 'ADMIN' || normalizedRole === 'SPECIAL') return true;
+/**
+ * Follow-up reminders are personal: every role — ADMIN, managers, RM and OP
+ * alike — is notified only about records assigned to them.
+ *
+ * (Previously this returned true for role 'SPECIAL', which is a permission
+ * rather than a role and so never matched, and for ADMIN, who was alerted
+ * about every employee's follow-ups.)
+ */
+const canViewFollowup = (item, empId) => {
     const eid = Number(empId);
     if (!Number.isFinite(eid)) return false;
     return Number(item.rm_id) === eid || Number(item.op_id) === eid;
@@ -132,13 +138,12 @@ const useGstFilingFollowupReminders = (profileData) => {
 
     const processGstFilingFollowups = useCallback((items, now, profile) => {
         const empId = profile.emp_id;
-        const role = profile.role;
 
         clearAllScheduledTimeouts();
 
         (items || []).forEach((item) => {
             if (!item?.followup_at || !item?.return_detail_id || !item?.form_key) return;
-            if (!canViewFollowup(item, empId, role)) return;
+            if (!canViewFollowup(item, empId)) return;
 
             const key = alertKey(item.return_detail_id, item.form_key, item.followup_at);
             const prefix = alertKeyPrefix(item.return_detail_id, item.form_key);

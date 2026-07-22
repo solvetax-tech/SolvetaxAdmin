@@ -65,6 +65,10 @@ class GstFilingMatrixMonthCell(BaseModel):
     # Latest active sheet linked to this cell's filing — one sheet covers all
     # returns on the filing, so the matrix can view-or-add from a single action.
     document_url: Optional[str] = None
+    # Portal login on this cell's filing, shown/edited from the customer column.
+    filing_email_id: Optional[str] = None
+    filing_username: Optional[str] = None
+    filing_password: Optional[str] = None
     forms: Optional[Dict[str, GstFilingMatrixFormCell]] = None
 
 
