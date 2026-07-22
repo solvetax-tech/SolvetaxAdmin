@@ -104,6 +104,11 @@
     width: 100%;
 }
 
+/* An RM/OP doesn't need the column naming themselves — collapse its track. The
+   rows inherit these vars from the body, so one class here covers the ledger. */
+.itr-ledger-body.rmop-hide-rm { --itr-col-10: 0px; }
+.itr-ledger-body.rmop-hide-op { --itr-col-11: 0px; }
+
 .itr-ledger-header {
     background: var(--bg-surface-2);
     border-bottom: 1px solid var(--border);

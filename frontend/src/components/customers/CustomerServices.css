@@ -82,6 +82,8 @@
 /* --- Grid Ledger Layout (fluid columns, fits viewport) --- */
 .cs-services-grid-template {
     display: grid !important;
+    --col-rm: minmax(88px, 0.65fr);
+    --col-op: minmax(88px, 0.65fr);
     grid-template-columns:
         minmax(48px, 0.35fr)   /* ID */
         minmax(64px, 0.45fr)   /* Cust ID */
@@ -89,8 +91,8 @@
         minmax(120px, 1fr)     /* Business Name */
         minmax(100px, 0.75fr)  /* Phone */
         minmax(96px, 0.8fr)    /* Code */
-        minmax(88px, 0.65fr)   /* RM */
-        minmax(88px, 0.65fr)   /* OP */
+        var(--col-rm)          /* RM */
+        var(--col-op)          /* OP */
         minmax(72px, 0.5fr)    /* Status */
         minmax(96px, 0.65fr)   /* Service Status */
         minmax(96px, 0.65fr)   /* Follow-up */
@@ -100,6 +102,10 @@
     width: 100%;
     min-width: 0;
 }
+
+/* An RM/OP doesn't need the column naming themselves — collapse its track. */
+.cs-services-grid-template.rmop-hide-rm { --col-rm: 0px; }
+.cs-services-grid-template.rmop-hide-op { --col-op: 0px; }
 
 .cs-services-table-v2 {
     width: 100%;

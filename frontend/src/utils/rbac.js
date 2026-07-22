@@ -41,7 +41,7 @@ export function canSeeGstFilingsDashboard(profileData) {
 // WRITE implies READ (same rule as the backend).
 // --------------------------------------------------------------------------- //
 
-function decodeSessionToken() {
+export function decodeSessionToken() {
   try {
     const token = localStorage.getItem('session_token');
     if (!token) return null;
@@ -52,6 +52,14 @@ function decodeSessionToken() {
   } catch {
     return null;
   }
+}
+
+/**
+ * Role from the session JWT, for components too deep in the tree to be handed
+ * `profileData` as a prop. Prefer `profileData?.role` where it is available.
+ */
+export function getSessionRole() {
+  return String(decodeSessionToken()?.role || '').toUpperCase();
 }
 
 /**

@@ -28,6 +28,7 @@ import FormCustomSelect from '../common/FormCustomSelect';
 import FilterDateInput from '../common/FilterDateInput';
 import { optionsFromConfig, optionsFromPairs } from '../common/selectOptionUtils';
 import { buildRmOpSelectOptions } from '../../utils/activeEmployees';
+import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
 
 const FILTER_FY_OPTIONS = buildFinancialYearPresetOptions({ yearsBack: 8 });
 
@@ -36,14 +37,14 @@ const RECORD_YEAR_OPTIONS = (() => {
     return Array.from({ length: 8 }, (_, i) => current - i);
 })();
 
-const ITRTableSkeleton = ({ rows = 12 }) => (
+const ITRTableSkeleton = ({ rows = 12, rmOpCols = {} }) => (
     <>
         {[...Array(rows)].map((_, rowIndex) => (
             <div key={`itr-skeleton-${rowIndex}`} className="itr-ledger-row itr-skeleton-row">
                 {[...Array(12)].map((__, columnIndex) => (
-                    <div 
-                        key={`itr-skeleton-cell-${columnIndex}`} 
-                        className={`itr-ledger-cell${columnIndex === 0 ? ' itr-ledger-sticky-id' : ''}${columnIndex === 11 ? ' itr-ledger-sticky-actions' : ''}`}
+                    <div
+                        key={`itr-skeleton-cell-${columnIndex}`}
+                        className={`itr-ledger-cell${columnIndex === 0 ? ' itr-ledger-sticky-id' : ''}${columnIndex === 11 ? ' itr-ledger-sticky-actions' : ''}${columnIndex === 9 ? ` ${rmOpCols.rmCellClass || ''}` : ''}${columnIndex === 10 ? ` ${rmOpCols.opCellClass || ''}` : ''}`}
                     >
                         <div className="itr-skeleton-bar" />
                     </div>
@@ -54,6 +55,7 @@ const ITRTableSkeleton = ({ rows = 12 }) => (
 );
 
 export const IncomeTax = ({ profileData }) => {
+    const rmOpCols = getRmOpColumnVisibility(profileData);
     const navigate = useNavigate();
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -730,7 +732,7 @@ export const IncomeTax = ({ profileData }) => {
             )}
 
             <div className="gst-table-wrapper">
-                <div className="itr-ledger-body">
+                <div className={`itr-ledger-body ${rmOpCols.containerClass}`}>
                     {/* Header - Always visible */}
                     <div className="itr-ledger-row itr-ledger-header">
                         <div className="itr-ledger-cell itr-ledger-sticky-id">ID</div>
@@ -742,13 +744,13 @@ export const IncomeTax = ({ profileData }) => {
                         <div className="itr-ledger-cell">Income Source</div>
                         <div className="itr-ledger-cell">Status</div>
                         <div className="itr-ledger-cell">Record Year</div>
-                        <div className="itr-ledger-cell">RM</div>
-                        <div className="itr-ledger-cell">OP</div>
+                        <div className={`itr-ledger-cell ${rmOpCols.rmCellClass}`}>RM</div>
+                        <div className={`itr-ledger-cell ${rmOpCols.opCellClass}`}>OP</div>
                         <div className="itr-ledger-cell itr-ledger-sticky-actions">Actions</div>
                     </div>
 
                     {loading && data.length === 0 ? (
-                        <ITRTableSkeleton rows={12} />
+                        <ITRTableSkeleton rows={12} rmOpCols={rmOpCols} />
                     ) : (
                         <>
                             {/* Body */}
@@ -778,8 +780,8 @@ export const IncomeTax = ({ profileData }) => {
                                         <div className="itr-ledger-cell itr-ledger-record-year-cell">
                                             <RecordYearBadge year={item.year} />
                                         </div>
-                                        <div className="itr-ledger-cell">{getRMUsername(item.rm_id, item.rm_name)}</div>
-                                        <div className="itr-ledger-cell">{getOPUsername(item.op_id, item.op_name)}</div>
+                                        <div className={`itr-ledger-cell ${rmOpCols.rmCellClass}`}>{getRMUsername(item.rm_id, item.rm_name)}</div>
+                                        <div className={`itr-ledger-cell ${rmOpCols.opCellClass}`}>{getOPUsername(item.op_id, item.op_name)}</div>
                                         <div
                                             className="itr-ledger-cell itr-actions-cell itr-ledger-sticky-actions"
                                         >

@@ -19,7 +19,7 @@ import Button from '../ui/Button';
 import StatusPill from '../ui/StatusPill';
 import './Customer.css';
 import AddCustomerModal from './AddCustomerModal';
-import { canManageRmOpRecords } from '../../utils/rmOpAssignmentFields';
+import { canManageRmOpRecords, getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
 import CustomerDetailsModal from './CustomerDetailsModal';
 import CustomerActivationModal from './CustomerActivationModal';
 import ManageCustomerServicesModal from './ManageCustomerServicesModal';
@@ -41,6 +41,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
     const [error, setError] = useState(null);
     const [hasFetched, setHasFetched] = useState(false);
     const userRole = profileData?.role || '';
+    const rmOpCols = getRmOpColumnVisibility(profileData);
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [showFilterModal, setShowFilterModal] = useState(false);
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -636,7 +637,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
 
             <div className="gst-table-wrapper">
                 <div className="gst-table-container">
-                    <div className="filings-ledger-header customer-grid-template">
+                    <div className={`filings-ledger-header customer-grid-template ${rmOpCols.containerClass}`}>
                         <div className="filings-ledger-header-cell">Cust ID</div>
                         <div className="filings-ledger-header-cell">Full Name</div>
                         <div className="filings-ledger-header-cell">Email</div>
@@ -646,8 +647,8 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                         <div className="filings-ledger-header-cell">Business Type</div>
                         <div className="filings-ledger-header-cell">State</div>
                         <div className="filings-ledger-header-cell">City</div>
-                        <div className="filings-ledger-header-cell">RM Name</div>
-                        <div className="filings-ledger-header-cell">OP Name</div>
+                        <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM Name</div>
+                        <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>OP Name</div>
                         <div className="filings-ledger-header-cell" style={{ justifyContent: 'center' }}>Active</div>
                         <div className="filings-ledger-header-cell customer-actions-sticky">Actions</div>
                     </div>
@@ -655,9 +656,9 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                     {loading ? (
                         <div className="filings-ledger-body">
                             {[...Array(12)].map((_, i) => (
-                                <div key={i} className="filings-ledger-row customer-grid-template">
+                                <div key={i} className={`filings-ledger-row customer-grid-template ${rmOpCols.containerClass}`}>
                                     {[...Array(13)].map((_, j) => (
-                                        <div key={j} className="filings-ledger-cell">
+                                        <div key={j} className={`filings-ledger-cell ${j === 9 ? rmOpCols.rmCellClass : ''}${j === 10 ? rmOpCols.opCellClass : ''}`}>
                                             <div className="filings-ledger-skeleton-bar" />
                                         </div>
                                     ))}
@@ -675,7 +676,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                             {data.map(item => (
                                 <div
                                     key={item.customer_id}
-                                    className={`filings-ledger-row customer-grid-template ${openPopover.customerId === item.customer_id ? 'customer-row-active' : ''}`}
+                                    className={`filings-ledger-row customer-grid-template ${rmOpCols.containerClass} ${openPopover.customerId === item.customer_id ? 'customer-row-active' : ''}`}
                                 >
                                     <div className="filings-ledger-cell">
                                         <span className="ui-num">{item.customer_id}</span>
@@ -694,8 +695,8 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                                     </div>
                                     <div className="filings-ledger-cell" title={item.state}>{getDisplayName(states, item.state)}</div>
                                     <div className="filings-ledger-cell" title={item.city}>{item.city || '-'}</div>
-                                    <div className="filings-ledger-cell" title={item.rm_name}>{item.rm_name || '-'}</div>
-                                    <div className="filings-ledger-cell" title={item.op_name}>{item.op_name || '-'}</div>
+                                    <div className={`filings-ledger-cell ${rmOpCols.rmCellClass}`} title={item.rm_name}>{item.rm_name || '-'}</div>
+                                    <div className={`filings-ledger-cell ${rmOpCols.opCellClass}`} title={item.op_name}>{item.op_name || '-'}</div>
                                     <div className="filings-ledger-cell" style={{ justifyContent: 'center' }}>
                                         <StatusPill tone={item.is_active ? 'success' : 'danger'}>
                                             {item.is_active ? 'Active' : 'Inactive'}

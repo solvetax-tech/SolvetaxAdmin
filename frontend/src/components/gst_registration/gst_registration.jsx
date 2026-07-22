@@ -14,6 +14,7 @@ import './GSTRegistrationSignup.css';
 import api from '../../utils/api';
 import {
     getRmOpAssignmentVisibility,
+    getRmOpColumnVisibility,
     resolveRmIdForPayload,
     resolveOpIdForPayload,
     canManageRmOpRecords,
@@ -130,6 +131,7 @@ const extractGstRegistrationError = (err) => {
 };
 
 export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSubTab }) => {
+    const rmOpCols = getRmOpColumnVisibility(profileData);
     const navigate = useNavigate();
     const location = useLocation();
     const [activeTab, setActiveTab] = useState(initialSubTab || 'registrations');
@@ -235,9 +237,9 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
     const GstRegTableSkeleton = () => (
         <div className="filings-ledger-body">
             {[...Array(12)].map((_, i) => (
-                <div key={i} className="filings-ledger-row gst-reg-grid-template">
+                <div key={i} className={`filings-ledger-row gst-reg-grid-template ${rmOpCols.containerClass}`}>
                     {[...Array(14)].map((_, j) => (
-                        <div key={j} className="filings-ledger-cell">
+                        <div key={j} className={`filings-ledger-cell ${j === 11 ? rmOpCols.rmCellClass : ''}${j === 12 ? rmOpCols.opCellClass : ''}`}>
                             <div className="filings-ledger-skeleton-bar" />
                         </div>
                     ))}
@@ -728,7 +730,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                     <main className="gst-main-content-table">
                         <div className="gst-table-wrapper gst-table-wrapper--portal">
                             <div className="gst-table-container gst-table-container--portal">
-                                <div className="filings-ledger-header gst-reg-grid-template">
+                                <div className={`filings-ledger-header gst-reg-grid-template ${rmOpCols.containerClass}`}>
                                     <div className="filings-ledger-header-cell">ID</div>
                                     <div className="filings-ledger-header-cell">Customer ID</div>
                                     <div className="filings-ledger-header-cell">Username</div>
@@ -740,8 +742,8 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                     <div className="filings-ledger-header-cell">Business Type</div>
                                     <div className="filings-ledger-header-cell">State</div>
                                     <div className="filings-ledger-header-cell">Filing Pref</div>
-                                    <div className="filings-ledger-header-cell">RM Name</div>
-                                    <div className="filings-ledger-header-cell">Assigned OP</div>
+                                    <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM Name</div>
+                                    <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>Assigned OP</div>
                                     <div className="filings-ledger-header-cell gst-sticky-actions" style={{ justifyContent: 'center' }}>Actions</div>
                                 </div>
                                 {loading ? (
@@ -764,7 +766,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                         {data.map((item, idx) => (
                                             <div 
                                                 key={idx} 
-                                                className="filings-ledger-row gst-reg-grid-template gst-table-row gst-table-row--static"
+                                                className={`filings-ledger-row gst-reg-grid-template gst-table-row gst-table-row--static ${rmOpCols.containerClass}`}
                                             >
                                                 <div className="filings-ledger-cell gst-reg-id-cell">{item.id}</div>
                                                 <div className="filings-ledger-cell">
@@ -779,8 +781,8 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                                 <div className="filings-ledger-cell" title={item.business_type || ''}>{item.business_type || '-'}</div>
                                                 <div className="filings-ledger-cell">{item.state || '-'}</div>
                                                 <div className="filings-ledger-cell">{item.filing_preference || '-'}</div>
-                                                <div className="filings-ledger-cell" title={getRmDisplayName(item)}>{getRmDisplayName(item)}</div>
-                                                <div className="filings-ledger-cell" title={item.created_by_name || item.op_name || ''}>{getOpDisplayName(item)}</div>
+                                                <div className={`filings-ledger-cell ${rmOpCols.rmCellClass}`} title={getRmDisplayName(item)}>{getRmDisplayName(item)}</div>
+                                                <div className={`filings-ledger-cell ${rmOpCols.opCellClass}`} title={item.created_by_name || item.op_name || ''}>{getOpDisplayName(item)}</div>
                                                 <div className="filings-ledger-cell gst-action-buttons gst-sticky-actions" style={{ justifyContent: 'center' }}>
                                                     <button 
                                                         className="btn-view-action" 

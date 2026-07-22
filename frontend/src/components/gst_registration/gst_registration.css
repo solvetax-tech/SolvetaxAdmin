@@ -882,7 +882,9 @@
 
 .gst-reg-grid-template {
     display: grid !important;
-    grid-template-columns: 
+    --col-rm: minmax(140px, 1fr);
+    --col-op: minmax(140px, 1fr);
+    grid-template-columns:
         70px                    /* 1. ID (Sticky) */
         90px                    /* 2. Customer ID (Sticky) */
         minmax(120px, 0.8fr)    /* 3. Username */
@@ -894,14 +896,18 @@
         minmax(140px, 0.9fr)    /* 9. Business Type */
         minmax(140px, 0.9fr)    /* 10. State */
         minmax(100px, 0.7fr)    /* 11. Filing Pref */
-        minmax(140px, 1fr)      /* 12. RM Name */
-        minmax(140px, 1fr)      /* 13. Assigned OP */
+        var(--col-rm)           /* 12. RM Name */
+        var(--col-op)           /* 13. Assigned OP */
         156px;                  /* 14. Actions — snug fit for View + Edit + Record + Schedule Payment */
     gap: 0 !important;
     grid-column-gap: 0 !important;
     width: fit-content !important;
     min-width: 100% !important;
 }
+
+/* An RM/OP doesn't need the column naming themselves — collapse its track. */
+.gst-reg-grid-template.rmop-hide-rm { --col-rm: 0px; }
+.gst-reg-grid-template.rmop-hide-op { --col-op: 0px; }
 
 .gst-people-grid-template {
     display: grid !important;

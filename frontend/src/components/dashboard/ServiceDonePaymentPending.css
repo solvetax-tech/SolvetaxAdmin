@@ -162,20 +162,26 @@
 
 .sdpp-ledger-grid {
     display: grid !important;
+    --col-rm: minmax(90px, 0.5fr);
+    --col-op: minmax(90px, 0.5fr);
     grid-template-columns:
-        minmax(90px, 0.6fr)
-        minmax(90px, 0.55fr)
-        minmax(100px, 0.55fr)
-        minmax(160px, 1.1fr)
-        minmax(120px, 0.8fr)
-        minmax(100px, 0.7fr)
-        minmax(90px, 0.5fr)
-        minmax(90px, 0.5fr)
-        minmax(110px, 0.65fr)
-        minmax(100px, 0.55fr);
+        minmax(90px, 0.6fr)    /* Type */
+        minmax(90px, 0.55fr)   /* Entity ID */
+        minmax(100px, 0.55fr)  /* Cust. ID */
+        minmax(160px, 1.1fr)   /* Name / Service */
+        minmax(120px, 0.8fr)   /* Mobile */
+        minmax(100px, 0.7fr)   /* Service Status */
+        var(--col-rm)          /* RM */
+        var(--col-op)          /* OP */
+        minmax(110px, 0.65fr)  /* Pending Amount */
+        minmax(100px, 0.55fr); /* Action */
     width: 100% !important;
     min-width: 1080px !important;
 }
+
+/* An RM/OP doesn't need the column naming themselves — collapse its track. */
+.sdpp-ledger-grid.rmop-hide-rm { --col-rm: 0px; }
+.sdpp-ledger-grid.rmop-hide-op { --col-op: 0px; }
 
 .sdpp-entity-chip {
     display: inline-flex;

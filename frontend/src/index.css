@@ -807,3 +807,26 @@ h1, h2, h3, h4, h5, h6 {
 :root:is([data-theme="light"], [data-theme="violet"]) .crm-main {
   background: var(--bg-app);
 }
+
+/* RM/OP ledger columns hidden from the role they describe (see
+   utils/rmOpAssignmentFields.js). The cell stays a grid item so the following
+   columns keep their tracks; the per-table `rmop-hide-*` rules zero the track
+   itself. visibility:hidden also drops it from the a11y tree and tab order.
+
+   The selector is repeated on purpose. Component sheets style these cells with
+   `!important` rules that load after this file, so at equal specificity they win
+   the tie and their padding survives as a ~25px sliver where the column should
+   be. Two levels were not enough: income_tax.css uses a descendant pair
+   (.itr-ledger-header .itr-ledger-cell{padding:0 16px!important}) which is also
+   (0,2,0). Three class references clear both without depending on import order.
+   Verified in-browser: collapsed cells measure exactly 0px wide. */
+.rmop-col-hidden.rmop-col-hidden.rmop-col-hidden {
+  visibility: hidden !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+}

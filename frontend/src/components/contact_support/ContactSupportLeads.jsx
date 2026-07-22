@@ -17,6 +17,7 @@ import {
     fetchContactSupportOptions,
     editContactSupportLead,
 } from '../../utils/contactSupportApi';
+import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
 import '../common/Filters.css';
 import './ContactSupportLeads.css';
 
@@ -59,6 +60,9 @@ function getApiErrorMessage(err, fallback = 'Request failed') {
 }
 
 const ContactSupportLeads = () => {
+    // No profileData prop this deep in the dashboard tree — the helper falls
+    // back to the role on the session token.
+    const rmOpCols = getRmOpColumnVisibility();
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -511,7 +515,7 @@ const ContactSupportLeads = () => {
                         </div>
 
                         <div className="progress-tracker-container-v4">
-                            <div className={`filings-ledger-header cs-leads-grid ${activeTab === TAB_REFERRAL ? 'cs-leads-grid--referral' : ''}`}>
+                            <div className={`filings-ledger-header cs-leads-grid ${activeTab === TAB_REFERRAL ? 'cs-leads-grid--referral' : ''} ${rmOpCols.containerClass}`}>
                                 <div className="filings-ledger-header-cell">ID</div>
                                 <div className="filings-ledger-header-cell">Name</div>
                                 <div className="filings-ledger-header-cell">Phone</div>
@@ -520,8 +524,8 @@ const ContactSupportLeads = () => {
                                 )}
                                 <div className="filings-ledger-header-cell">Email</div>
                                 <div className="filings-ledger-header-cell">Service</div>
-                                <div className="filings-ledger-header-cell">RM</div>
-                                <div className="filings-ledger-header-cell">OP</div>
+                                <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM</div>
+                                <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>OP</div>
                                 <div className="filings-ledger-header-cell">Provided</div>
                                 <div className="filings-ledger-header-cell">Status</div>
                                 <div className="filings-ledger-header-cell">Action</div>
@@ -547,7 +551,7 @@ const ContactSupportLeads = () => {
                                             return (
                                                 <React.Fragment key={row.id}>
                                                     <div
-                                                        className={`filings-ledger-row cs-leads-grid ${activeTab === TAB_REFERRAL ? 'cs-leads-grid--referral' : ''}`}
+                                                        className={`filings-ledger-row cs-leads-grid ${activeTab === TAB_REFERRAL ? 'cs-leads-grid--referral' : ''} ${rmOpCols.containerClass}`}
                                                     >
                                                         <div className="filings-ledger-cell">
                                                             <span className="customer-id-green-v4">{row.id}</span>
@@ -575,8 +579,8 @@ const ContactSupportLeads = () => {
                                                                 View ({serviceItems.length})
                                                             </button>
                                                         </div>
-                                                        <div className="filings-ledger-cell">{row.rm_name || row.rm_id || '—'}</div>
-                                                        <div className="filings-ledger-cell">{row.op_name || row.op_id || '—'}</div>
+                                                        <div className={`filings-ledger-cell ${rmOpCols.rmCellClass}`}>{row.rm_name || row.rm_id || '—'}</div>
+                                                        <div className={`filings-ledger-cell ${rmOpCols.opCellClass}`}>{row.op_name || row.op_id || '—'}</div>
                                                         <div className="filings-ledger-cell">
                                                             {row.is_service_provided ? 'Yes' : 'No'}
                                                         </div>

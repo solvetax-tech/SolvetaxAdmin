@@ -7,6 +7,7 @@ import api from '../../utils/api';
 import { useListLoading } from '../../hooks/useListLoading';
 import {
     getRmOpAssignmentVisibility,
+    getRmOpColumnVisibility,
     resolveRmIdForPayload,
     resolveOpIdForPayload,
 } from '../../utils/rmOpAssignmentFields';
@@ -247,13 +248,24 @@ const LocationSearchField = React.memo(({ onSelect, defaultValue = '' }) => {
     );
 });
 
-export const TableSkeleton = ({ columns, rows = 12 }) => {
+/**
+ * `rmOpCols` (from getRmOpColumnVisibility) plus the 0-based index of the RM and
+ * OP columns collapses those cells to match the real rows. Omit them and the
+ * skeleton renders unchanged, which is what every other caller wants.
+ */
+export const TableSkeleton = ({ columns, rows = 12, rmOpCols, rmIndex = -1, opIndex = -1 }) => {
+    const collapsedClass = (j) => {
+        if (!rmOpCols) return '';
+        if (j === rmIndex) return rmOpCols.rmCellClass;
+        if (j === opIndex) return rmOpCols.opCellClass;
+        return '';
+    };
     return (
         <div className="filings-ledger-body">
             {[...Array(rows)].map((_, i) => (
-                <div key={`skeleton-${i}`} className="filings-ledger-row filings-ledger-grid-template filings-ledger-skeleton-row">
+                <div key={`skeleton-${i}`} className={`filings-ledger-row filings-ledger-grid-template filings-ledger-skeleton-row ${rmOpCols?.containerClass || ''}`}>
                     {[...Array(columns)].map((_, j) => (
-                        <div key={`cell-${j}`} className="filings-ledger-cell">
+                        <div key={`cell-${j}`} className={`filings-ledger-cell ${collapsedClass(j)}`}>
                             <div
                                 className="filings-ledger-skeleton-bar"
                                 style={{
@@ -498,6 +510,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
     const [editingFiling, setEditingFiling] = useState(null);
     const filingFormIsEdit = Boolean(editingFiling);
     const { showRmField, showOpField } = getRmOpAssignmentVisibility(profileData);
+    const rmOpCols = getRmOpColumnVisibility(profileData);
     const [recentSearches, setRecentSearches] = useState([]);
     const [showCreateDocModal, setShowCreateDocModal] = useState(false);
     // Seeded by the per-row "Add Document Link" action on the GST Filings tab so
@@ -1512,7 +1525,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                     {activeSubTab === 'GST Filings' ? (
                         <>
 
-                            <div className="filings-ledger-header filings-ledger-grid-template">
+                            <div className={`filings-ledger-header filings-ledger-grid-template ${rmOpCols.containerClass}`}>
                                 <div className="filings-ledger-header-cell filings-ledger-sticky-id filings-ledger-sticky-col-1">ID</div>
                                 <div className="filings-ledger-header-cell filings-ledger-sticky-id filings-ledger-sticky-col-2">Cust ID</div>
                                 <div className="filings-ledger-header-cell filings-ledger-sticky-id filings-ledger-sticky-col-3">GST ID</div>
@@ -1524,8 +1537,8 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                 <div className="filings-ledger-header-cell">Frequency</div>
                                 <div className="filings-ledger-header-cell">Status</div>
                                 <div className="filings-ledger-header-cell">State</div>
-                                <div className="filings-ledger-header-cell">RM</div>
-                                <div className="filings-ledger-header-cell">OP</div>
+                                <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM</div>
+                                <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>OP</div>
                                 <div className="filings-ledger-header-cell">Business Name</div>
                                 <div className="filings-ledger-header-cell">Business Type</div>
                                 <div className="filings-ledger-header-cell">Remarks</div>
@@ -1533,11 +1546,11 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                             </div>
 
                             {loading ? (
-                                <TableSkeleton columns={17} rows={12} />
+                                <TableSkeleton columns={17} rows={12} rmOpCols={rmOpCols} rmIndex={11} opIndex={12} />
                             ) : data.length > 0 ? (
                                 <div className="filings-ledger-body">
                                     {data.map((item) => (
-                                        <div key={item.id} className="filings-ledger-row filings-ledger-grid-template gst-table-row gst-table-row--static">
+                                        <div key={item.id} className={`filings-ledger-row filings-ledger-grid-template gst-table-row gst-table-row--static ${rmOpCols.containerClass}`}>
                                             <div className="filings-ledger-cell filings-ledger-sticky-id filings-ledger-sticky-col-1 gst-filings-filing-id-cell">
                                                 <span className="ui-num">{item.id ?? '-'}</span>
                                             </div>
@@ -1571,10 +1584,10 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                             <div className="filings-ledger-cell state-cell">
                                                 {configs.states?.find(s => s.value === item.state)?.display_name || item.state || '-'}
                                             </div>
-                                            <div className="filings-ledger-cell staff-cell" title={`RM ID: ${item.rm_id}`}>
+                                            <div className={`filings-ledger-cell staff-cell ${rmOpCols.rmCellClass}`} title={`RM ID: ${item.rm_id}`}>
                                                 {configs.employees.find(e => Number(e.emp_id) === Number(item.rm_id))?.username || '-'}
                                             </div>
-                                            <div className="filings-ledger-cell staff-cell" title={`OP ID: ${item.op_id}`}>
+                                            <div className={`filings-ledger-cell staff-cell ${rmOpCols.opCellClass}`} title={`OP ID: ${item.op_id}`}>
                                                 {configs.employees.find(e => Number(e.emp_id) === Number(item.op_id))?.username || '-'}
                                             </div>
                                             <div className="filings-ledger-cell business-name-cell" title={item.business_name}>

@@ -107,34 +107,41 @@
 
 .cs-leads-grid {
     display: grid !important;
+    --col-rm: minmax(80px, 0.45fr);
+    --col-op: minmax(80px, 0.45fr);
     grid-template-columns:
-        minmax(50px, 0.35fr)
-        minmax(150px, 0.9fr)
-        minmax(100px, 0.65fr)
-        minmax(190px, 1.15fr)
-        minmax(150px, 0.95fr)
-        minmax(100px, 0.65fr)
-        minmax(80px, 0.45fr)
-        minmax(80px, 0.45fr)
-        minmax(70px, 0.4fr)
-        minmax(64px, 0.3fr);
+        minmax(50px, 0.35fr)   /* ID */
+        minmax(150px, 0.9fr)   /* Name */
+        minmax(100px, 0.65fr)  /* Phone */
+        minmax(190px, 1.15fr)  /* Email */
+        minmax(150px, 0.95fr)  /* Service */
+        var(--col-rm)          /* RM */
+        var(--col-op)          /* OP */
+        minmax(80px, 0.45fr)   /* Provided */
+        minmax(70px, 0.4fr)    /* Status */
+        minmax(64px, 0.3fr);   /* Action */
     width: 100% !important;
     min-width: 1240px !important;
 }
 
+/* An RM/OP doesn't need the column naming themselves — collapse its track.
+   Covers the referral variant too, since both templates name the same vars. */
+.cs-leads-grid.rmop-hide-rm { --col-rm: 0px; }
+.cs-leads-grid.rmop-hide-op { --col-op: 0px; }
+
 .cs-leads-grid--referral {
     grid-template-columns:
-        minmax(50px, 0.35fr)
-        minmax(150px, 0.9fr)
-        minmax(100px, 0.65fr)
-        minmax(110px, 0.65fr)
-        minmax(190px, 1.1fr)
-        minmax(150px, 0.95fr)
-        minmax(100px, 0.65fr)
-        minmax(80px, 0.45fr)
-        minmax(80px, 0.45fr)
-        minmax(70px, 0.4fr)
-        minmax(64px, 0.3fr);
+        minmax(50px, 0.35fr)   /* ID */
+        minmax(150px, 0.9fr)   /* Name */
+        minmax(100px, 0.65fr)  /* Phone */
+        minmax(110px, 0.65fr)  /* Referral Phone */
+        minmax(190px, 1.1fr)   /* Email */
+        minmax(150px, 0.95fr)  /* Service */
+        var(--col-rm)          /* RM */
+        var(--col-op)          /* OP */
+        minmax(80px, 0.45fr)   /* Provided */
+        minmax(70px, 0.4fr)    /* Status */
+        minmax(64px, 0.3fr);   /* Action */
     min-width: 1360px !important;
 }
 

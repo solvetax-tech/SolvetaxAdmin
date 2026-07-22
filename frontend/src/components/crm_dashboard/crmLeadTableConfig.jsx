@@ -1,4 +1,5 @@
 import { getFollowupActivityBadge } from '../../utils/followupsApi';
+import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
 
 /** Fixed columns for CRM lead list tables (Leads, Pipeline, Smart Board). */
 
@@ -18,13 +19,24 @@ const CRM_LEAD_TABLE_COLUMNS_BASE = [
 
 export const CRM_LEAD_TABLE_COLUMNS = CRM_LEAD_TABLE_COLUMNS_BASE;
 
-/** Income Tax CRM adds assessment year between entity id and preferred language. */
-export function getCrmLeadTableColumns({ isIncomeTaxCrm = false } = {}) {
-    if (!isIncomeTaxCrm) return CRM_LEAD_TABLE_COLUMNS_BASE;
-    const cols = [...CRM_LEAD_TABLE_COLUMNS_BASE];
-    const entityIdx = cols.findIndex((col) => col.key === 'entity_id');
-    cols.splice(entityIdx + 1, 0, { key: 'ay', label: 'AY', className: 'crm-col-ay' });
-    return cols;
+/**
+ * Income Tax CRM adds assessment year between entity id and preferred language.
+ * An RM/OP also drops the column naming their own role — every row is theirs, so
+ * it carries no information. This is a real <table>, so the column is removed
+ * outright rather than collapsed the way the CSS-grid ledgers do it.
+ */
+export function getCrmLeadTableColumns({ isIncomeTaxCrm = false, profileData } = {}) {
+    const { showRmColumn, showOpColumn } = getRmOpColumnVisibility(profileData);
+    let cols = CRM_LEAD_TABLE_COLUMNS_BASE;
+    if (isIncomeTaxCrm) {
+        cols = [...cols];
+        const entityIdx = cols.findIndex((col) => col.key === 'entity_id');
+        cols.splice(entityIdx + 1, 0, { key: 'ay', label: 'AY', className: 'crm-col-ay' });
+    }
+    if (showRmColumn && showOpColumn) return cols;
+    return cols.filter((col) => (
+        (col.key !== 'rm_name' || showRmColumn) && (col.key !== 'op_name' || showOpColumn)
+    ));
 }
 
 export function formatCrmLeadDateTime(dateStr) {

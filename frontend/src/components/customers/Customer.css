@@ -25,7 +25,9 @@
 
 .customer-grid-template {
     display: grid !important;
-    grid-template-columns: 
+    --col-rm: minmax(130px, 0.8fr);
+    --col-op: minmax(130px, 0.8fr);
+    grid-template-columns:
         minmax(70px, 0.5fr)     /* 1. ID (Sticky) */
         minmax(180px, 1.2fr)    /* 2. Full Name */
         minmax(220px, 1.5fr)    /* 3. Email */
@@ -35,11 +37,15 @@
         minmax(160px, 1fr)      /* 7. Business Type */
         minmax(140px, 0.9fr)    /* 8. State */
         minmax(130px, 0.8fr)    /* 9. City */
-        minmax(130px, 0.8fr)    /* 10. RM */
-        minmax(130px, 0.8fr)    /* 11. OP */
+        var(--col-rm)           /* 10. RM */
+        var(--col-op)           /* 11. OP */
         minmax(80px, 0.6fr)     /* 12. Active */
         minmax(88px, 0.55fr);   /* 13. Actions (sticky right) */
 }
+
+/* An RM/OP doesn't need the column naming themselves — collapse its track. */
+.customer-grid-template.rmop-hide-rm { --col-rm: 0px; }
+.customer-grid-template.rmop-hide-op { --col-op: 0px; }
 
 .filings-ledger-header {
     display: flex;

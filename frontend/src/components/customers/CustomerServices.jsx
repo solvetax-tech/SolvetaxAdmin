@@ -31,6 +31,7 @@ import {
     fetchActiveOpEmployees,
     buildRmOpIdSelectOptions,
 } from '../../utils/activeEmployees';
+import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
 
 // Create-form vocabularies. The filter drawer's equivalents lead with an
 // "All ..." entry, which is meaningless here: a new row always lands on one
@@ -64,6 +65,7 @@ const readFiltersFromSearch = (search) => {
 };
 
 const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
+    const rmOpCols = getRmOpColumnVisibility(profileData);
     const location = useLocation();
     const navigate = useNavigate();
     const fetchAbortRef = useRef(null);
@@ -536,9 +538,9 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
     const CustomerServicesTableSkeleton = () => (
         <div className="filings-ledger-body">
             {[...Array(12)].map((_, i) => (
-                <div key={i} className="filings-ledger-row cs-services-grid-template">
+                <div key={i} className={`filings-ledger-row cs-services-grid-template ${rmOpCols.containerClass}`}>
                     {[...Array(13)].map((_, j) => (
-                        <div key={j} className="filings-ledger-cell">
+                        <div key={j} className={`filings-ledger-cell ${j === 6 ? rmOpCols.rmCellClass : ''}${j === 7 ? rmOpCols.opCellClass : ''}`}>
                             <div className="skeleton-pulse" style={{
                                 width: j === 2 || j === 3 ? '140px' : '60px',
                                 height: j === 7 || j === 8 || j === 9 ? '24px' : '12px',
@@ -889,15 +891,15 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
 
             <div className="gst-table-wrapper cs-services-table-wrapper">
                 <div className="gst-table-container">
-                <div className="filings-ledger-header cs-services-grid-template">
+                <div className={`filings-ledger-header cs-services-grid-template ${rmOpCols.containerClass}`}>
                     <div className="filings-ledger-header-cell">ID</div>
                     <div className="filings-ledger-header-cell">Cust ID</div>
                     <div className="filings-ledger-header-cell">Customer Name</div>
                     <div className="filings-ledger-header-cell">Business Name</div>
                     <div className="filings-ledger-header-cell">Phone</div>
                     <div className="filings-ledger-header-cell">Code</div>
-                    <div className="filings-ledger-header-cell">RM</div>
-                    <div className="filings-ledger-header-cell">OP</div>
+                    <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM</div>
+                    <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>OP</div>
                     <div className="filings-ledger-header-cell">Status</div>
                     <div className="filings-ledger-header-cell">Service Status</div>
                     <div className="filings-ledger-header-cell">Follow-up</div>
@@ -927,7 +929,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                         {data.map((item) => (
                             <div
                                 key={item.id}
-                                className={`filings-ledger-row cs-services-grid-template ${activeFollowupId === item.id ? 'active-drawer-row' : ''} ${selectedServiceId === item.id ? 'cs-row-active' : ''}`}
+                                className={`filings-ledger-row cs-services-grid-template ${rmOpCols.containerClass} ${activeFollowupId === item.id ? 'active-drawer-row' : ''} ${selectedServiceId === item.id ? 'cs-row-active' : ''}`}
                             >
                                 <div className="filings-ledger-cell">{item.id}</div>
                                 <div className="filings-ledger-cell">{item.customer_id ?? '-'}</div>
@@ -939,8 +941,8 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                                 <div className="filings-ledger-cell ledger-cell-longtext" title={item.business_name}>{item.business_name || '-'}</div>
                                 <div className="filings-ledger-cell">{item.mobile || '-'}</div>
                                 <div className="filings-ledger-cell"><code className="code-badge">{item.service_code}</code></div>
-                                <div className="filings-ledger-cell">{resolveRmLabel(item)}</div>
-                                <div className="filings-ledger-cell">{resolveOpLabel(item)}</div>
+                                <div className={`filings-ledger-cell ${rmOpCols.rmCellClass}`}>{resolveRmLabel(item)}</div>
+                                <div className={`filings-ledger-cell ${rmOpCols.opCellClass}`}>{resolveOpLabel(item)}</div>
                                 <div className="filings-ledger-cell">
                                     <span className={`service-status-chip ${recordStatusLabel(item) === 'ACTIVE' ? 'status-active' : 'required'}`}>
                                         {recordStatusLabel(item)}

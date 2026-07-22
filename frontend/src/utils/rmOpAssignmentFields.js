@@ -1,9 +1,13 @@
 /**
- * RM/OP assignment field visibility and payload rules for create/edit forms.
+ * RM/OP assignment visibility and payload rules for create/edit forms, and the
+ * matching column rule for the list tables.
  *
  * Create & edit: RM sees/edits OP only (self as RM on create); OP sees/edits RM only (self as OP on create); admins see both.
  * On edit, each role keeps the assignment field they cannot see unchanged on save.
+ * Tables: same rule — an RM hides the RM column, an OP hides the OP column.
  */
+
+import { getSessionRole } from './rbac';
 
 export function getRmOpAssignmentVisibility(profileData) {
     const userRole = String(profileData?.role || '').toUpperCase();
@@ -21,6 +25,31 @@ export function getRmOpAssignmentVisibility(profileData) {
         showRmField,
         showOpField,
         showAssignmentSection,
+    };
+}
+
+/**
+ * Ledger column visibility for the same rule: an RM already knows every row is
+ * theirs, so the RM column is dead weight; likewise OP. Managers keep both —
+ * they oversee a team, so the column still distinguishes rows.
+ *
+ * The ledgers are CSS grids with fixed track lists, so a hidden column keeps its
+ * cell in the DOM and collapses to a zero-width track instead of being dropped —
+ * skipping the cell would shift every following column into the wrong track.
+ * Spread `containerClass` onto the header/row element and `cellClass` onto the
+ * matching RM/OP cells.
+ */
+export function getRmOpColumnVisibility(profileData) {
+    // CRM/dashboard tables sit too deep to be handed profileData; fall back to
+    // the role on the session JWT so they follow the same rule.
+    const resolved = profileData?.role ? profileData : { role: getSessionRole() };
+    const { isRmUser, isOpUser, showRmField, showOpField } = getRmOpAssignmentVisibility(resolved);
+    return {
+        showRmColumn: showRmField,
+        showOpColumn: showOpField,
+        containerClass: `${isRmUser ? 'rmop-hide-rm' : ''}${isOpUser ? ' rmop-hide-op' : ''}`.trim(),
+        rmCellClass: showRmField ? '' : 'rmop-col-hidden',
+        opCellClass: showOpField ? '' : 'rmop-col-hidden',
     };
 }
 

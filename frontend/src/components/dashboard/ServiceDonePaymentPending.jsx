@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CreditCard, RotateCcw, Search } from 'lucide-react';
 import { fetchServiceDonePaymentPending } from '../../utils/dashboardApi';
+import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
 import Pagination from '../common/Pagination';
 import '../common/Filters.css';
 import './ServiceDonePaymentPending.css';
@@ -41,6 +42,9 @@ function getApiErrorMessage(err, fallback = 'Request failed') {
 }
 
 const ServiceDonePaymentPending = () => {
+    // No profileData prop this deep in the dashboard tree — the helper falls
+    // back to the role on the session token.
+    const rmOpCols = getRmOpColumnVisibility();
     const navigate = useNavigate();
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
@@ -208,15 +212,15 @@ const ServiceDonePaymentPending = () => {
                         </div>
 
                         <div className="progress-tracker-container-v4">
-                            <div className="filings-ledger-header sdpp-ledger-grid">
+                            <div className={`filings-ledger-header sdpp-ledger-grid ${rmOpCols.containerClass}`}>
                                 <div className="filings-ledger-header-cell">Type</div>
                                 <div className="filings-ledger-header-cell">Entity ID</div>
                                 <div className="filings-ledger-header-cell">Cust. ID</div>
                                 <div className="filings-ledger-header-cell">Name / Service</div>
                                 <div className="filings-ledger-header-cell">Mobile</div>
                                 <div className="filings-ledger-header-cell">Service Status</div>
-                                <div className="filings-ledger-header-cell">RM</div>
-                                <div className="filings-ledger-header-cell">OP</div>
+                                <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM</div>
+                                <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>OP</div>
                                 <div className="filings-ledger-header-cell sdpp-col-pending">Pending Amount</div>
                                 <div className="filings-ledger-header-cell">Action</div>
                             </div>
@@ -224,9 +228,9 @@ const ServiceDonePaymentPending = () => {
                             {loading ? (
                                 <div className="filings-ledger-body">
                                     {[...Array(8)].map((_, i) => (
-                                        <div key={i} className="filings-ledger-row sdpp-ledger-grid">
+                                        <div key={i} className={`filings-ledger-row sdpp-ledger-grid ${rmOpCols.containerClass}`}>
                                             {[...Array(10)].map((__, j) => (
-                                                <div key={j} className="filings-ledger-cell">
+                                                <div key={j} className={`filings-ledger-cell ${j === 6 ? rmOpCols.rmCellClass : ''}${j === 7 ? rmOpCols.opCellClass : ''}`}>
                                                     <div className="filings-ledger-skeleton-bar" />
                                                 </div>
                                             ))}
@@ -243,7 +247,7 @@ const ServiceDonePaymentPending = () => {
                                         rows.map((row) => (
                                             <div
                                                 key={`${row.entity_type}-${row.entity_id}`}
-                                                className="filings-ledger-row sdpp-ledger-grid"
+                                                className={`filings-ledger-row sdpp-ledger-grid ${rmOpCols.containerClass}`}
                                             >
                                                 <div className="filings-ledger-cell">
                                                     <span className={`sdpp-entity-chip ${row.entity_type}`}>
@@ -283,10 +287,10 @@ const ServiceDonePaymentPending = () => {
                                                 <div className="filings-ledger-cell">
                                                     <span className="sdpp-status-chip">{row.service_status || '—'}</span>
                                                 </div>
-                                                <div className="filings-ledger-cell">
+                                                <div className={`filings-ledger-cell ${rmOpCols.rmCellClass}`}>
                                                     {row.rm_username || row.rm_id || '—'}
                                                 </div>
-                                                <div className="filings-ledger-cell">
+                                                <div className={`filings-ledger-cell ${rmOpCols.opCellClass}`}>
                                                     {row.op_username || row.op_id || '—'}
                                                 </div>
                                                 <div className="filings-ledger-cell sdpp-col-pending">
