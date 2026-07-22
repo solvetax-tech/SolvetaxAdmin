@@ -215,20 +215,54 @@ def passwords_match(password1: str, password2: str) -> bool:
     return password1 == password2
 
 
-def employee_report_tree_subquery(schema: str, idx: int) -> str:
+_TREE_MEMBER_ROLES = frozenset({"RM", "OP"})
+
+# employees.role has no constraint and defaults to 'SE', which the business
+# treats as an RM. Legacy rows still carry it, so a sales manager has to match
+# both spellings or their older staff silently drop out of the tree.
+_TREE_ROLE_ALIASES = {"RM": ("RM", "SE"), "OP": ("OP",)}
+
+
+def employee_report_tree_subquery(
+    schema: str,
+    idx: int,
+    member_role: Optional[str] = None,
+) -> str:
     """
-    Active employees under emp_id's reporting tree (recursive ``manager_emp_id``),
-    including emp_id as root. Used for manager visibility instead of team tables.
+    Active employees under emp_id's reporting tree (recursive ``manager_emp_id``).
+    Used for manager visibility instead of team tables.
+
+    ``member_role`` restricts which members are *returned*, not which are walked.
+    A SALES_MANAGER matches rm columns and so wants only RM staff; an OP_MANAGER
+    matches op columns and wants only OP. Left unset the tree is role-blind, so
+    an RM reporting to an OP_MANAGER puts that RM's emp_id into the set matched
+    against op columns and leaks their rows to that manager.
+
+    Traversal stays unfiltered on purpose: filtering it would stop at an
+    intermediate manager and hide everyone beneath them.
+
+    With ``member_role`` set the manager themselves is excluded — their own role
+    is SALES_MANAGER/OP_MANAGER, not RM/OP. Leads are not assigned to managers
+    directly, so this costs them nothing and keeps the rule strict: a manager
+    sees their team's rows, and only their team's.
     """
+    if member_role is not None and member_role not in _TREE_MEMBER_ROLES:
+        raise ValueError(f"Unsupported member_role: {member_role!r}")
+    # Role codes come from the whitelist above, never from caller input, so
+    # inlining them here cannot inject.
+    member_filter = ""
+    if member_role:
+        codes = ", ".join(f"'{code}'" for code in _TREE_ROLE_ALIASES[member_role])
+        member_filter = f" WHERE role IN ({codes})"
     return (
         f"(WITH RECURSIVE report_tree AS ("
-        f" SELECT emp_id FROM {schema}.employees WHERE emp_id = ${idx}"
+        f" SELECT emp_id, role FROM {schema}.employees WHERE emp_id = ${idx}"
         f" AND COALESCE(is_active, TRUE)"
         f" UNION ALL"
-        f" SELECT e.emp_id FROM {schema}.employees e"
+        f" SELECT e.emp_id, e.role FROM {schema}.employees e"
         f" INNER JOIN report_tree r ON e.manager_emp_id = r.emp_id"
         f" WHERE COALESCE(e.is_active, TRUE)"
-        f") SELECT emp_id FROM report_tree)"
+        f") SELECT emp_id FROM report_tree{member_filter})"
     )
 
 
@@ -262,13 +296,13 @@ def build_customer_visibility(role: str, emp_id: Optional[int], idx: int, schema
     if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="RM")
         return f"c.rm_id IN {tree}", [emp_id], idx + 1
 
     if role == "OP_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="OP")
         return f"c.op_id IN {tree}", [emp_id], idx + 1
 
     # --------------------------------------------------
@@ -310,11 +344,11 @@ def build_registration_payments_visibility(
         return f"{op_col} = ${idx}", [emp_id], idx + 1
 
     if role == "SALES_MANAGER":
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="RM")
         return f"{rm_col} IN {tree}", [emp_id], idx + 1
 
     if role == "OP_MANAGER":
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="OP")
         return f"{op_col} IN {tree}", [emp_id], idx + 1
 
     return (
@@ -354,11 +388,11 @@ def build_payment_followup_visibility(
         return f"{op_col} = ${idx}", [emp_id], idx + 1
 
     if role == "SALES_MANAGER":
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="RM")
         return f"{rm_col} IN {tree}", [emp_id], idx + 1
 
     if role == "OP_MANAGER":
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="OP")
         return f"{op_col} IN {tree}", [emp_id], idx + 1
 
     return (
@@ -387,13 +421,13 @@ def build_gst_visibility(role: str, emp_id: int, idx: int, schema: str):
     if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="RM")
         return f"g.rm_id IN {tree}", [emp_id], idx + 1
 
     if role == "OP_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="OP")
         return f"g.created_by IN {tree}", [emp_id], idx + 1
 
     if not emp_id:
@@ -419,13 +453,13 @@ def build_gst_filing_visibility(role: str, emp_id: int, idx: int, schema: str):
     if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="RM")
         return f"f.rm_id IN {tree}", [emp_id], idx + 1
 
     if role == "OP_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="OP")
         return f"f.op_id IN {tree}", [emp_id], idx + 1
 
     if not emp_id:
@@ -456,13 +490,13 @@ def build_income_tax_visibility(
     if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="RM")
         return f"{alias}.rm_id IN {tree}", [emp_id], idx + 1
 
     if role == "OP_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="OP")
         return f"{alias}.op_id IN {tree}", [emp_id], idx + 1
 
     if not emp_id:
@@ -491,13 +525,13 @@ def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: 
     if role == "SALES_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="RM")
         return f"cs.rm_id IN {tree}", [emp_id], idx + 1
 
     if role == "OP_MANAGER":
         if not emp_id:
             return "1=0", [], idx
-        tree = employee_report_tree_subquery(schema, idx)
+        tree = employee_report_tree_subquery(schema, idx, member_role="OP")
         return f"cs.op_id IN {tree}", [emp_id], idx + 1
 
     if not emp_id:
@@ -505,8 +539,45 @@ def build_customer_service_visibility(role: str, emp_id: int, idx: int, schema: 
     return f"(cs.rm_id = ${idx} OR cs.op_id = ${idx})", [emp_id], idx + 1
 
 
+# Every permission an ADMIN holds. Mirrors the model documented in
+# frontend/src/utils/rbac.js; extend here if a new permission code is added.
+ADMIN_PERMISSION_CODES = ("READ", "WRITE", "DELETE", "SPECIAL")
+
+# Used only when the features table returns nothing. Endpoints name features as
+# string literals, so an admin whose claim lacks the key is refused regardless of
+# what the table holds — falling back keeps an unseeded table from locking them out.
+ADMIN_FALLBACK_FEATURE_CODES = ("EMPLOYEE", "USER_ACCESS", "SETTINGS")
+
+
 async def get_user_permissions(emp_id: int, conn, DB_SCHEMA="solvetax") -> Dict[str, Any]:
     try:
+        # ADMIN is granted every feature outright rather than via role_features.
+        # Those rows are seeded config: when they are missing or incomplete the
+        # admin used to receive an empty claim, and because the frontend assumes
+        # ADMIN on an empty claim it would render actions the API then rejected
+        # with 403 — including the employee/role screens needed to repair the
+        # very rows that were missing. Deriving it from employees.role (the same
+        # column require_admin and the JWT `role` claim use) keeps the token
+        # honest, so frontend and backend agree.
+        role_row = await conn.fetchrow(
+            f"SELECT role FROM {DB_SCHEMA}.employees WHERE emp_id = $1",
+            emp_id,
+        )
+        if role_row and str(role_row["role"] or "").strip().upper() == "ADMIN":
+            feature_rows = await conn.fetch(
+                f"SELECT feature_code FROM {DB_SCHEMA}.features WHERE COALESCE(is_active, TRUE)"
+            )
+            feature_codes = [r["feature_code"] for r in feature_rows] or list(
+                ADMIN_FALLBACK_FEATURE_CODES
+            )
+            permissions = {
+                "platform": {code: list(ADMIN_PERMISSION_CODES) for code in feature_codes}
+            }
+            logging.info(
+                f"[permissions] emp_id={emp_id} is ADMIN, granting all features={feature_codes}"
+            )
+            return permissions
+
         # ✅ 1) fetch role ids for this employee
         rows = await conn.fetch(
             f"""

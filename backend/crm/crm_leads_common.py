@@ -477,12 +477,21 @@ def _build_crm_visibility(role: str, emp_id: int, idx: int):
         return f"l.rm_id = ${idx}", [emp_id], idx + 1
     if role == "OP":
         return f"l.op_id = ${idx}", [emp_id], idx + 1
-    if role in {"SALES_MANAGER", "OP_MANAGER"}:
+    # Each manager sees only their own side of the assignment: a SALES_MANAGER
+    # their RMs' leads, an OP_MANAGER their OPs'. Previously both matched
+    # (rm_id OR op_id) against a role-blind tree, so an RM reporting to an
+    # OP_MANAGER exposed that RM's leads to them, and vice versa.
+    if role == "SALES_MANAGER":
         if not emp_id:
             return "FALSE", [], idx
-        tree = employee_report_tree_subquery(DB_SCHEMA, idx)
-        sql = f"(l.rm_id IN {tree} OR l.op_id IN {tree})"
-        return sql, [emp_id], idx + 1
+        tree = employee_report_tree_subquery(DB_SCHEMA, idx, member_role="RM")
+        return f"l.rm_id IN {tree}", [emp_id], idx + 1
+
+    if role == "OP_MANAGER":
+        if not emp_id:
+            return "FALSE", [], idx
+        tree = employee_report_tree_subquery(DB_SCHEMA, idx, member_role="OP")
+        return f"l.op_id IN {tree}", [emp_id], idx + 1
     # Staff → CRM rows owned as RM or OP only (same idea as customer visibility).
     if not emp_id:
         return "FALSE", [], idx
