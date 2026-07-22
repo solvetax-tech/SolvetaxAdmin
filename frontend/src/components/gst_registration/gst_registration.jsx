@@ -30,7 +30,7 @@ import LoadingOverlay from '../common/LoadingOverlay';
 import Pagination from '../common/Pagination';
 import '../common/Filters.css';
 import FilterDateInput from '../common/FilterDateInput';
-import { Filter, X, RotateCcw, Plus, AlertCircle, CheckCircle2, Users, FileText, LayoutDashboard, Eye, Pencil, CalendarClock, CreditCard } from 'lucide-react';
+import { Filter, X, RotateCcw, Plus, AlertCircle, CheckCircle2, Users, FileText, LayoutDashboard, Eye, Pencil, CalendarClock, CreditCard, FilePlus } from 'lucide-react';
 import Button from '../ui/Button';
 import {
     buildGstCrmLeadActionSearchParams,
@@ -827,6 +827,26 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                                             onClick={(e) => handleRowSchedulePayment(e, item)}
                                                         >
                                                             <CalendarClock size={14} />
+                                                        </button>
+                                                    )}
+                                                    {/* Create Filing — only where filing is actually needed, and
+                                                        only until the first filing exists (has_filing). Opens the
+                                                        Add Filing form prefilled so staff can review before saving. */}
+                                                    {String(item.registration_status || '').toUpperCase() === 'APPROVED' && item.is_filing_needed && !item.has_filing && (
+                                                        <button
+                                                            className="btn-view-action"
+                                                            title="Create Filing"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const label = item.gstin || item.business_name || `Reg ${item.id}`;
+                                                                navigate(
+                                                                    `/dashboard?tab=gst&sub=filings&create_filing_reg_id=${item.id}`
+                                                                    + `&create_filing_label=${encodeURIComponent(label)}`
+                                                                    + `&return_tab=gst&return_sub=registrations`
+                                                                );
+                                                            }}
+                                                        >
+                                                            <FilePlus size={14} />
                                                         </button>
                                                     )}
                                                 </div>

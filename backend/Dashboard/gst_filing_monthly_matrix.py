@@ -350,6 +350,28 @@ def _parse_return_status_list(raw: Optional[str]) -> list[str]:
     return ordered
 
 
+def _parse_return_form_list(raw: Optional[str]) -> list[str]:
+    """Parse comma-separated return form keys (GSTR1, GSTR3B, ...)."""
+    if not raw or not str(raw).strip():
+        return []
+    valid = {form[0] for form in RETURN_FORMS}
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for part in re.split(r"[,;\s]+", str(raw).strip()):
+        token = part.strip().upper().replace("-", "").replace("_", "")
+        if not token:
+            continue
+        if token not in valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid return form '{part}'. Allowed: {', '.join(sorted(valid))}.",
+            )
+        if token not in seen:
+            seen.add(token)
+            ordered.append(token)
+    return ordered
+
+
 def _matrix_status_customer_filter_clause(
     *,
     role: str,
@@ -359,8 +381,9 @@ def _matrix_status_customer_filter_clause(
     return_statuses: list[str],
     followup_scheduled: bool,
     followup_columns_exist: bool,
+    return_forms: list[str] | None = None,
 ) -> tuple[str, list[Any], int]:
-    if not return_statuses and not followup_scheduled:
+    if not return_statuses and not followup_scheduled and not return_forms:
         return "", [], idx
     if followup_scheduled and not followup_columns_exist:
         raise HTTPException(
@@ -372,13 +395,19 @@ def _matrix_status_customer_filter_clause(
     values: list[Any] = []
     cur = idx
 
+    # A return-form selection scopes WHICH form columns the other filters look
+    # at (AND), rather than being another OR'd term — "GSTR-1 + MISSED" must
+    # mean "GSTR-1 that is MISSED", not "GSTR-1 or anything MISSED".
+    selected = set(return_forms or ())
+    scoped_forms = [f for f in RETURN_FORMS if f[0] in selected] if selected else list(RETURN_FORMS)
+
     if return_statuses:
         status_or = " OR ".join(
             (
                 f"(d_st.{due_col} IS NOT NULL "
                 f"AND upper(coalesce(d_st.{status_col}, '')) = ANY(${cur}::text[]))"
             )
-            for _, status_col, due_col, _ in RETURN_FORMS
+            for _, status_col, due_col, _ in scoped_forms
         )
         match_parts.append(f"({status_or})")
         values.append(return_statuses)
@@ -386,9 +415,17 @@ def _matrix_status_customer_filter_clause(
 
     if followup_scheduled:
         followup_or = " OR ".join(
-            f"d_st.{col} IS NOT NULL" for col in _PER_FORM_FOLLOWUP_COLUMNS
+            f"d_st.{form[3]} IS NOT NULL" for form in scoped_forms
         )
         match_parts.append(f"({followup_or})")
+
+    # Forms chosen on their own: keep customers that actually have one of those
+    # returns due, otherwise there'd be no predicate at all.
+    if selected and not return_statuses and not followup_scheduled:
+        due_or = " OR ".join(
+            f"d_st.{due_col} IS NOT NULL" for _, _, due_col, _ in scoped_forms
+        )
+        match_parts.append(f"({due_or})")
 
     vis_sql, vis_vals, cur = build_gst_filing_visibility(role, emp_id, cur, DB_SCHEMA)
     vis_clause = ""
@@ -615,11 +652,38 @@ async def _fetch_return_detail_payment_map(
     }
 
 
+async def _fetch_filing_document_map(
+    conn: asyncpg.Connection,
+    filing_ids: list[int],
+) -> dict[int, str]:
+    """Latest active document URL per filing (one sheet covers all its returns)."""
+    if not filing_ids:
+        return {}
+    rows = await conn.fetch(
+        f"""
+        SELECT DISTINCT ON (gst_filing_id)
+               gst_filing_id::int AS gst_filing_id,
+               document_url
+          FROM {DB_SCHEMA}.gst_filings_documents
+         WHERE gst_filing_id = ANY($1::int[])
+           AND is_active IS TRUE
+         ORDER BY gst_filing_id, created_at DESC NULLS LAST, document_id DESC
+        """,
+        filing_ids,
+    )
+    return {
+        int(row["gst_filing_id"]): str(row["document_url"])
+        for row in rows
+        if row["document_url"]
+    }
+
+
 def _build_month_cell(
     forms_raw: Dict[str, Dict[str, Any]],
     filing_id: Optional[int],
     return_detail_id: Optional[int] = None,
     payment: Optional[Dict[str, Any]] = None,
+    document_url: Optional[str] = None,
 ) -> GstFilingMatrixMonthCell:
     form_cells: Dict[str, GstFilingMatrixFormCell] = {}
     tones: list[str] = []
@@ -662,6 +726,7 @@ def _build_month_cell(
         payment_remaining_amount=remaining_amount,
         payment_paid_amount=paid_amount,
         payment_net_amount=net_amount,
+        document_url=document_url,
         forms=form_cells,
     )
 
@@ -695,6 +760,13 @@ async def list_gst_filing_monthly_matrix(
     return_statuses: Optional[str] = Query(
         None,
         description="Comma-separated return statuses; customer matches if any form in visible months has one.",
+    ),
+    return_forms: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated return forms (GSTR1, GSTR3B, CMP08, GSTR4, GSTR9, GSTR9C). "
+            "Scopes the status/follow-up filters to these forms rather than widening the match."
+        ),
     ),
     followup_scheduled: Optional[bool] = Query(
         None,
@@ -734,6 +806,7 @@ async def list_gst_filing_monthly_matrix(
     period_list = _parse_period_list(periods)
     month_columns = period_list if period_list else _generate_month_columns(months)
     return_statuses_list = _parse_return_status_list(return_statuses)
+    return_forms_list = _parse_return_form_list(return_forms)
     followup_scheduled_filter = followup_scheduled is True
     remaining_payment_filter = has_remaining_payment is True
     today_ist = datetime.now(_IST).date()
@@ -746,6 +819,7 @@ async def list_gst_filing_monthly_matrix(
         followup_dates=followup_dates_key,
         periods=",".join(period_list) if period_list else None,
         return_statuses=",".join(return_statuses_list) if return_statuses_list else None,
+        return_forms=",".join(return_forms_list) if return_forms_list else None,
         followup_scheduled=followup_scheduled_filter or None,
         has_remaining_payment=remaining_payment_filter or None,
         months=months,
@@ -806,7 +880,7 @@ async def list_gst_filing_monthly_matrix(
         values.append(month_columns)
         idx += 1
 
-        if return_statuses_list or followup_scheduled_filter:
+        if return_statuses_list or followup_scheduled_filter or return_forms_list:
             clause, clause_vals, idx = _matrix_status_customer_filter_clause(
                 role=role,
                 emp_id=emp_id,
@@ -815,6 +889,7 @@ async def list_gst_filing_monthly_matrix(
                 return_statuses=return_statuses_list,
                 followup_scheduled=followup_scheduled_filter,
                 followup_columns_exist=followup_columns_exist,
+                return_forms=return_forms_list,
             )
             matrix_selection_clauses.append(clause)
             values.extend(clause_vals)
@@ -968,6 +1043,13 @@ async def list_gst_filing_monthly_matrix(
             })
             payment_map = await _fetch_return_detail_payment_map(conn, detail_ids)
 
+            filing_ids = sorted({
+                int(meta["filing_id"])
+                for meta in cell_meta_by_customer_period.values()
+                if meta.get("filing_id") is not None
+            })
+            document_map = await _fetch_filing_document_map(conn, filing_ids)
+
             data: List[GstFilingMatrixRow] = []
             for crow in customer_rows:
                 cid = int(crow["customer_id"])
@@ -983,11 +1065,15 @@ async def list_gst_filing_monthly_matrix(
                         payment_info = (
                             payment_map.get(resolved_id) if resolved_id is not None else None
                         )
+                        cell_filing_id = meta.get("filing_id")
                         month_map[period] = _build_month_cell(
                             raw,
-                            meta.get("filing_id"),
+                            cell_filing_id,
                             meta.get("return_detail_id"),
                             payment_info,
+                            document_map.get(int(cell_filing_id))
+                            if cell_filing_id is not None
+                            else None,
                         )
                     else:
                         month_map[period] = GstFilingMatrixMonthCell(tone="none")

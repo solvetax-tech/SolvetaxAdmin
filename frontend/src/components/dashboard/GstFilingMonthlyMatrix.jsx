@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, CreditCard, RotateCcw, Search } from 'lucide-react';
+import { CheckCircle2, CreditCard, ExternalLink, Link2, RotateCcw, Search } from 'lucide-react';
+import AddDocumentLinkModal from '../gst_filings/AddDocumentLinkModal';
 import { fetchGstFilingMonthlyMatrix, parseGstFilingFocusFromSearch } from '../../utils/dashboardApi';
 import { patchReturnDetailStatus, resolveReturnDetailIdForForm } from '../../utils/gstFilingReturnApi';
 import { getAnchorRect, getViewportSize } from '../../utils/zoom';
@@ -17,6 +18,7 @@ import Pagination from '../common/Pagination';
 import GfmFollowupDateFilter, { normalizeFollowupDateList } from './GfmFollowupDateFilter';
 import GfmMonthFilter, { normalizeGfmPeriodList } from './GfmMonthFilter';
 import GfmStatusFilter from './GfmStatusFilter';
+import GfmFormFilter from './GfmFormFilter';
 import '../common/Filters.css';
 import './GstFilingMonthlyMatrix.css';
 
@@ -29,6 +31,7 @@ const createEmptyFilters = () => ({
     followup_dates: [],
     months: [],
     statuses: [],
+    forms: [],
     followup_scheduled: false,
     remaining_payment: false,
 });
@@ -36,6 +39,8 @@ const createEmptyFilters = () => ({
 const ALLOWED_RETURN_STATUSES = new Set(
     GST_RETURN_DETAIL_STATUSES.filter((value) => value !== 'OVERDUE'),
 );
+
+const ALLOWED_RETURN_FORMS = new Set(GST_RETURN_FORM_OPTIONS.map((item) => item.value));
 
 const normalizeStatusList = (statuses = []) => (
     [...new Set(
@@ -45,25 +50,48 @@ const normalizeStatusList = (statuses = []) => (
     )]
 );
 
+const normalizeFormList = (forms = []) => (
+    [...new Set(
+        (Array.isArray(forms) ? forms : [])
+            .map((value) => String(value).trim().toUpperCase())
+            .filter((value) => ALLOWED_RETURN_FORMS.has(value)),
+    )]
+);
+
 const normalizeAppliedFilters = (filters) => ({
     ...filters,
     followup_dates: normalizeFollowupDateList(filters.followup_dates),
     months: normalizeGfmPeriodList(filters.months),
     statuses: normalizeStatusList(filters.statuses),
+    forms: normalizeFormList(filters.forms),
     followup_scheduled: Boolean(filters.followup_scheduled),
     remaining_payment: Boolean(filters.remaining_payment),
 });
 
 function getMatrixFilterConfig(appliedFilters) {
     const statuses = normalizeStatusList(appliedFilters?.statuses);
+    const forms = normalizeFormList(appliedFilters?.forms);
     const followup_scheduled = Boolean(appliedFilters?.followup_scheduled);
     const remaining_payment = Boolean(appliedFilters?.remaining_payment);
     return {
-        active: statuses.length > 0 || followup_scheduled || remaining_payment,
+        active: statuses.length > 0 || forms.length > 0 || followup_scheduled || remaining_payment,
         statuses,
+        forms,
         followup_scheduled,
         remaining_payment,
     };
+}
+
+/**
+ * A form selection narrows WHICH forms the other filters inspect (AND), rather
+ * than being another OR'd term — "GSTR-1 + MISSED" means GSTR-1 that is MISSED.
+ * Returns null when the group has none of the selected forms.
+ */
+function scopeGroupForms(groupForms, filterConfig) {
+    const selected = filterConfig?.forms || [];
+    if (!selected.length) return groupForms;
+    const scoped = groupForms.filter((key) => selected.includes(key));
+    return scoped.length ? scoped : null;
 }
 
 /** @deprecated alias — use getMatrixFilterConfig */
@@ -101,22 +129,29 @@ function formMatchesMatrixFilters(form, filterConfig, { cell, groupForms } = {})
         const status = (form?.status || '').trim().toUpperCase();
         matches.push(filterConfig.statuses.includes(status));
     }
+    // Forms picked on their own — the caller already scoped by form key.
+    if (!matches.length) return true;
     return matches.some(Boolean);
 }
 
 function cellMatchesMatrixFilters(cell, groupForms, filterConfig) {
     if (!filterConfig?.active) return true;
 
+    const scoped = scopeGroupForms(groupForms, filterConfig);
+    if (!scoped) return false;
+
     const matches = [];
     if (filterConfig.followup_scheduled) {
-        matches.push(cellMatchesFollowupScheduled(cell, groupForms));
+        matches.push(cellMatchesFollowupScheduled(cell, scoped));
     }
     if (filterConfig.remaining_payment) {
-        matches.push(cellHasRemainingPayment(cell, groupForms));
+        matches.push(cellHasRemainingPayment(cell, scoped));
     }
     if (filterConfig.statuses.length > 0) {
-        matches.push(cellMatchesReturnStatuses(cell, groupForms, filterConfig.statuses));
+        matches.push(cellMatchesReturnStatuses(cell, scoped, filterConfig.statuses));
     }
+    // Forms picked on their own: keep any cell carrying one of those returns.
+    if (!matches.length) return cellHasDataForGroup(cell, scoped);
     return matches.some(Boolean);
 }
 
@@ -278,6 +313,26 @@ function getRowFollowupSummary(row, months, groupForms) {
     return items.sort((a, b) => b.time - a.time)[0];
 }
 
+/**
+ * The filing a row's Actions column targets: the first cell carrying a filing_id
+ * scanning `months`, which is ordered newest-first — so this is the most recent
+ * filing in the visible range. One sheet covers all returns on a filing, so a
+ * single view-or-add action per row is enough.
+ */
+function getRowFilingTarget(row, months) {
+    for (const period of months) {
+        const cell = row.months?.[period];
+        if (cell?.filing_id) {
+            return {
+                filingId: cell.filing_id,
+                documentUrl: cell.document_url || null,
+                period,
+            };
+        }
+    }
+    return null;
+}
+
 function formatMonthHeader(period) {
     if (!period) return '—';
     const [mon, year] = period.split('-');
@@ -421,10 +476,11 @@ function MonthCellContent({
     matrixFilterConfig = null,
 }) {
     const forms = cell?.forms || {};
+    const scopedGroupForms = scopeGroupForms(groupForms, matrixFilterConfig) || [];
     const activeRows = FORM_ROWS.filter(({ key }) => (
-        groupForms.includes(key)
+        scopedGroupForms.includes(key)
         && hasFormData(forms[key])
-        && formMatchesMatrixFilters(forms[key], matrixFilterConfig, { cell, groupForms })
+        && formMatchesMatrixFilters(forms[key], matrixFilterConfig, { cell, groupForms: scopedGroupForms })
     ));
     const paymentTarget = getCellPaymentTarget(cell, groupForms);
     const canEdit = Boolean(paymentTarget?.returnDetailId);
@@ -714,6 +770,8 @@ const GstFilingMonthlyMatrix = () => {
     const [focusTarget, setFocusTarget] = useState(() => parseGstFilingFocusFromSearch(window.location.search));
     const [rows, setRows] = useState([]);
     const [months, setMonths] = useState([]);
+    // { gst_filing_id, gstin } while the Add Document Link drawer is open.
+    const [docModalPreset, setDocModalPreset] = useState(null);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -757,6 +815,10 @@ const GstFilingMonthlyMatrix = () => {
             if (selectedStatuses.length) {
                 params.return_statuses = selectedStatuses.join(',');
             }
+            const selectedForms = normalizeFormList(appliedFilters.forms);
+            if (selectedForms.length) {
+                params.return_forms = selectedForms.join(',');
+            }
             if (appliedFilters.followup_scheduled) {
                 params.followup_scheduled = true;
             }
@@ -768,7 +830,9 @@ const GstFilingMonthlyMatrix = () => {
             }
             const result = await fetchGstFilingMonthlyMatrix(params);
             setRows(result?.data || []);
-            setMonths(result?.months || []);
+            // The API returns periods oldest-first; the matrix shows newest-first
+            // so a new month lands in the leftmost column, next to Follow-up.
+            setMonths([...(result?.months || [])].reverse());
             setTotal(Number(result?.total) || 0);
         } catch (err) {
             setError(getApiErrorMessage(err, 'Failed to load GST filing matrix'));
@@ -868,6 +932,13 @@ const GstFilingMonthlyMatrix = () => {
         });
     }, [commitFilters, filterInputs]);
 
+    const handleFormFilterChange = useCallback((nextForms) => {
+        commitFilters({
+            ...filterInputs,
+            forms: normalizeFormList(nextForms),
+        });
+    }, [commitFilters, filterInputs]);
+
     const matrixFilterConfig = useMemo(
         () => getMatrixFilterConfig(appliedFilters),
         [appliedFilters],
@@ -879,6 +950,7 @@ const GstFilingMonthlyMatrix = () => {
         || normalizeFollowupDateList(appliedFilters.followup_dates).length
         || normalizeGfmPeriodList(appliedFilters.months).length
         || normalizeStatusList(appliedFilters.statuses).length
+        || normalizeFormList(appliedFilters.forms).length
         || appliedFilters.followup_scheduled
         || appliedFilters.remaining_payment,
     );
@@ -894,6 +966,20 @@ const GstFilingMonthlyMatrix = () => {
         }
         navigate(`/dashboard?${params.toString()}`);
     }, [navigate]);
+
+    // One sheet per filing: open it when linked, otherwise add the link right
+    // here on the dashboard rather than sending the user to another tab.
+    const openFilingDocument = useCallback((target, row) => {
+        if (!target?.filingId) return;
+        if (target.documentUrl) {
+            window.open(target.documentUrl, '_blank', 'noopener,noreferrer');
+            return;
+        }
+        setDocModalPreset({
+            gst_filing_id: String(target.filingId),
+            gstin: row?.gstin || '',
+        });
+    }, []);
 
     const periodKeys = useMemo(() => {
         if (months.length) return months;
@@ -922,7 +1008,7 @@ const GstFilingMonthlyMatrix = () => {
     );
 
     const gridStyle = useMemo(() => ({
-        gridTemplateColumns: `minmax(180px, 1.25fr) minmax(64px, 0.5fr) minmax(92px, 0.6fr) minmax(120px, 0.75fr) repeat(${months.length || MONTH_COUNT}, minmax(176px, 1.35fr))`,
+        gridTemplateColumns: `minmax(180px, 1.25fr) minmax(64px, 0.5fr) minmax(92px, 0.6fr) minmax(120px, 0.75fr) repeat(${months.length || MONTH_COUNT}, minmax(176px, 1.35fr)) minmax(88px, 0.5fr)`,
     }), [months.length]);
 
     const openStatusEditor = useCallback((event, context) => {
@@ -1095,6 +1181,10 @@ const GstFilingMonthlyMatrix = () => {
                                     }}
                                     onChange={handleStatusFilterChange}
                                 />
+                                <GfmFormFilter
+                                    value={appliedFilters.forms}
+                                    onChange={handleFormFilterChange}
+                                />
                                 <div className="gfm-filter-field">
                                     <label htmlFor="gfm-phone">Phone</label>
                                     <input
@@ -1160,13 +1250,14 @@ const GstFilingMonthlyMatrix = () => {
                                             {m ? formatMonthHeader(m) : '…'}
                                         </div>
                                     ))}
+                                    <div className="gfm-table-cell">Actions</div>
                                 </div>
 
                                 {loading ? (
                                     <div className="gfm-table-body">
                                         {[...Array(8)].map((_, i) => (
                                             <div key={i} className="gfm-table-row" style={gridStyle}>
-                                                {[...Array(4 + (months.length || MONTH_COUNT))].map((__, j) => (
+                                                {[...Array(5 + (months.length || MONTH_COUNT))].map((__, j) => (
                                                     <div key={j} className="gfm-table-cell">
                                                         <div className="gfm-skeleton" />
                                                     </div>
@@ -1297,6 +1388,31 @@ const GstFilingMonthlyMatrix = () => {
                                                         </div>
                                                     );
                                                 })}
+                                                {(() => {
+                                                    const target = getRowFilingTarget(row, months);
+                                                    if (!target) {
+                                                        return (
+                                                            <div className="gfm-table-cell gfm-cell-actions">
+                                                                <span className="gfm-cell-empty">—</span>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    const linked = Boolean(target.documentUrl);
+                                                    return (
+                                                        <div className="gfm-table-cell gfm-cell-actions">
+                                                            <button
+                                                                type="button"
+                                                                className="gfm-doc-link-btn"
+                                                                title={linked
+                                                                    ? `Open sheet for filing ${target.filingId}`
+                                                                    : `Add document link for filing ${target.filingId}`}
+                                                                onClick={() => openFilingDocument(target, row)}
+                                                            >
+                                                                {linked ? <ExternalLink size={14} /> : <Link2 size={14} />}
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         );
                                         })}
@@ -1313,6 +1429,18 @@ const GstFilingMonthlyMatrix = () => {
                 onPageChange={setPage}
                 hasMore={page * ROWS_PER_PAGE < total}
                 loading={loading}
+            />
+
+            <AddDocumentLinkModal
+                isOpen={Boolean(docModalPreset)}
+                onClose={() => setDocModalPreset(null)}
+                presetFilingId={docModalPreset?.gst_filing_id || null}
+                presetGstin={docModalPreset?.gstin || ''}
+                onCreated={() => {
+                    setDocModalPreset(null);
+                    // Refresh so the icon flips from "add link" to "open sheet".
+                    loadRows();
+                }}
             />
 
             <StatusEditorPopover

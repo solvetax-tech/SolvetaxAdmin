@@ -66,9 +66,12 @@ import {
     Eye,
     EyeOff,
     Pencil,
-    CreditCard
+    CreditCard,
+    Link2
 } from 'lucide-react';
 import GstFilingDocuments from './GstFilingDocuments';
+import GSTFilingViewPanel from './GSTFilingViewPanel';
+import AddDocumentLinkModal from './AddDocumentLinkModal';
 import GSTFilingsReturns from './GSTFilingsReturns';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromConfig, optionsFromConfigOnly, optionsFromPairs } from '../common/selectOptionUtils';
@@ -497,6 +500,10 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
     const { showRmField, showOpField } = getRmOpAssignmentVisibility(profileData);
     const [recentSearches, setRecentSearches] = useState([]);
     const [showCreateDocModal, setShowCreateDocModal] = useState(false);
+    // Seeded by the per-row "Add Document Link" action on the GST Filings tab so
+    // the document form opens already pointed at that filing.
+    const [createDocPreset, setCreateDocPreset] = useState(null);
+    const [viewFilingId, setViewFilingId] = useState(null);
 
     const handleCloseCreateModal = () => {
         setShowCreateModal(false);
@@ -976,6 +983,28 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
             fetchRegistrationsGlobally();
         }
     }, [showCreateModal]);
+
+    // Deep link from GST Registrations → "Create Filing": open the Add Filing
+    // form prefilled for that registration so staff can review before saving.
+    // The params are stripped straight away, so closing the modal (or a
+    // refresh) doesn't reopen it.
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const regId = parseInt(params.get('create_filing_reg_id'), 10);
+        if (!regId) return;
+
+        setRegSearch(params.get('create_filing_label') || `Reg ${regId}`);
+        setShowCreateModal(true);
+        handleRegistrationChange(regId, null);
+
+        params.delete('create_filing_reg_id');
+        params.delete('create_filing_label');
+        navigate(
+            `${location.pathname}${params.toString() ? `?${params.toString()}` : ''}`,
+            { replace: true },
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when deep-link params are set
+    }, [location.search]);
 
     const fetchFilings = useCallback(async () => {
         await wrapFetch(setLoading, async () => {
@@ -1562,6 +1591,15 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                             <div className="filings-ledger-cell gst-action-buttons gst-sticky-actions" style={{ justifyContent: 'center' }}>
                                                 <Button
                                                     variant="ghost"
+                                                    icon={<Eye size={14} />}
+                                                    title="View Details"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setViewFilingId(item.id);
+                                                    }}
+                                                />
+                                                <Button
+                                                    variant="ghost"
                                                     icon={<Pencil size={14} />}
                                                     title="Edit Filing"
                                                     onClick={(e) => {
@@ -1569,15 +1607,35 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                                                         handleEditFiling(item);
                                                     }}
                                                 />
-                                                <Button
-                                                    variant="ghost"
-                                                    icon={<CreditCard size={14} />}
-                                                    title="Record Payment"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        navigate(`/dashboard?tab=add-payment&service_type=GST_FILING&entity_id=${item.id}&return_tab=gst&return_sub=filings`);
-                                                    }}
-                                                />
+                                                {/* One-time actions: Record Payment hides once the filing is
+                                                    fully paid; Add Document Link hides once a document is linked. */}
+                                                {!item.has_paid_payment && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        icon={<CreditCard size={14} />}
+                                                        title="Record Payment"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            navigate(`/dashboard?tab=add-payment&service_type=GST_FILING&entity_id=${item.id}&return_tab=gst&return_sub=filings`);
+                                                        }}
+                                                    />
+                                                )}
+                                                {!item.has_document && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        icon={<Link2 size={14} />}
+                                                        title="Add Document Link"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            // Opens right here — no tab switch.
+                                                            setCreateDocPreset({
+                                                                gst_filing_id: String(item.id),
+                                                                gstin: item.gstin || '',
+                                                            });
+                                                            setShowCreateDocModal(true);
+                                                        }}
+                                                    />
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -1613,6 +1671,8 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                             setError={setError}
                             showCreateDocModal={showCreateDocModal}
                             setShowCreateDocModal={setShowCreateDocModal}
+                            createDocPreset={createDocPreset}
+                            onCreateDocPresetApplied={() => setCreateDocPreset(null)}
                             // Hoisted State
                             setCurrentDocsPage={setCurrentDocsPage}
                             currentDocsPage={currentDocsPage}
@@ -2171,6 +2231,29 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            <GSTFilingViewPanel
+                isOpen={Boolean(viewFilingId)}
+                onClose={() => setViewFilingId(null)}
+                recordId={viewFilingId}
+                configs={configs}
+            />
+
+            {/* Row action on the GST Filings tab opens the document form in place.
+                On the Documents tab GstFilingDocuments hosts its own instance (and
+                only mounts there), so the two never render at the same time. */}
+            {activeSubTab !== 'Documents' && (
+                <AddDocumentLinkModal
+                    isOpen={showCreateDocModal}
+                    onClose={() => { setShowCreateDocModal(false); setCreateDocPreset(null); }}
+                    presetFilingId={createDocPreset?.gst_filing_id || null}
+                    presetGstin={createDocPreset?.gstin || ''}
+                    onCreated={() => {
+                        setCreateDocPreset(null);
+                        fetchFilings();
+                    }}
+                />
             )}
 
             {/* Creation Modal */}

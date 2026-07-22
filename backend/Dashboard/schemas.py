@@ -62,6 +62,9 @@ class GstFilingMatrixMonthCell(BaseModel):
     payment_remaining_amount: Optional[float] = None
     payment_paid_amount: Optional[float] = None
     payment_net_amount: Optional[float] = None
+    # Latest active sheet linked to this cell's filing — one sheet covers all
+    # returns on the filing, so the matrix can view-or-add from a single action.
+    document_url: Optional[str] = None
     forms: Optional[Dict[str, GstFilingMatrixFormCell]] = None
 
 

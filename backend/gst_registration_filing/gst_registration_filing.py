@@ -321,6 +321,9 @@ async def _invalidate_gst_filing_cache(gst_registration_id: Optional[int] = None
     await redis_invalidate_tag(_gst_filing_table_return_details_tag())
     if gst_registration_id is not None:
         await redis_invalidate_tag(_gst_filing_prefill_tag(gst_registration_id))
+    # The registrations table derives has_filing from gst_filings to hide its
+    # one-time Create Filing action, so that list goes stale on create/delete.
+    await redis_invalidate_tag("gst_registration:filter:index")
     # gst_filings.status can transition into/out of FILED ("service done"), which
     # changes the service-done-payment-pending dashboard.
     from backend.Dashboard.service_done_payment_pending import (
@@ -863,7 +866,24 @@ async def list_gst_filings_table(
                COALESCE(f.state, r.state) AS state,
                COALESCE(f.language, r.language) AS language,
                erm.first_name AS rm_name,
-               eop.first_name AS op_name
+               eop.first_name AS op_name,
+               -- One-time action signals for the row actions: Add Document Link
+               -- hides once a document is linked; Record Payment hides once the
+               -- filing is fully paid.
+               EXISTS (
+                   SELECT 1
+                     FROM {DB_SCHEMA}.gst_filings_documents d
+                    WHERE d.gst_filing_id = f.id
+                      AND d.is_active IS TRUE
+               ) AS has_document,
+               EXISTS (
+                   SELECT 1
+                     FROM {DB_SCHEMA}.payments p
+                    WHERE p.entity_id = f.id
+                      AND p.entity_type = 'GST_FILING'
+                      AND p.is_active = TRUE
+                      AND p.payment_status = 'PAID'
+               ) AS has_paid_payment
         FROM {DB_SCHEMA}.gst_filings f
         LEFT JOIN {DB_SCHEMA}.gst_registration r
             ON r.id = f.gst_registration_id

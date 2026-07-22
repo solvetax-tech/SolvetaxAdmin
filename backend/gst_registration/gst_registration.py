@@ -1266,6 +1266,14 @@ async def list_gst_registrations(
                           AND p.is_active = TRUE
                           AND p.payment_status = 'PAID'
                    ) AS has_paid_payment,
+                   -- Create Filing is also one-time: hide it once any filing
+                   -- exists for this registration.
+                   EXISTS (
+                       SELECT 1
+                         FROM {DB_SCHEMA}.gst_filings f
+                        WHERE f.gst_registration_id = g.id
+                          AND f.is_active = TRUE
+                   ) AS has_filing,
                    (
                        SELECT cl.stage
                          FROM {DB_SCHEMA}.crm_leads cl

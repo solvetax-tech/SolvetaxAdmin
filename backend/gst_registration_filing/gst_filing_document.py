@@ -35,6 +35,9 @@ async def _invalidate_gst_filing_documents_cache() -> None:
     await redis_invalidate_tag(_gst_filing_documents_filter_tag())
     await redis_invalidate_tag("gst_filing:table:filings:index")
     await redis_invalidate_tag("gst_filing:table:return_details:index")
+    # The dashboard matrix surfaces each filing's linked sheet in its actions
+    # column, so it goes stale when a document is added or removed.
+    await redis_invalidate_tag("dashboard:gst_filing_monthly_matrix:index")
 
 # -------------------------------------------------------------------
 # CREATE GST FILING DOCUMENT (link URL in DB only; no blob)

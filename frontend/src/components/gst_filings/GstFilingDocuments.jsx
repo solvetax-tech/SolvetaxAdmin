@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../../utils/api';
 import {
@@ -21,7 +21,7 @@ import {
 import { TableSkeleton } from './gst_filings';
 import './GstFilingDocuments.css';
 import FormCustomSelect from '../common/FormCustomSelect';
-import { optionsFromConfigOnly } from '../common/selectOptionUtils';
+import AddDocumentLinkModal from './AddDocumentLinkModal';
 
 const GstFilingDocuments = ({ 
     filters, 
@@ -31,8 +31,11 @@ const GstFilingDocuments = ({
     setDocFilterInputs, 
     rowsPerPage, 
     setError, 
-    showCreateDocModal, 
+    showCreateDocModal,
     setShowCreateDocModal,
+    // Seed from the GST Filings row action ({ gst_filing_id, gstin }), cleared once applied
+    createDocPreset = null,
+    onCreateDocPresetApplied,
     // Hoisted State
     setCurrentDocsPage,
     currentDocsPage,
@@ -42,11 +45,6 @@ const GstFilingDocuments = ({
     setDocsLoading
 }) => {
     const [docsData, setDocsData] = useState([]);
-    const [formLoading, setFormLoading] = useState(false);
-    const [isSearchingFiling, setIsSearchingFiling] = useState(false);
-    const [filingSearchResults, setFilingSearchResults] = useState([]);
-    const [isFilingDropdownOpen, setIsFilingDropdownOpen] = useState(false);
-    const [fieldErrors, setFieldErrors] = useState({});
 
     // --- Filter Summary Helpers ---
     const getFilterLabel = (key, value) => {
@@ -100,20 +98,6 @@ const GstFilingDocuments = ({
 
 
 
-    // Create Document Form State (Capsulated inside module)
-    const [createDocForm, setCreateDocForm] = useState({
-        gst_filing_id: '',
-        document_type: 'WORKING_SHEET',
-        document_url: '',
-        gstin: '',
-        remarks: '',
-        verified: false
-    });
-
-    // 🔥 Track internal updates to prevent double-searching when an ID is selected from dropdown
-    const isInternalUpdate = useRef(false);
-    const lastSearchedId = useRef('');
-
     const fetchFilingDocuments = useCallback(async () => {
         setDocsLoading(true);
         try {
@@ -146,53 +130,6 @@ const GstFilingDocuments = ({
         }
     }, [filters, currentDocsPage, rowsPerPage, setError, setDocsLoading, setDocsHasMore]);
 
-    const handleFilingIdSearch = useCallback(async (id) => {
-        if (!id) {
-            setFilingSearchResults([]);
-            setIsFilingDropdownOpen(false);
-            return;
-        }
-
-        setIsSearchingFiling(true);
-        try {
-            // 🔥 Use include_details=false to avoid the backend ID collision bug with return details.
-            // This ensures results are unique and 'id' refers to the actual Filing ID.
-            const response = await api.get(`/api/v1/gst-filings/table/filings?id=${id}`);
-            const filings = response.data.data || [];
-            lastSearchedId.current = id.toString();
-            setFilingSearchResults(filings);
-            // 🔥 Keep dropdown open even if 0 results so we can show "No results found"
-            setIsFilingDropdownOpen(true);
-        } catch (err) {
-            console.error("Error searching filing:", err);
-            setFilingSearchResults([]);
-        } finally {
-            setIsSearchingFiling(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        const delayDebounceFn = setTimeout(() => {
-            const currentId = createDocForm.gst_filing_id?.toString();
-
-            // Skip search if it was updated by selecting from the result list
-            if (isInternalUpdate.current) {
-                isInternalUpdate.current = false;
-                return;
-            }
-
-            // Skip if we just searched this ID or if it's empty
-            if (currentId && currentId !== lastSearchedId.current) {
-                handleFilingIdSearch(currentId);
-            } else if (!currentId) {
-                setFilingSearchResults([]);
-                setIsFilingDropdownOpen(false);
-            }
-        }, 500);
-
-        return () => clearTimeout(delayDebounceFn);
-    }, [createDocForm.gst_filing_id, handleFilingIdSearch]);
-
     useEffect(() => {
         fetchFilingDocuments();
     }, [fetchFilingDocuments]);
@@ -207,78 +144,6 @@ const GstFilingDocuments = ({
         }
     };
 
-    const handleCreateDocSubmit = async (e) => {
-        e.preventDefault();
-        setFormLoading(true);
-        setFieldErrors({}); // Reset previous modal errors
-        setError(null);    // 🔥 Clear global dashboard errors at start of submission
-        try {
-            const payload = { ...createDocForm };
-            if (payload.gst_filing_id) payload.gst_filing_id = parseInt(payload.gst_filing_id);
-
-            await api.post('/api/v1/gst-filings-docs', payload);
-            setSuccessConfig({
-                message: "Document Linked Successfully",
-                subMessage: `Linked to GST Filing ID ${payload.gst_filing_id}`
-            });
-            setTimeout(() => setSuccessConfig(null), 3000);
-            
-            setShowCreateDocModal(false); 
-            setCreateDocForm({
-                gst_filing_id: '',
-                document_type: 'WORKING_SHEET',
-                document_url: '',
-                gstin: '',
-                remarks: '',
-                verified: false
-            });
-            fetchFilingDocuments();
-        } catch (err) {
-            console.error("Error creating document:", err);
-            let errorMessage = "Failed to create document link.";
-            const newFieldErrors = {};
-
-            const errorData = err.response?.data;
-            const detail = errorData?.detail || errorData?.message || errorData?.error;
-
-            if (err.response?.status === 422 && Array.isArray(detail)) {
-                detail.forEach(error => {
-                    if (error.loc && error.loc.length > 1) {
-                        const fieldName = error.loc[1];
-                        newFieldErrors[fieldName] = error.msg;
-                    }
-                });
-                if (detail.length > 0) {
-                    errorMessage = detail[0].msg || "Validation error occurred.";
-                }
-            } else if (err.response?.status === 400 || err.response?.status === 404) {
-                // Handle business logic errors like "GST filing not found"
-                const msg = typeof detail === 'string' ? detail : (detail?.msg || detail?.message || "Bad Request");
-                errorMessage = msg;
-
-                // Map filing-related errors to the Filing ID field
-                if (msg.toLowerCase().includes("filing")) {
-                    newFieldErrors.gst_filing_id = msg;
-                }
-            } else if (err.response?.status === 409) {
-                // Handle duplicate document errors (Conflict)
-                const msg = typeof detail === 'string' ? detail : (detail?.msg || detail?.message || detail?.error || "Conflict");
-                errorMessage = msg;
-                newFieldErrors.document_type = msg;
-                newFieldErrors.gst_filing_id = "Check if this doc type already exists for this ID";
-            } else {
-                errorMessage = typeof detail === 'string' ? detail : (detail?.msg || "An unexpected error occurred.");
-            }
-
-            setFieldErrors(newFieldErrors);
-            // 🔥 User Request: Only show field-level errors in the modal, avoid global dashboard alerts for validation
-            if (!Object.keys(newFieldErrors).length) {
-                setError(errorMessage);
-            }
-        } finally {
-            setFormLoading(false);
-        }
-    };
 
     const GstDocTableSkeleton = () => (
         <>
@@ -406,261 +271,21 @@ const GstFilingDocuments = ({
                 </div>
             </div>
 
-            {/* Documents Creation Modal (Standard High-Fidelity - Now inside module via Portal) */}
-            {showCreateDocModal && createPortal(
-                <div className="gst-modal-overlay-v4 app-side-drawer-mode" onClick={() => {
-                    setShowCreateDocModal(false);
-                    setError(null);
-                    setFieldErrors({});
-                }}>
-                    <div className="gst-modal-card-v4 wide-modal app-drawer-panel gst-reg-side-drawer-shell" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header-v4">
-                            <div className="header-content-v4">
-                                <div className="header-icon-box-v4">
-                                    <FilePlus size={20} />
-                                </div>
-                                <div className="modal-title-box">
-                                    <h2>Add Document Link</h2>
-                                    <p className="modal-subtitle-v4">Link a working sheet or summary sheet to a filing</p>
-                                </div>
-                            </div>
-                            <button className="btn-drawer-close" onClick={() => {
-                                setShowCreateDocModal(false);
-                                setError(null); // 🔥 Ensure global errors are cleared when closing modal
-                                setFieldErrors({});
-                            }}><X size={20} /></button>
-                        </div>
-
-                        <form onSubmit={handleCreateDocSubmit} className="modal-form-v4">
-                            <div className="form-scroll-container">
-                                {/* SECTION 1: LINK METADATA */}
-                                <div className="form-section-group">
-                                    <h3 className="section-title">1. Link Metadata</h3>
-                                    <div className="form-grid-2">
-                                        <div className="form-group-v4">
-                                            <label className="modal-label-caps">Filing ID*</label>
-                                            <div style={{ position: 'relative', zIndex: isFilingDropdownOpen ? 3000 : 1 }}>
-                                                <input
-                                                    type="number"
-                                                    className={`modal-input-v4 ${fieldErrors.gst_filing_id ? 'input-error-v4' : ''}`}
-                                                    required
-                                                    placeholder="e.g. 101"
-                                                    value={createDocForm.gst_filing_id}
-                                                    onChange={e => {
-                                                        const val = e.target.value;
-                                                        setCreateDocForm(prev => ({ ...prev, gst_filing_id: val }));
-                                                        setFieldErrors(prev => ({ ...prev, gst_filing_id: null }));
-                                                        if (!val) {
-                                                            setFilingSearchResults([]);
-                                                            setIsFilingDropdownOpen(false);
-                                                        }
-                                                    }}
-                                                    onFocus={() => {
-                                                        if (filingSearchResults.length > 0) setIsFilingDropdownOpen(true);
-                                                    }}
-                                                />
-                                                {isSearchingFiling && (
-                                                    <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--emerald-success)' }}>
-                                                        <Loader2 size={16} className="refresh-spin" />
-                                                    </div>
-                                                )}
-
-                                                {/* Filing Search Dropdown */}
-                                                {isFilingDropdownOpen && createDocForm.gst_filing_id && (
-                                                    <div className="searchable-dropdown" style={{ top: '100%', left: 0, right: 0, marginTop: '8px' }}>
-                                                        <div className="results-section">
-                                                            <div className="results-header">Matching Filing</div>
-                                                            {filingSearchResults.length > 0 ? (
-                                                                filingSearchResults.map(f => (
-                                                                    <div
-                                                                        key={`filing-res-${f.id}`}
-                                                                        className="dropdown-item"
-                                                                        onMouseDown={(e) => {
-                                                                            e.preventDefault();
-                                                                            e.stopPropagation();
-                                                                            const selectedGstin = f.gstin || '';
-                                                                            const selectedFilingId = f.id;
-
-                                                                            // 🔥 Mark as internal update so useEffect skips the redundant search
-                                                                            isInternalUpdate.current = true;
-
-                                                                            setCreateDocForm(prev => ({
-                                                                                ...prev,
-                                                                                gst_filing_id: selectedFilingId,
-                                                                                gstin: selectedGstin
-                                                                            }));
-                                                                            setFieldErrors(prev => ({ ...prev, gst_filing_id: null, gstin: null }));
-
-                                                                            // Small timeout to ensure state settles before closing dropdown
-                                                                            setTimeout(() => {
-                                                                                setIsFilingDropdownOpen(false);
-                                                                            }, 50);
-                                                                        }}
-                                                                    >
-                                                                        <div className="item-main">
-                                                                            <span className="item-id">{f.id}</span>
-                                                                            <span className="item-name">{f.filing_period}</span>
-                                                                        </div>
-                                                                        <div className="item-sub" style={{ paddingLeft: '40px' }}>
-                                                                            GSTIN: <span style={{ color: 'var(--info)', fontWeight: '700' }}>{f.gstin || 'N/A'}</span>
-                                                                        </div>
-                                                                    </div>
-                                                                ))
-                                                            ) : !isSearchingFiling ? (
-                                                                <div className="dropdown-no-results" style={{ padding: '20px', textAlign: 'center', fontSize: '11px', color: 'var(--text-primary)' }}>
-                                                                    No filings found for ID "{createDocForm.gst_filing_id}"
-                                                                </div>
-                                                            ) : null}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                            {fieldErrors.gst_filing_id && <p className="error-text-v4">{fieldErrors.gst_filing_id}</p>}
-                                            {isFilingDropdownOpen && (
-                                                <div
-                                                    className="dropdown-backdrop"
-                                                    onClick={() => setIsFilingDropdownOpen(false)}
-                                                    style={{ zIndex: 2050 }}
-                                                />
-                                            )}
-                                        </div>
-                                        <div className="form-group-v4">
-                                            <label className="modal-label-caps">Document Type*</label>
-                                            <FormCustomSelect
-                                                name="document_type"
-                                                value={createDocForm.document_type}
-                                                onChange={(e) => setCreateDocForm((prev) => ({ ...prev, document_type: e.target.value }))}
-                                                options={optionsFromConfigOnly([
-                                                    { value: 'WORKING_SHEET', label: 'Working Sheet' },
-                                                    { value: 'SUMMARY_SHEET', label: 'Summary Sheet' },
-                                                    { value: 'RECON_SHEET', label: 'Reconciliation Sheet' },
-                                                    { value: 'MISC_SHEET', label: 'Miscellaneous Sheet' },
-                                                ])}
-                                                placeholder="Document type"
-                                                ariaLabel="Document type"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* SECTION 2: ACCESS & VERIFICATION */}
-                                <div className="form-section-group">
-                                    <h3 className="section-title">2. Access & Verification</h3>
-                                    <div className="form-group-v4 full-width" style={{ marginBottom: '24px', width: '100%' }}>
-                                        <label className="modal-label-caps">Spreadsheet URL*</label>
-                                        <input
-                                            type="url"
-                                            className={`modal-input-v4 ${fieldErrors.document_url ? 'input-error-v4' : ''}`}
-                                            required
-                                            placeholder="Google Sheets or OneDrive Excel link"
-                                            value={createDocForm.document_url}
-                                            onChange={e => {
-                                                setCreateDocForm(prev => ({ ...prev, document_url: e.target.value }));
-                                                setFieldErrors(prev => ({ ...prev, document_url: null }));
-                                            }}
-                                        />
-                                        {fieldErrors.document_url ? (
-                                            <p className="error-text-v4">{fieldErrors.document_url}</p>
-                                        ) : (
-                                            <p className="field-hint">Required: Must be a direct Excel (.xlsx), CSV, or Google Sheets link starting with http/https</p>
-                                        )}
-                                    </div>
-
-                                    <div className="form-grid-2">
-                                        <div className="form-group-v4">
-                                            <label className="modal-label-caps">GSTIN (Optional)</label>
-                                            <input
-                                                type="text"
-                                                className={`modal-input-v4 ${fieldErrors.gstin ? 'input-error-v4' : ''}`}
-                                                placeholder="15-digit GSTIN"
-                                                value={createDocForm.gstin}
-                                                onChange={e => {
-                                                    setCreateDocForm(prev => ({ ...prev, gstin: e.target.value }));
-                                                    setFieldErrors(prev => ({ ...prev, gstin: null }));
-                                                }}
-                                            />
-                                            {fieldErrors.gstin && <p className="error-text-v4">{fieldErrors.gstin}</p>}
-                                        </div>
-
-                                        <div className="form-group-v4">
-                                            <div className="verification-field-v4" style={{ marginTop: '22px', padding: '12px', background: 'rgba(var(--fg-rgb),0.02)', borderRadius: '10px', border: '1px solid rgba(var(--fg-rgb),0.05)' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                                                    <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>I have manually verified this document</span>
-
-                                                    <label className="toggle-switch-v4" style={{ cursor: 'pointer' }}>
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={createDocForm.verified}
-                                                            onChange={() => setCreateDocForm({ ...createDocForm, verified: !createDocForm.verified })}
-                                                            style={{ display: 'none' }}
-                                                        />
-                                                        <div className={`switch-track-v4 ${createDocForm.verified ? 'active' : ''}`}>
-                                                            <div className="switch-thumb-v4"></div>
-                                                        </div>
-                                                    </label>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* SECTION 3: CONTEXT */}
-                                <div className="form-section-group">
-                                    <h3 className="section-title">3. Context</h3>
-                                    <div className="form-group-v4 full-width" style={{ width: '100%' }}>
-                                        <label className="modal-label-caps">Remarks</label>
-                                        <textarea
-                                            className="modal-input-v4"
-                                            style={{ minHeight: '120px', resize: 'vertical', lineHeight: '1.6' }}
-                                            placeholder="Add any context for this sheet..."
-                                            value={createDocForm.remarks}
-                                            onChange={e => setCreateDocForm({ ...createDocForm, remarks: e.target.value })}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="modal-footer-v4">
-                                <div className="footer-actions-v4">
-                                    <button type="button" className="dark-outline" onClick={() => {
-                                        setShowCreateDocModal(false);
-                                        setError(null);
-                                        setFieldErrors({});
-                                    }}>Cancel</button>
-                                    <button
-                                        type="submit"
-                                        className="minimal-btn"
-                                        style={{
-                                            background: 'var(--emerald-success)',
-                                            color: 'var(--text-primary)',
-                                            border: 'none',
-                                            borderRadius: '100px',
-                                            fontWeight: '700',
-                                            cursor: formLoading ? 'not-allowed' : 'pointer',
-                                            opacity: formLoading ? 0.7 : 1,
-                                            padding: '10px 24px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: '8px',
-                                            transition: 'all 0.2s ease'
-                                        }}
-                                        disabled={formLoading}
-                                    >
-                                        {formLoading ? (
-                                            <>
-                                                <Loader2 size={16} className="refresh-spin" />
-                                                Linking...
-                                            </>
-                                        ) : 'Link Document'}
-                                    </button>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
-                </div>,
-                document.body
-            )}
+            <AddDocumentLinkModal
+                isOpen={showCreateDocModal}
+                onClose={() => setShowCreateDocModal(false)}
+                presetFilingId={createDocPreset?.gst_filing_id || null}
+                presetGstin={createDocPreset?.gstin || ''}
+                onCreated={({ filingId }) => {
+                    onCreateDocPresetApplied?.();
+                    setSuccessConfig({
+                        message: "Document Linked Successfully",
+                        subMessage: `Linked to GST Filing ID ${filingId}`,
+                    });
+                    setTimeout(() => setSuccessConfig(null), 3000);
+                    fetchFilingDocuments();
+                }}
+            />
             {/* Verification Confirmation Modal */}
             {confirmDocId && createPortal(
                 <div className="gst-modal-overlay-v4" style={{ zIndex: 4000 }}>
