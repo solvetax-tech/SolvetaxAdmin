@@ -27,3 +27,7 @@ redis
 # Optional error tracking — only used when SENTRY_DSN is set (import is guarded).
 sentry-sdk[fastapi]>=2.0
 PyYAML==6.0.2
+
+# Test framework — added in Workflow Builder Slice 0 (doc 09 §5).
+pytest==8.3.5
+pytest-asyncio==0.24.0

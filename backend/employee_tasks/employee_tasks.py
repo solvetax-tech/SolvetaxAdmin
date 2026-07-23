@@ -115,6 +115,66 @@ async def _find_conflict(conn, emp_id: int, slots: List[datetime], exclude_id: O
     )
 
 
+def _date_today_ist() -> date_cls:
+    """Return today's IST date.
+
+    Extracted as a named function so tests can patch it without touching the
+    stdlib datetime class.
+    """
+    return datetime.now(IST).date()
+
+
+async def create_task_for_emp(
+    conn,
+    emp_id: int,
+    title: str,
+    description: Optional[str] = None,
+    scheduled_at: Optional[datetime] = None,
+) -> int:
+    """Create a system-generated employee task; return its id.
+
+    Called by the workflow engine's AssignTask node handler (doc 09 §3.3).
+    Satisfies employee_tasks NOT NULL columns with a synthetic single slot:
+      - scheduled_at  = provided value, or next business day 10:00 IST
+      - time_slots    = [scheduled_at]
+      - status        = 'PENDING'
+
+    The human-calendar overlap-conflict check (_find_conflict) is
+    intentionally SKIPPED for system-generated tasks.  System tasks are
+    nudges / follow-up reminders, not calendar bookings; they must not be
+    silently dropped because an employee happens to have that slot taken.
+    """
+    if scheduled_at is None:
+        today = _date_today_ist()
+        next_day = today + timedelta(days=1)
+        # Skip Saturday (weekday 5) and Sunday (weekday 6)
+        while next_day.weekday() in (5, 6):
+            next_day += timedelta(days=1)
+        scheduled_at = datetime.combine(next_day, time_cls(10, 0), tzinfo=IST)
+
+    time_slots = [scheduled_at]
+    task_id = await conn.fetchval(
+        f"""
+        INSERT INTO {DB_SCHEMA}.employee_tasks
+            (emp_id, title, description, scheduled_at, time_slots, status)
+        VALUES ($1, $2, $3, $4, $5, 'PENDING')
+        RETURNING id
+        """,
+        emp_id,
+        title,
+        description,
+        scheduled_at,
+        time_slots,
+    )
+    logger.info(
+        "system_task_created id=%s emp_id=%s scheduled_at=%s",
+        task_id,
+        emp_id,
+        scheduled_at.isoformat(),
+    )
+    return task_id
+
+
 @router.post("/create", response_model=TaskOut, status_code=201, summary="Create a task")
 async def create_task(
     payload: TaskCreateIn,
