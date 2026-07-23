@@ -34,6 +34,16 @@ export function canSeeGstFilingsDashboard(profileData) {
   return role === 'ADMIN' || role === 'OP_MANAGER';
 }
 
+/**
+ * CRM (lead pipeline) is the sales/RM side of the app. The operations roles —
+ * OP and OP_MANAGER — don't work leads, so the CRM switcher is hidden from them.
+ * Everyone else (ADMIN, RM, SALES_MANAGER, …) keeps it.
+ */
+export function canSeeCrmDashboard(profileData) {
+  const role = normalizeRole(profileData);
+  return role !== 'OP' && role !== 'OP_MANAGER';
+}
+
 // --------------------------------------------------------------------------- //
 // Platform RBAC — mirrors the backend's require_permission / assert_platform_
 // permission. The JWT carries permissions.platform.{FEATURE} = [PERMS].

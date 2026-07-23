@@ -17,7 +17,7 @@ import {
     fetchContactSupportOptions,
     editContactSupportLead,
 } from '../../utils/contactSupportApi';
-import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
+import { getRmOpColumnVisibility, canCreateSalesRecords } from '../../utils/rmOpAssignmentFields';
 import '../common/Filters.css';
 import './ContactSupportLeads.css';
 
@@ -499,9 +499,11 @@ const ContactSupportLeads = () => {
                                     />
                                 </div>
                                 <div className="sdpp-filter-actions">
-                                    <button type="button" className="btn-clear-v2" onClick={openCreate}>
-                                        + Create
-                                    </button>
+                                    {canCreateSalesRecords() && (
+                                        <button type="button" className="btn-clear-v2" onClick={openCreate}>
+                                            + Create
+                                        </button>
+                                    )}
                                     <button type="button" className="btn-filter-trigger" onClick={handleApplyFilters}>
                                         <Search size={14} /> Apply
                                     </button>

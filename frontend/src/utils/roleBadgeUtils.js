@@ -33,3 +33,31 @@ export function getRoleCssClass(role) {
     if (r.includes('OP') || r.includes('OPERATION')) return 'op';
     return 'employee';
 }
+
+// --------------------------------------------------------------------------- //
+// CO-ADMIN — a display-only distinction. A few ADMIN accounts are surfaced in
+// the UI as "CO-ADMIN" with their own badge colour; their backend role stays
+// ADMIN, so permissions are unchanged. The override is keyed on account email.
+// --------------------------------------------------------------------------- //
+
+const CO_ADMIN_EMAILS = new Set(['samuelinti9@gmail.com']);
+
+/** True when a record's ADMIN role should render as CO-ADMIN. Pass an object with { role, email }. */
+export function isCoAdmin(record) {
+    if (!record) return false;
+    const role = String(record.role || '').toUpperCase();
+    const email = String(record.email || '').trim().toLowerCase();
+    return role === 'ADMIN' && CO_ADMIN_EMAILS.has(email);
+}
+
+/** Role text to display, applying the CO-ADMIN override. Falls back to the raw role. */
+export function getRoleDisplayLabel(record) {
+    if (isCoAdmin(record)) return 'CO-ADMIN';
+    return record?.role || '';
+}
+
+/** Header/dropdown CSS class, honouring the CO-ADMIN override. Pass a record { role, email }. */
+export function getRoleCssClassFor(record) {
+    if (isCoAdmin(record)) return 'co-admin';
+    return getRoleCssClass(record?.role);
+}

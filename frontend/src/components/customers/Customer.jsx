@@ -19,7 +19,7 @@ import Button from '../ui/Button';
 import StatusPill from '../ui/StatusPill';
 import './Customer.css';
 import AddCustomerModal from './AddCustomerModal';
-import { canManageRmOpRecords, getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
+import { canCreateSalesRecords, getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
 import CustomerDetailsModal from './CustomerDetailsModal';
 import CustomerActivationModal from './CustomerActivationModal';
 import ManageCustomerServicesModal from './ManageCustomerServicesModal';
@@ -483,7 +483,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                             Reset Filters
                         </Button>
                     )}
-                    {canManageRmOpRecords(profileData, isAdmin) && (
+                    {canCreateSalesRecords(profileData, isAdmin) && (
                         <Button variant="primary" size="sm" icon={<UserPlus size={13} />} onClick={() => setIsAddModalOpen(true)}>
                             Create Customer
                         </Button>

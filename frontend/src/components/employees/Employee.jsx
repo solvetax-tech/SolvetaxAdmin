@@ -13,7 +13,7 @@ import '../common/Filters.css';
 import FilterDateInput from '../common/FilterDateInput';
 
 import { Search, Filter, RefreshCcw, ChevronLeft, ChevronRight, UserPlus, Settings, RotateCcw, Plus, X, Eye, Pencil, AlertCircle } from 'lucide-react';
-import { getRoleBadgeClass } from '../../utils/roleBadgeUtils';
+import { getRoleBadgeClass, getRoleDisplayLabel, isCoAdmin } from '../../utils/roleBadgeUtils';
 import api from '../../utils/api';
 import Button from '../ui/Button';
 import StatusPill from '../ui/StatusPill';
@@ -34,7 +34,6 @@ import Toast from '../common/Toast';
 import './EmployeeDetailsModal.css';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromPairs } from '../common/selectOptionUtils';
-import { hasPermission } from '../../utils/rbac';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -210,8 +209,10 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
         }
     }, [autoOpenEmpId, data]);
 
-    // RBAC: gate by the EMPLOYEE feature permission (was role-only `isAdmin`).
-    const canEditEmployee = hasPermission('EMPLOYEE', 'WRITE');
+    // Creating and editing employees is ADMIN-only. Other roles (RM, OP,
+    // SALES_MANAGER, OP_MANAGER, …) get read-only access: they can view a
+    // profile but see no "New Employee" button and no edit action.
+    const canEditEmployee = isAdmin;
 
     const openEmployeeView = (item, e) => {
         e?.stopPropagation();
@@ -629,7 +630,7 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                                     <div className="filings-ledger-cell">{item.last_name || '-'}</div>
                                     <div className="filings-ledger-cell"><span className="ui-num">{item.phone_number || '-'}</span></div>
                                     <div className="filings-ledger-cell">
-                                        <StatusPill value={item.role} tone={roleTone(item.role)} dot={false} />
+                                        <StatusPill value={getRoleDisplayLabel(item)} tone={isCoAdmin(item) ? 'co-admin' : roleTone(item.role)} dot={false} />
                                     </div>
                                     <div className="filings-ledger-cell" title={item.manager_username}>
                                         {item.manager_username || managerMap[String(item.manager_emp_id)] || (

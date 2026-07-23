@@ -5,7 +5,7 @@
  * password reset flow via the Twilio SMS service integration.
  */
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, ArrowLeft, Sparkles } from 'lucide-react';
 import './Login.css';
 import api from '../utils/api';
@@ -13,6 +13,7 @@ import LoadingOverlay from './common/LoadingOverlay';
 
 const Login = ({ onSuccess }) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -33,6 +34,13 @@ const Login = ({ onSuccess }) => {
   React.useEffect(() => {
     localStorage.removeItem('session_token');
   }, []);
+
+  // Account switcher: pre-fill the email when arriving from "switch account"
+  // (/login?email=...). Only the email is passed — the password is still typed.
+  React.useEffect(() => {
+    const prefill = (searchParams.get('email') || '').trim();
+    if (prefill) setEmail(prefill);
+  }, [searchParams]);
 
   const handleForgotRequest = async (e) => {
     e.preventDefault();

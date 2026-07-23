@@ -65,6 +65,7 @@
 
   /* Role accents (badges) — tuned bright for dark; deepened in light theme */
   --role-admin: #e0a92e;
+  --role-co-admin: #f472b6;
   --role-hr: #b98cfb;
   --role-manager: #38bdf8;
   --role-lead: #7c85f7;
@@ -208,6 +209,7 @@
 
   /* Role accents deepened for contrast on white */
   --role-admin: #a9761a;
+  --role-co-admin: #be185d;
   --role-hr: #6d28d9;
   --role-manager: #0e7ba8;
   --role-lead: #4f4cd9;

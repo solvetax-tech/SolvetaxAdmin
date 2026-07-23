@@ -61,6 +61,24 @@ export function canManageRmOpRecords(profileData, isAdmin = false) {
     return role === 'RM' || role === 'OP';
 }
 
+/**
+ * Create access for the sales-funnel origination points — new Customer, new GST
+ * registration, new Customer Service, new Contact/Referral lead. These start a
+ * record in the acquisition funnel; the operations roles (OP, OP_MANAGER) work
+ * existing records but don't originate them, so they're excluded here even
+ * though canManageRmOpRecords (edits, plus create of nested GST people/documents)
+ * still allows them.
+ *
+ * `isAdmin` short-circuits to true. Otherwise the role comes from profileData
+ * when available, falling back to the session-token role for components mounted
+ * too deep to receive profileData (e.g. Contact/Referral leads).
+ */
+export function canCreateSalesRecords(profileData, isAdmin = false) {
+    if (isAdmin) return true;
+    const role = String(profileData?.role || getSessionRole() || '').toUpperCase();
+    return role === 'ADMIN' || role === 'SALES_MANAGER' || role === 'RM';
+}
+
 export function coerceAssignmentValue(value) {
     if (value == null || value === '') return null;
     const s = String(value).trim();

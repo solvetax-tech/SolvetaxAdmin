@@ -28,7 +28,7 @@ import FormCustomSelect from '../common/FormCustomSelect';
 import FilterDateInput from '../common/FilterDateInput';
 import { optionsFromConfig, optionsFromPairs } from '../common/selectOptionUtils';
 import { buildRmOpSelectOptions } from '../../utils/activeEmployees';
-import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
+import { getRmOpColumnVisibility, canCreateSalesRecords } from '../../utils/rmOpAssignmentFields';
 
 const FILTER_FY_OPTIONS = buildFinancialYearPresetOptions({ yearsBack: 8 });
 
@@ -447,6 +447,8 @@ export const IncomeTax = ({ profileData }) => {
                         >
                             <Filter size={13} /> Filters
                         </button>
+                        {/* Operations roles (OP, OP_MANAGER) don't originate records. */}
+                        {canCreateSalesRecords(profileData) && (
                         <Button
                             variant="primary"
                             size="sm"
@@ -460,6 +462,7 @@ export const IncomeTax = ({ profileData }) => {
                         >
                             New Record
                         </Button>
+                        )}
                 </div>
             </div>
 

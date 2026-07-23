@@ -18,7 +18,7 @@ import {
   CreditCard,
   BookOpen,
   History,
-  Briefcase, Camera, Edit2, Shield, Clock, Activity, Mail, Phone, Hash, Calendar, CalendarCheck, ShieldCheck, CheckCircle2, XCircle, MoreVertical, Loader2, X, AlertCircle, ArrowRight, Lock, Landmark, ListTodo, Headphones, Sun, Moon, Bug
+  Briefcase, Camera, Edit2, Shield, Clock, Activity, Mail, Phone, Hash, Calendar, CalendarCheck, ShieldCheck, CheckCircle2, XCircle, MoreVertical, Loader2, X, AlertCircle, ArrowRight, Lock, Landmark, ListTodo, Headphones, Sun, Moon, Bug, UserPlus
 } from 'lucide-react';
 import './Dashboard.css';
 import './common/AppSideDrawer.css';
@@ -45,7 +45,8 @@ import useTaskReminders from '../hooks/useTaskReminders';
 import api from '../utils/api';
 import { fetchCustomerServiceProgressTracker } from '../utils/customerServiceApi';
 import { dispatchGstFilingFocusOpen, resolveGstFocusFromAction } from '../utils/dashboardApi';
-import { getRoleCssClass } from '../utils/roleBadgeUtils';
+import { getRoleCssClassFor, getRoleDisplayLabel } from '../utils/roleBadgeUtils';
+import { getRememberedAccounts, rememberAccount } from '../utils/rememberedAccounts';
 import LoadingOverlay from './common/LoadingOverlay';
 import Pagination from './common/Pagination';
 import NotificationsTab from './notifications/NotificationsTab';
@@ -54,7 +55,7 @@ import DataTableLoader from './common/DataTableLoader';
 import ThemeToggle from './common/ThemeToggle';
 import useFollowupReminders from '../hooks/useFollowupReminders';
 import useGstFilingFollowupReminders from '../hooks/useGstFilingFollowupReminders';
-import { canSeeGstFilingsDashboard, isTrueAdmin, hasPermission } from '../utils/rbac';
+import { canSeeGstFilingsDashboard, canSeeCrmDashboard, isTrueAdmin, hasPermission } from '../utils/rbac';
 
 class DashboardErrorBoundary extends React.Component {
   constructor(props) {
@@ -802,9 +803,45 @@ const Dashboard = ({ onLogout }) => {
     };
   }, [showProfileDropdown]);
 
+  // --- Account switcher (profile dropdown) -------------------------------- //
+  // Remembered accounts are a device-local convenience list (name/email/role,
+  // no passwords, no tokens), so this never weakens the httpOnly refresh-token
+  // model. Switching just pre-fills the login email; the password is still
+  // required. See utils/rememberedAccounts.
+  const [savedAccounts, setSavedAccounts] = useState([]);
+
+  // Remember the current account whenever its profile is (re)loaded.
+  useEffect(() => {
+    if (!profileData?.email) return;
+    const name = `${profileData.first_name || ''} ${profileData.last_name || ''}`.trim()
+      || profileData.username || '';
+    rememberAccount({
+      emp_id: profileData.emp_id,
+      email: profileData.email,
+      name,
+      role: profileData.role,
+    });
+  }, [profileData?.email, profileData?.emp_id, profileData?.role, profileData?.first_name, profileData?.last_name, profileData?.username]);
+
+  // localStorage isn't reactive — re-read the list each time the dropdown opens.
+  useEffect(() => {
+    if (showProfileDropdown) setSavedAccounts(getRememberedAccounts());
+  }, [showProfileDropdown]);
+
+  const switchToAccount = (email) => {
+    setShowProfileDropdown(false);
+    navigate(`/login?email=${encodeURIComponent(email)}`);
+  };
+
+  const addAnotherAccount = () => {
+    setShowProfileDropdown(false);
+    navigate('/login');
+  };
+
   // ADMIN-only system tools; managers use team-scoped access via profileData.role in APIs.
   const isAdmin = isTrueAdmin(profileData);
   const showGstFilingsTab = canSeeGstFilingsDashboard(profileData);
+  const showCrmSwitcher = canSeeCrmDashboard(profileData);
   const canSignup = isAdmin;
 
   useEffect(() => {
@@ -1288,9 +1325,9 @@ const Dashboard = ({ onLogout }) => {
                   ? `${profileData?.first_name || ''} ${profileData?.last_name || ''}`.trim()
                   : profileData?.username || 'User User'}
               </h1>
-              <span className="role-badge-v3">
+              <span className={`role-badge-v3 ${getRoleCssClassFor(profileData)}`}>
                 <Shield size={12} className="role-icon" />
-                {profileData?.role || 'User'}
+                {getRoleDisplayLabel(profileData) || 'User'}
               </span>
             </div>
             <p className="profile-joined-text">
@@ -1731,6 +1768,7 @@ const Dashboard = ({ onLogout }) => {
 
             <div className="vertical-divider" style={{ margin: '0 8px' }} />
 
+            {showCrmSwitcher && (
             <div className="crm-dropdown-container" style={{ position: 'relative' }}>
               <button
                 className="topbar-icon-btn v4-btn crm-header-btn"
@@ -1771,6 +1809,7 @@ const Dashboard = ({ onLogout }) => {
                 </div>
               )}
             </div>
+            )}
 
             <div className="vertical-divider" />
 
@@ -1788,8 +1827,8 @@ const Dashboard = ({ onLogout }) => {
                   <span className="user-name">
                     {profileData?.first_name || profileData?.username || 'User'}
                   </span>
-                  <span className={`mini-role-badge ${profileData?.role ? getRoleCssClass(profileData.role) : ''}`}>
-                    {profileData?.role || 'User'}
+                  <span className={`mini-role-badge ${profileData?.role ? getRoleCssClassFor(profileData) : ''}`}>
+                    {getRoleDisplayLabel(profileData) || 'User'}
                   </span>
                   <span className="chevron-icon">
                     <ChevronDown size={14} className={showProfileDropdown ? 'rotate' : ''} />
@@ -1805,9 +1844,45 @@ const Dashboard = ({ onLogout }) => {
                         ? `${profileData?.first_name || ''} ${profileData?.last_name || ''}`.trim()
                         : profileData?.username || 'User'}
                     </span>
-                    <span className={`dropdown-role ${getRoleCssClass(profileData?.role)}`}>{profileData?.role || 'User'}</span>
+                    {profileData?.email && <span className="dropdown-email">{profileData.email}</span>}
+                    <span className={`dropdown-role ${getRoleCssClassFor(profileData)}`}>{getRoleDisplayLabel(profileData) || 'User'}</span>
                   </div>
+
+                  {(() => {
+                    const currentEmail = String(profileData?.email || '').toLowerCase();
+                    const otherAccounts = savedAccounts.filter(
+                      (a) => String(a.emp_id) !== String(profileData?.emp_id) && a.email !== currentEmail
+                    );
+                    if (otherAccounts.length === 0) return null;
+                    return (
+                      <>
+                        <div className="dropdown-divider" />
+                        <div className="dropdown-section-label">Switch account</div>
+                        {otherAccounts.map((acc) => (
+                          <button
+                            key={acc.email}
+                            className="dropdown-item account-switch-item"
+                            onClick={() => switchToAccount(acc.email)}
+                            title={`Switch to ${acc.email}`}
+                          >
+                            <span className="account-avatar">{(acc.name || acc.email).charAt(0).toUpperCase()}</span>
+                            <span className="account-meta">
+                              <span className="account-name">{acc.name || acc.email}</span>
+                              <span className="account-email">{acc.email}</span>
+                            </span>
+                            {acc.role && (
+                              <span className={`mini-role-badge ${getRoleCssClassFor(acc)}`}>{getRoleDisplayLabel(acc)}</span>
+                            )}
+                          </button>
+                        ))}
+                      </>
+                    );
+                  })()}
+
                   <div className="dropdown-divider" />
+                  <button className="dropdown-item" onClick={addAnotherAccount}>
+                    <UserPlus size={14} /> <span>Add another account</span>
+                  </button>
                   <button className="dropdown-item logout" onClick={handleLogout}>
                     <LogOut size={14} /> <span>Logout</span>
                   </button>

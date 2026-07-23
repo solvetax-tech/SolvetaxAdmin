@@ -18,6 +18,7 @@ import {
     resolveRmIdForPayload,
     resolveOpIdForPayload,
     canManageRmOpRecords,
+    canCreateSalesRecords,
 } from '../../utils/rmOpAssignmentFields';
 import {
     fetchActiveRmUsernames,
@@ -682,7 +683,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                 <RotateCcw size={14} /> Reset Filters
                             </button>
                         )}
-                        {canManageRmOpRecords(profileData, isAdmin) && (
+                        {canCreateSalesRecords(profileData, isAdmin) && (
                             <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={() => setShowCreateModal(true)}>
                                 Create GST
                             </Button>

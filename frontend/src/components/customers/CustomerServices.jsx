@@ -31,7 +31,7 @@ import {
     fetchActiveOpEmployees,
     buildRmOpIdSelectOptions,
 } from '../../utils/activeEmployees';
-import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
+import { getRmOpColumnVisibility, canCreateSalesRecords } from '../../utils/rmOpAssignmentFields';
 
 // Create-form vocabularies. The filter drawer's equivalents lead with an
 // "All ..." entry, which is meaningless here: a new row always lands on one
@@ -572,15 +572,17 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                     >
                         <Filter size={13} /> Filters
                     </button>
-                    <Button
-                        variant="primary"
-                        size="sm"
-                        icon={<Plus size={13} />}
-                        onClick={openCreateService}
-                        title="Create customer service"
-                    >
-                        Create Service
-                    </Button>
+                    {canCreateSalesRecords(profileData, isAdmin) && (
+                        <Button
+                            variant="primary"
+                            size="sm"
+                            icon={<Plus size={13} />}
+                            onClick={openCreateService}
+                            title="Create customer service"
+                        >
+                            Create Service
+                        </Button>
+                    )}
                 </div>
             </div>
 

@@ -105,6 +105,8 @@
 .ui-pill--warning { --pill-tone: var(--warning); color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 28%, transparent); }
 .ui-pill--danger  { --pill-tone: var(--danger);  color: var(--danger);  background: var(--danger-soft);  border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
 .ui-pill--info    { --pill-tone: var(--info);    color: var(--info);    background: var(--info-soft);    border-color: color-mix(in srgb, var(--info) 28%, transparent); }
+/* CO-ADMIN role pill — display-only distinction (see roleBadgeUtils.isCoAdmin). */
+.ui-pill--co-admin { --pill-tone: var(--role-co-admin); color: var(--role-co-admin); background: color-mix(in srgb, var(--role-co-admin) 14%, transparent); border-color: color-mix(in srgb, var(--role-co-admin) 32%, transparent); }
 
 /* ---------------- Data table ---------------- */
 .ui-table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: var(--font-body); }

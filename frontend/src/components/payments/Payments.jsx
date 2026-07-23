@@ -31,6 +31,7 @@ import PaymentDetails from './PaymentDetails';
 import PaymentFollowupManager from './PaymentFollowupManager';
 import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromPairs } from '../common/selectOptionUtils';
+import { getSessionRole } from '../../utils/rbac';
 
 const formatCurrency = (value) => {
     const num = typeof value === 'number' ? value : (value ? Number(value) : 0);
@@ -320,9 +321,12 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                     <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={() => setShowFilterModal(true)}>
                         Filters
                     </Button>
-                    <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={onNewPayment}>
-                        New Payment
-                    </Button>
+                    {/* Individual Operators (OP) don't originate payments; OP_MANAGER can. */}
+                    {getSessionRole() !== 'OP' && (
+                        <Button variant="primary" size="sm" icon={<Plus size={13} />} onClick={onNewPayment}>
+                            New Payment
+                        </Button>
+                    )}
                 </div>
             </div>
 
