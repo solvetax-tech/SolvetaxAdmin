@@ -244,6 +244,7 @@ from backend.issue_reports.issue_reports import router as issue_reports_router
 from backend.employee_tasks.employee_tasks import router as employee_tasks_router
 from backend.Dashboard.service_done_payment_pending import router as dashboard_router
 from backend.Dashboard.gst_filing_monthly_matrix import router as gst_filing_matrix_router
+from backend.whatsapp.router import router as whatsapp_router
 
 
 if email_verification:
@@ -322,6 +323,8 @@ if dashboard_router:
     app.include_router(dashboard_router)
 if gst_filing_matrix_router:
     app.include_router(gst_filing_matrix_router)
+if whatsapp_router:
+    app.include_router(whatsapp_router)
 
 @app.get("/health")
 async def health_check():
