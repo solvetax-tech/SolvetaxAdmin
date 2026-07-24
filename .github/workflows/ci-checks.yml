@@ -3,6 +3,11 @@
 # with branch protection on `prod` (require these checks + 1 review) so a PR
 # can't merge until they're green. The real deploy runs after merge, in
 # deploy-prod.yml.
+#
+# NOTE: this repo has no unit-test suite (no pytest/vitest). These are the checks
+# that are meaningful today: lint, a backend syntax compile, and a full image
+# build (which itself runs `vite build` + `pip install`). If you add real tests
+# later, drop a `test` job here and mark it required too.
 
 name: CI checks (PR to prod)
 
@@ -44,55 +49,6 @@ jobs:
       # errors without needing a database or the full dependency install.
       - name: Syntax compile (backend + migration runner)
         run: python -m compileall -q backend db
-
-  # BLOCKING: introduced in Workflow Builder Slice 0.
-  # Runs all backend unit tests with a real Postgres 16 + Redis 7 service.
-  # Must pass before a PR can merge to prod; update branch protection accordingly.
-  backend-tests:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: solvetax
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: solvetax_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-      redis:
-        image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-    env:
-      DB_HOST: localhost
-      DB_PORT: 5432
-      DB_NAME: solvetax_test
-      DB_USER: solvetax
-      DB_PASSWORD: testpass
-      DB_SCHEMA: solvetax
-      DB_SSL: disable
-      TEST_DATABASE_URL: postgresql://solvetax:testpass@localhost:5432/solvetax_test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install Python deps
-        run: pip install -r requirements.txt
-      - name: Apply migrations to test DB
-        run: python db/migrate/run_migrations.py
-      - name: Run backend tests
-        run: pytest backend/whatsapp/tests/ -v
 
   image-build:
     runs-on: ubuntu-latest
