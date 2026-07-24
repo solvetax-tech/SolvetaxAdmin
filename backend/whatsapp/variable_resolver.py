@@ -14,6 +14,7 @@ Unit-testable; no database access.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from typing import Any
 
@@ -49,6 +50,9 @@ def resolve(body: str, context: dict[str, Any]) -> str:
         val = context.get(name)
         if val is None:
             return m.group(0)  # leave whitelisted-but-absent tokens intact
+        if isinstance(val, (_dt.datetime, _dt.date)):
+            # Client-facing messages want 29-07-2026, not an ISO timestamp.
+            return val.strftime("%d-%m-%Y")
         return str(val)
 
     return _TOKEN_RE.sub(_replace, body)

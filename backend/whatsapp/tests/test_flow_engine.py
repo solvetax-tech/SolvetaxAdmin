@@ -943,3 +943,30 @@ async def test_quiet_hours_20_59_succeeds_21_00_defers(conn, fake_redis):
     assert row_c["next_retry_at"] is not None
     retry_ist = row_c["next_retry_at"].astimezone(_IST_ZI)
     assert retry_ist.hour == 9
+
+
+# ── Operator + token-formatting regressions (E2E QA 2026-07-24) ──────────────
+
+def test_compare_accepts_ui_operator_synonyms():
+    """The canvas serializes eq/neq since v1.1 but early drafts used long forms;
+    both must work — unknown operators silently took the false branch."""
+    from backend.whatsapp.flow_engine import _compare
+    assert _compare("FILED", "equals", "FILED") is True
+    assert _compare("NOT_FILED", "not_equals", "FILED") is True
+    assert _compare("FILED", "eq", "FILED") is True
+    assert _compare("NOT_FILED", "neq", "FILED") is True
+    assert _compare("GSTR3B-2026", "starts_with", "GSTR3B") is True
+    assert _compare("GSTR3B-2026", "starts_with", "ITR") is False
+
+
+def test_resolver_formats_dates_human_readable():
+    """Date/datetime context values render as DD-MM-YYYY, not ISO timestamps."""
+    import datetime
+    from backend.whatsapp.variable_resolver import resolve
+    ctx = {
+        "gstr3b_due_date": datetime.datetime(2026, 7, 29, 0, 0, tzinfo=datetime.timezone.utc),
+        "payment_due_date": datetime.date(2026, 8, 15),
+        "customer_name": "QA One",
+    }
+    out = resolve("Due {{gstr3b_due_date}} / {{payment_due_date}} for {{customer_name}}", ctx)
+    assert out == "Due 29-07-2026 / 15-08-2026 for QA One"

@@ -31,7 +31,7 @@ const NODE_DEFS = {
   sendMessage:    { label: 'Send Message',     group: 'Actions',  icon: '💬', iconClass: 'action',  defaultConfig: { body: '' } },
   assignTask:     { label: 'Assign Task',      group: 'Actions',  icon: '✅', iconClass: 'action',  defaultConfig: { assignee: '', title: '', description: '' } },
   updateCrmField: { label: 'Update CRM Field', group: 'Actions',  icon: '✏️', iconClass: 'action',  defaultConfig: { field: '', value: '' } },
-  condition:      { label: 'Condition',        group: 'Logic',    icon: '🔀', iconClass: 'logic',   defaultConfig: { variable: '', operator: 'equals', value: '' } },
+  condition:      { label: 'Condition',        group: 'Logic',    icon: '🔀', iconClass: 'logic',   defaultConfig: { variable: '', operator: 'eq', value: '' } },
   wait:           { label: 'Wait',             group: 'Logic',    icon: '⏳', iconClass: 'logic',   defaultConfig: { type: 'delay', delay_minutes: 60, timeout_hours: 24 } },
   endFlow:        { label: 'End Flow',         group: 'Control',  icon: '🔴', iconClass: 'control', defaultConfig: {} },
 };
@@ -269,9 +269,9 @@ function ConfigFields({ nodeType, config, onChange }) {
           </div>
           <div className="wa-config-field">
             <p className="wa-config-label">Operator</p>
-            <select className="wa-select" value={field('operator') || 'equals'} onChange={(e) => set('operator', e.target.value)}>
-              <option value="equals">Equals</option>
-              <option value="not_equals">Not Equals</option>
+            <select className="wa-select" value={field('operator') || 'eq'} onChange={(e) => set('operator', e.target.value)}>
+              <option value="eq">Equals</option>
+              <option value="neq">Not Equals</option>
               <option value="contains">Contains</option>
               <option value="starts_with">Starts With</option>
               <option value="gt">Greater Than</option>

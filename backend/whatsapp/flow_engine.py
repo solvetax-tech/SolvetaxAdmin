@@ -546,12 +546,17 @@ def _compare(actual: Any, operator: str, expected: str) -> bool:
         return False
     actual_str = str(actual)
     op = operator.lower()
+    # The canvas serialized long-form operator names in early drafts; accept
+    # both so published flows never silently evaluate False (QA 2026-07-24).
+    op = {"equals": "eq", "not_equals": "neq"}.get(op, op)
     if op == "eq":
         return actual_str == expected
     if op == "neq":
         return actual_str != expected
     if op == "contains":
         return expected in actual_str
+    if op == "starts_with":
+        return actual_str.startswith(expected)
     if op == "gt":
         try:
             return float(actual_str) > float(expected)
