@@ -7,11 +7,12 @@ Registered in router.py as a sub-router; resolves to:
   PUT    /api/v1/whatsapp/flows/{flow_id}/draft
   POST   /api/v1/whatsapp/flows/{flow_id}/validate
   POST   /api/v1/whatsapp/flows/{flow_id}/publish
+  POST   /api/v1/whatsapp/flows/{flow_id}/simulate
   PATCH  /api/v1/whatsapp/flows/{flow_id}
 
 Auth (doc 09 §6.7):
   GET, PUT /draft  → require_permission("EMPLOYEE", "READ")
-  POST (create), validate, publish, PATCH  → require_admin()
+  POST (create), validate, publish, simulate, PATCH  → require_admin()
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from pydantic import BaseModel, Field
 from backend import utils as backend_utils
 from backend.security.rbac import require_admin, require_permission
 from backend.whatsapp.flow_validation import validate_flow
+from backend.whatsapp.flow_engine import simulate_flow
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,17 @@ class PublishResponse(BaseModel):
 
 class OkResponse(BaseModel):
     ok: bool = True
+
+
+class SimulateRequest(BaseModel):
+    customer_id: Optional[int] = None
+    context_overrides: dict = Field(default_factory=dict)
+    simulated_replies: list = Field(default_factory=list)
+
+
+class SimulateResponse(BaseModel):
+    trace: list[dict]
+    would_send: list[dict]
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +274,63 @@ async def publish_flow(
                 new_version, flow_id,
             )
     return PublishResponse(version=new_version)
+
+
+@flows_router.post("/{flow_id}/simulate", response_model=SimulateResponse)
+async def simulate_flow_endpoint(
+    flow_id: UUID,
+    payload: SimulateRequest,
+    current_user: dict = Depends(require_admin()),
+) -> SimulateResponse:
+    """Dry-run the published flow in-memory; no DB rows are persisted (doc 09 §3.8).
+
+    Loads live_data (404 if unpublished), builds a synthetic context from
+    defaults + context_overrides, executes handlers with no DB writes,
+    fast-forwards Wait(delay), and returns the execution trace + would_send list.
+    """
+    pool = await backend_utils.get_db_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT live_data FROM {_SCHEMA}.wa_flows WHERE id = $1",
+            flow_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    live_data = _parse_jsonb(row["live_data"])
+    if live_data is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Flow has not been published yet; live_data is NULL",
+        )
+
+    # Build initial context: defaults for all 12 tokens + caller overrides
+    context: dict = {
+        "customer_name": "Simulated Customer",
+        "gst_number": "29AABCT1332L000",
+        "gstr3b_due_date": "2026-08-20",
+        "gstr1_due_date": "2026-08-11",
+        "payment_amount_due": "5000",
+        "payment_due_date": "2026-08-15",
+        "rm_name": "RM Staff",
+        "op_name": "OP Staff",
+        "filing_status": "NOT_FILED",
+        "pipeline_stage": "ACTIVE",
+        "income_tax_year": "AY2025-26",
+        "pending_documents_count": "2",
+        "phone": "9000000000",
+        "__flow_def": live_data,
+    }
+    context.update(payload.context_overrides)
+
+    result = await simulate_flow(
+        live_data=live_data,
+        initial_context=context,
+        simulated_replies=payload.simulated_replies,
+    )
+    return SimulateResponse(
+        trace=result.get("trace", []),
+        would_send=result.get("would_send", []),
+    )
 
 
 @flows_router.patch("/{flow_id}", response_model=OkResponse)

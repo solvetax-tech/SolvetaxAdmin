@@ -26,3 +26,6 @@ migrations:
   - version: "V004"
     name: "wa_flows"
     script: "V004__wa_flows.sql"
+  - version: "V005"
+    name: "wa_flow_engine"
+    script: "V005__wa_flow_engine.sql"
