@@ -140,7 +140,13 @@ async def get_db_pool():
     if _db_pool is None:
         async with _db_pool_lock:
             if _db_pool is None:
-                ssl_context = ssl.create_default_context()
+                # Honor DB_SSL=disable for local/test environments (mirrors
+                # the same check in db/migrate/run_migrations.py ~line 83).
+                ssl_arg = (
+                    False
+                    if os.getenv("DB_SSL", "require") == "disable"
+                    else ssl.create_default_context()
+                )
                 pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "2"))
                 pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "10"))
                 app_name = os.getenv("DB_APP_NAME", "slovetax-api")
@@ -160,7 +166,7 @@ async def get_db_pool():
                     database=DB_NAME,
                     user=DB_USER,
                     password=DB_PASSWORD,
-                    ssl=ssl_context,
+                    ssl=ssl_arg,
                     command_timeout=int(os.getenv("DB_COMMAND_TIMEOUT", "30")),
                     min_size=pool_min_size,
                     max_size=pool_max_size,

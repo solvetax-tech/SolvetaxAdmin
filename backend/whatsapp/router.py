@@ -26,12 +26,14 @@ from backend.redis_cache import get_redis_client, is_redis_configured
 from backend.security.rbac import require_admin, require_permission
 from backend.whatsapp import client as evo_client
 from backend.whatsapp.client import EvolutionAPIError
+from backend.whatsapp.flows_router import flows_router
 from backend.whatsapp.send_service import ConsentError, QuietHoursError, RateLimitError, send
 from backend.whatsapp.sinks import EvolutionSink
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/whatsapp", tags=["whatsapp"])
+router.include_router(flows_router)
 
 
 class SendRequest(BaseModel):

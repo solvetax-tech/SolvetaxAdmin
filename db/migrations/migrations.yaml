@@ -23,3 +23,6 @@ migrations:
   - version: "V003"
     name: "whatsapp_slice0"
     script: "V003__whatsapp_slice0.sql"
+  - version: "V004"
+    name: "wa_flows"
+    script: "V004__wa_flows.sql"

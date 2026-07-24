@@ -30,6 +30,9 @@ _REDIS_COOLDOWN_SEC = int(os.getenv("REDIS_COOLDOWN_SEC", "15"))
 # without a health check the first request afterwards fails and trips the cooldown.
 _REDIS_MAX_CONNECTIONS = int(os.getenv("REDIS_MAX_CONNECTIONS", "50"))
 _REDIS_HEALTH_CHECK_INTERVAL_SEC = int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL_SEC", "30"))
+# REDIS_SSL defaults to 'true' (Azure Cache for Redis requires TLS).
+# Set REDIS_SSL=false or REDIS_SSL=disable for local/test environments.
+_REDIS_USE_SSL: bool = os.getenv("REDIS_SSL", "true").strip().lower() not in ("false", "disable")
 _redis_skip_until_ts = 0.0
 
 
@@ -63,7 +66,7 @@ def get_redis_client() -> redis.Redis:
             "redis_client_create",
             host=REDIS_HOST,
             port=REDIS_PORT,
-            ssl=True,
+            ssl=_REDIS_USE_SSL,
             connect_timeout_sec=_REDIS_CONNECT_TIMEOUT_SEC,
             max_connections=_REDIS_MAX_CONNECTIONS,
             health_check_interval_sec=_REDIS_HEALTH_CHECK_INTERVAL_SEC,
@@ -72,7 +75,7 @@ def get_redis_client() -> redis.Redis:
             host=REDIS_HOST,
             port=REDIS_PORT,
             password=REDIS_PASSWORD or None,
-            ssl=True,
+            ssl=_REDIS_USE_SSL,
             decode_responses=True,
             socket_connect_timeout=_REDIS_CONNECT_TIMEOUT_SEC,
             socket_timeout=_REDIS_CONNECT_TIMEOUT_SEC,
