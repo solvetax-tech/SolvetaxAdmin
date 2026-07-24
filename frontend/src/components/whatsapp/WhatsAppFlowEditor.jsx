@@ -135,6 +135,21 @@ function WaNode({ data, selected }) {
 
 const nodeTypes = { waNode: WaNode };
 
+/* ── Read app theme for ReactFlow colorMode ───────────────────────────────── */
+function useAppColorMode() {
+  const read = () => {
+    const t = document.documentElement.dataset.theme;
+    return (t === 'light' || t === 'violet') ? 'light' : 'dark';
+  };
+  const [mode, setMode] = useState(read);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setMode(read()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => obs.disconnect();
+  }, []);
+  return mode;
+}
+
 /* ── Delay presets ────────────────────────────────────────────────────── */
 const DELAY_PRESETS = [
   { label: '5 minutes',  minutes: 5 },
@@ -317,6 +332,7 @@ function ConfigFields({ nodeType, config, onChange }) {
 function FlowEditorInner({ flowId }) {
   const navigate = useNavigate();
   const { setCenter } = useReactFlow();
+  const colorMode = useAppColorMode();
 
   const [flowMeta, setFlowMeta] = useState(null);   // { id, name, status, version }
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -587,7 +603,7 @@ function FlowEditorInner({ flowId }) {
               onPaneClick={() => setSelectedNodeId(null)}
               nodeTypes={nodeTypes}
               fitView
-              colorMode="dark"
+              colorMode={colorMode}
             >
               <Background />
               <Controls />

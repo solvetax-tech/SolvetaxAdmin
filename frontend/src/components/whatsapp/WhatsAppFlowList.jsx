@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, X, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Plus, X, Loader2, AlertCircle, Workflow } from 'lucide-react';
 import api from '../../utils/api';
 import ThemeToggle from '../common/ThemeToggle';
 import './WhatsApp.css';
@@ -111,17 +111,24 @@ export default function WhatsAppFlowList() {
         <div className="wa-card" style={{ padding: 0 }}>
           {loading ? (
             <div className="wa-empty-state">
-              <Loader2 size={20} className="spin" style={{ margin: '0 auto 8px', display: 'block' }} />
-              Loading flows…
+              <Loader2 size={20} className="spin" style={{ color: 'var(--accent)' }} />
+              <span className="wa-empty-state-desc">Loading flows…</span>
             </div>
           ) : error ? (
             <div className="wa-empty-state">
-              <AlertCircle size={20} style={{ margin: '0 auto 8px', display: 'block', color: 'var(--danger)' }} />
-              {error}
+              <div className="wa-empty-state-icon" style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 22%, transparent)', background: 'var(--danger-soft)' }}>
+                <AlertCircle size={18} />
+              </div>
+              <span className="wa-empty-state-title">Failed to load</span>
+              <span className="wa-empty-state-desc">{error}</span>
             </div>
           ) : flows.length === 0 ? (
             <div className="wa-empty-state">
-              No flows yet. Create your first workflow.
+              <div className="wa-empty-state-icon">
+                <Workflow size={18} />
+              </div>
+              <span className="wa-empty-state-title">No flows yet</span>
+              <span className="wa-empty-state-desc">Create your first workflow to automate WhatsApp messages.</span>
             </div>
           ) : (
             <div className="wa-table-wrapper">
