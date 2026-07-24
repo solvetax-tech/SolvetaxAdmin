@@ -69,7 +69,7 @@ build, use the Swagger UI at `http://localhost:8080/docs` instead.
 ### 4. Create an instance named `primary`
 
 > The instance name **must be `primary`** — it matches the `instance_name` seed row in the
-> `wa_instance_config` table created by migration V002.
+> `wa_instance_config` table created by migration V003 (`V003__whatsapp_slice0.sql`).
 
 **Via Manager UI:** click "New Instance", set name to `primary`, leave integration as
 `WHATSAPP-BAILEYS`, click Create.

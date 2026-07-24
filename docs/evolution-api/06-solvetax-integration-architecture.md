@@ -147,7 +147,7 @@ sequenceDiagram
 
 ## 3. Data Model Additions
 
-Described as logical entities; SQL DDL to follow the project's migration pattern (`db/migrations/` + new `V002__whatsapp_schema.sql`).
+Described as logical entities; SQL DDL to follow the project's migration pattern (`db/migrations/` + new versioned scripts, e.g. `V003__whatsapp_slice0.sql`).
 
 ### `wa_instance_registry`
 

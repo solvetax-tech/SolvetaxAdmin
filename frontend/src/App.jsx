@@ -1,10 +1,14 @@
 /**
  * @file App.jsx
- * @description The root router configuration for the application. 
- * Defines all public and protected routes, handles high-level user session state, 
+ * @description The root router configuration for the application.
+ * Defines all public and protected routes, handles high-level user session state,
  * and controls global login/logout logic.
  */
-import React, { useState } from 'react';
+import React, { useState, Suspense, lazy } from 'react';
+
+const WhatsAppConfig   = lazy(() => import('./components/whatsapp/WhatsAppConfig'));
+const WhatsAppFlowList = lazy(() => import('./components/whatsapp/WhatsAppFlowList'));
+const WhatsAppFlowEditor = lazy(() => import('./components/whatsapp/WhatsAppFlowEditor'));
 import './components/common/AppSideDrawer.css';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Homepage from './components/Homepage';
@@ -294,6 +298,36 @@ function App() {
             element={
               <ProtectedRoute>
                 <CrmDashboard onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/whatsapp"
+            element={
+              <ProtectedRoute>
+                <Suspense fallback={null}>
+                  <WhatsAppConfig />
+                </Suspense>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/whatsapp-flows"
+            element={
+              <ProtectedRoute>
+                <Suspense fallback={null}>
+                  <WhatsAppFlowList />
+                </Suspense>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/whatsapp-flows/:id"
+            element={
+              <ProtectedRoute>
+                <Suspense fallback={null}>
+                  <WhatsAppFlowEditor />
+                </Suspense>
               </ProtectedRoute>
             }
           />

@@ -18,7 +18,7 @@ import {
   CreditCard,
   BookOpen,
   History,
-  Briefcase, Camera, Edit2, Shield, Clock, Activity, Mail, Phone, Hash, Calendar, CalendarCheck, ShieldCheck, CheckCircle2, XCircle, MoreVertical, Loader2, X, AlertCircle, ArrowRight, Lock, Landmark, ListTodo, Headphones, Sun, Moon, Bug, UserPlus
+  Briefcase, Camera, Edit2, Shield, Clock, Activity, Mail, Phone, Hash, Calendar, CalendarCheck, ShieldCheck, CheckCircle2, XCircle, MoreVertical, Loader2, X, AlertCircle, ArrowRight, Lock, Landmark, ListTodo, Headphones, Sun, Moon, Bug, UserPlus, MessageSquare, Workflow
 } from 'lucide-react';
 import './Dashboard.css';
 import './common/AppSideDrawer.css';
@@ -1564,6 +1564,28 @@ const Dashboard = ({ onLogout }) => {
             <span className="nav-icon"><Headphones size={18} /></span>
             <span className="nav-label">Contact/Referral</span>
           </div>
+
+          {isAdmin && (
+            <div
+              className="nav-item"
+              onClick={() => navigate('/whatsapp')}
+              title="WhatsApp Config"
+            >
+              <span className="nav-icon"><MessageSquare size={18} /></span>
+              <span className="nav-label">WhatsApp Config</span>
+            </div>
+          )}
+
+          {isAdmin && (
+            <div
+              className="nav-item"
+              onClick={() => navigate('/whatsapp-flows')}
+              title="WhatsApp Workflows"
+            >
+              <span className="nav-icon"><Workflow size={18} /></span>
+              <span className="nav-label">WA Workflows</span>
+            </div>
+          )}
         </nav>
 
         <div className="sidebar-footer-v2">

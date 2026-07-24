@@ -23,6 +23,13 @@ from backend.gst_registration_filing.gst_filing_auto_generation import (
     gstr9c_sync_category_sql,
 )
 from backend.redis_cache import invalidate_tag as redis_invalidate_tag
+from backend.whatsapp.flow_engine import (
+    _start_scheduled_flows,
+    _tick_wa_flow_runs,
+    _dispatch_outbox,
+)
+from backend.whatsapp.sinks import EvolutionSink
+from backend.redis_cache import get_redis_client, is_redis_configured
 
 ITR_CRM_ENTITY_TYPE = "INCOME_TAX"
 
@@ -655,6 +662,27 @@ async def background_jobs():
                 if auto_assign_ran:
                     await _invalidate_crm_cache()
                     logging.info("CRM auto bulk-assign rules executed: count=%s", auto_assign_ran)
+
+                # 14a) WhatsApp flow engine: enroll customers into scheduled flows
+                wa_enrolled = await _start_scheduled_flows(conn)
+                if wa_enrolled:
+                    logging.info("WA flow engine step14a enrolled=%s", wa_enrolled)
+
+                # 14b) WhatsApp flow engine: tick runnable flow runs
+                wa_ticked = await _tick_wa_flow_runs(conn)
+                if wa_ticked:
+                    logging.info("WA flow engine step14b runs_processed=%s", wa_ticked)
+
+                # 14c) WhatsApp flow engine: dispatch pending outbox rows
+                # Build sink and redis per tick; skip if Redis not configured (fail-closed)
+                if is_redis_configured():
+                    _wa_redis = get_redis_client()
+                    _wa_sink = EvolutionSink()
+                    wa_dispatched = await _dispatch_outbox(conn, _wa_redis, _wa_sink)
+                    if wa_dispatched:
+                        logging.info("WA flow engine step14c dispatched=%s", wa_dispatched)
+                else:
+                    logging.debug("WA flow engine step14c skip=redis_not_configured")
 
                 logging.info("Scheduler completed successfully")
 
