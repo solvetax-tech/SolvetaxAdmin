@@ -211,8 +211,7 @@ from backend.sign_up.forgot import router as forgot_password_router
 from backend.sign_up.employee_edit import router as employee_edit_router
 from backend.customer_registration.customer import router as customer_router
 from backend.gst_registration.gst_registration import router as gst_registration_router
-from backend.gst_registration.gst_people import router as gst_people_router
-from backend.gst_registration.gst_documents import router as gst_documents_router
+from backend.gst_registration.gst_people_documents_details import router as gst_people_documents_details_router
 from backend.gst_registration.gst_registration_config import router as gst_registration_config_router
 from backend.version.version import router as version_router
 from backend.payments.registration_payments import router as registration_payments_router
@@ -259,12 +258,10 @@ if customer_router:
     app.include_router(customer_router)
 if gst_registration_router:
     app.include_router(gst_registration_router)
-if gst_people_router:
-    app.include_router(gst_people_router)
+if gst_people_documents_details_router:
+    app.include_router(gst_people_documents_details_router)
 if employee_edit_router:
     app.include_router(employee_edit_router)
-if gst_documents_router:
-    app.include_router(gst_documents_router)
 if gst_registration_config_router:
     app.include_router(gst_registration_config_router)
 if gst_registration_filing:

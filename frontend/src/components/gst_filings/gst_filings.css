@@ -1963,7 +1963,7 @@ body {
 /* Column vars must live on portal table shell (wrapper was removed from JSX) */
 .gst-main-content.gst-portal-page .gst-table-container--portal.filings-gst-ledger-container,
 .gst-main-content.gst-portal-page .gst-table-container--portal {
-    --filings-col-1: 90px;
+    --filings-col-1: 66px;
     --filings-col-2: 110px;
     --filings-col-3: 110px;
     --docs-col-1: 80px;
@@ -1980,7 +1980,7 @@ body {
 }
 
 .filings-gst-ledger-container {
-    --filings-col-1: 90px;
+    --filings-col-1: 66px;
     --filings-col-2: 110px;
     --filings-col-3: 110px;
     --filings-col-4: 120px;
@@ -2055,31 +2055,146 @@ body {
 
 .filings-ledger-grid-template {
     display: grid !important;
-    --col-rm: minmax(150px, 1fr);
-    --col-op: minmax(150px, 1fr);
-    /* Fixed widths for sticky columns to prevent overlap/clipping */
+    /* Dense combined-column ledger (mirrors GST Registrations / Customers). */
     grid-template-columns:
-        90px                    /* 1. ID (Fixed) */
-        110px                   /* 2. Cust ID (Fixed) */
-        110px                   /* 3. GST ID (Fixed) */
-        minmax(120px, 0.8fr)    /* 4. Period */
-        minmax(120px, 0.8fr)    /* 5. Category */
-        minmax(110px, 0.7fr)    /* 6. Priority */
-        minmax(160px, 1fr)      /* 7. GSTIN */
-        minmax(120px, 0.8fr)    /* 8. Type */
-        minmax(120px, 0.8fr)    /* 9. Frequency */
-        minmax(150px, 1fr)      /* 10. Status */
-        minmax(180px, 1.2fr)    /* 11. State */
-        var(--col-rm)           /* 12. RM */
-        var(--col-op)           /* 13. OP */
-        minmax(250px, 1fr)      /* 14. Business Name */
-        minmax(140px, 1fr)      /* 15. Business Type */
-        minmax(200px, 1.5fr)    /* 16. Remarks */
-        88px;                   /* 17. Actions (compact) */
+        66px                    /* 1. ID (sticky) */
+        minmax(170px, 1.0fr)    /* 2. GSTIN / State */
+        minmax(240px, 1.55fr)   /* 3. Email — fits longest email 208px + padding (~232px) */
+        minmax(148px, 0.9fr)    /* 4. Login (user / pass + copy) */
+        minmax(168px, 1.1fr)    /* 5. Business / Type — wraps */
+        minmax(108px, 0.55fr)   /* 6. Period / Frequency */
+        minmax(154px, 0.85fr)   /* 7. Status — fits "IN PREPARATION" pill (122px) + padding */
+        minmax(120px, 0.45fr)   /* 8. Staff (RM / OP) — tight: "RM bhanuvenkat" = 88px + padding */
+        100px;                  /* 9. Actions (sticky) — 2-row compact like Registrations */
     gap: 0 !important;
     grid-column-gap: 0 !important;
     width: fit-content !important;
     min-width: 100% !important;
+}
+
+/* Dense two-line cells for GST Filings (mirrors gstreg-stack). */
+.filings-ledger-grid-template .gstfl-stack {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    text-align: left !important;
+    gap: 2px;
+    min-width: 0;
+    white-space: normal;
+}
+.filings-ledger-grid-template .gstfl-chips { gap: 4px; }
+.gstfl-main,
+.gstfl-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gstfl-main { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.gstfl-sub { font-size: 11px; font-weight: 500; color: var(--text-primary); }
+.gstfl-sub b { color: var(--accent); font-weight: 800; font-size: 9px; margin-right: 5px; letter-spacing: 0.04em; }
+
+/* Business: just the name, centered, wrapping up to 2 lines (type removed) —
+   same treatment as GST Registrations / Customers. */
+.filings-ledger-grid-template .gstfl-biz-cell {
+    flex-direction: column;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    white-space: normal;
+    overflow: hidden;
+}
+.gstfl-biz-wrap {
+    display: block;
+    text-align: center;
+    font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+    line-height: 1.25;
+    white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+    max-width: 240px;
+    margin-left: auto; margin-right: auto;
+    max-height: 2.6em;   /* ~2 lines; longer names clip (full name on hover) */
+    overflow: hidden;
+}
+
+/* Login column: email / user / masked password with reveal + edit icons. */
+.filings-ledger-grid-template .gstfl-login-cell {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    text-align: left !important;
+    gap: 5px;
+    min-width: 0;
+    white-space: normal;
+    overflow: hidden;
+}
+/* Status cell: click anywhere to change status (native <select> overlay —
+   reliable under the app zoom, no clipping). */
+.filings-ledger-grid-template .gstfl-status-cell {
+    position: relative;
+    gap: 4px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background 0.15s ease;
+}
+.filings-ledger-grid-template .gstfl-status-cell:hover { background: rgba(var(--fg-rgb), 0.05); }
+.gstfl-status-caret {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    color: var(--text-muted); opacity: 0; pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+.gstfl-status-cell:hover .gstfl-status-caret { opacity: 0.85; }
+.gstfl-status-select {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    margin: 0; padding: 0; border: none;
+    opacity: 0; cursor: pointer; font-size: 12px;
+    appearance: none; -webkit-appearance: none;
+    /* The closed control stays invisible (opacity:0) so the pill shows through,
+       but the native option list picks up these colours. */
+    background-color: var(--bg-elevated);
+    color: var(--text-primary);
+}
+.gstfl-status-select option { background-color: var(--bg-elevated); padding: 6px; }
+
+/* Email column: portal email + mobile, two lines, left-aligned. */
+.filings-ledger-grid-template .gstfl-email-cell {
+    align-items: flex-start !important;
+    text-align: left !important;
+    overflow: hidden;
+}
+.gstfl-email-val {
+    font-size: 12px; font-weight: 500; color: var(--text-primary);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.gstfl-login-line { display: inline-flex; align-items: center; max-width: 100%; min-width: 0; }
+.gstfl-login-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gstfl-login-pass { gap: 5px; }
+.gstfl-login-pass .gstfl-login-val {
+    letter-spacing: 1.5px; color: var(--text-secondary);
+    font-family: var(--font-mono, monospace);
+}
+.gstfl-login-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; background: transparent; color: var(--text-muted);
+    cursor: pointer; padding: 2px; border-radius: 5px; flex-shrink: 0;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+.gstfl-login-icon:hover { color: var(--accent); background: rgba(var(--fg-rgb), 0.08); }
+
+/* Violet "EDIT LOGIN" pill (own line) that opens the Portal Login editor —
+   matches the dashboard's card button. */
+.gstfl-login-edit-btn {
+    align-self: flex-start;
+    margin-top: 1px;
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: inherit; font-size: 9.5px; font-weight: 800; letter-spacing: 0.05em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+    border-radius: var(--radius-pill, 999px);
+    padding: 3px 11px; cursor: pointer; flex-shrink: 0;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.gstfl-login-edit-btn:active { transform: scale(0.97); }
+.gstfl-login-edit-btn:hover {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 /* An RM/OP doesn't need the column naming themselves — collapse its track. */
@@ -2346,16 +2461,32 @@ body {
     font-weight: 500;
 }
 
-/* Sticky Actions column (right) — filings */
+/* Sticky Actions column (right) — filings. 2-row compact wrap like GST Registrations. */
 .filings-ledger-grid-template .gst-sticky-actions {
     position: sticky !important;
     right: 0 !important;
     z-index: 6 !important;
-    min-width: 88px !important;
-    max-width: 88px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
+    flex-wrap: wrap !important;
+    align-content: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
     background-color: var(--bg-surface) !important;
     border-left: 1px solid var(--border-subtle) !important;
     box-shadow: none;
+}
+.filings-ledger-grid-template .gst-sticky-actions button {
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    padding: 0 !important;
+    flex: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }
 
 .filings-ledger-header.filings-ledger-grid-template .gst-sticky-actions {

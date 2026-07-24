@@ -66,7 +66,7 @@ async def get_required_documents(
                         dc.description,
                         dc.is_mandatory
                     FROM {DB_SCHEMA}.gst_registration g
-                    JOIN {DB_SCHEMA}.gst_registration_persons p
+                    JOIN {DB_SCHEMA}.person_document_details p
                         ON p.gst_registration_id = g.id
                     JOIN {DB_SCHEMA}.document_config dc
                         ON dc.ownership_category = g.ownership_category
@@ -78,13 +78,8 @@ async def get_required_documents(
                     AND p.is_active = TRUE
                     AND NOT EXISTS (
                         SELECT 1
-                        FROM {DB_SCHEMA}.gst_registration_documents gd
-                        WHERE gd.document_type = dc.value
-                        AND gd.is_active = TRUE
-                        AND (
-                            gd.gstin = g.gstin
-                            OR gd.person_id = p.person_id
-                        )
+                        FROM jsonb_array_elements(p.documents) d
+                        WHERE d->>'document_type' = dc.value
                     )
                     ORDER BY dc.sort_order
                     """,

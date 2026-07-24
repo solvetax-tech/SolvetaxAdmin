@@ -866,6 +866,7 @@ async def list_gst_filings_table(
                COALESCE(f.business_type, r.business_type) AS business_type,
                COALESCE(f.state, r.state) AS state,
                COALESCE(f.language, r.language) AS language,
+               r.mobile AS mobile,
                erm.first_name AS rm_name,
                eop.first_name AS op_name,
                -- One-time action signals for the row actions: Add Document Link
@@ -961,8 +962,9 @@ async def list_gst_filings_table(
             raise HTTPException(500, GstFilingApiMessages.SERVER_ERROR)
 
         data = [dict(r) for r in rows]
-        for row in data:
-            row["password"] = None
+        # Portal password is returned so staff can copy it and so the Portal
+        # Login editor pre-fills it (blank would clear it on save). Consistent
+        # with the dashboard GST-filing matrix, which already exposes it.
         return {
             "data": data,
             "count": len(data),

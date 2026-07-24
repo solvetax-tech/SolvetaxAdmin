@@ -9,7 +9,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import '../Dashboard.css';
 
 import axios from 'axios';
-import { Filter, X, RotateCcw, Plus, UserPlus, Trash2, Edit3, Briefcase, Eye, ChevronRight, ShieldCheck, ListTodo, CheckCircle2, Clock, Users, Pencil } from 'lucide-react';
+import { Filter, X, RotateCcw, Plus, UserPlus, Trash2, Edit3, Briefcase, Eye, ChevronRight, ShieldCheck, ListTodo, CheckCircle2, Clock, Users, Pencil, Globe } from 'lucide-react';
 import api from '../../utils/api';
 import LoadingOverlay from '../common/LoadingOverlay';
 import Pagination from '../common/Pagination';
@@ -29,7 +29,12 @@ import {
     parseActiveEmployeesFromApi,
     buildRmOpSelectOptions,
 } from '../../utils/activeEmployees';
-import { fetchStaffServiceConfig } from '../../utils/staffServiceConfigApi';
+import {
+    fetchStaffServiceConfig,
+    groupStaffServicesByCategory,
+    sortedStaffServiceCategoryEntries,
+    getServiceCategoryLabel,
+} from '../../utils/staffServiceConfigApi';
 
 const BASE_URL = import.meta.env.VITE_API_URL;
 
@@ -57,6 +62,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
     const [activeOps, setActiveOps] = useState([]);
     const [states, setStates] = useState([]);
     const [businessTypes, setBusinessTypes] = useState([]);
+    const [languages, setLanguages] = useState([]);
     const [servicesConfig, setServicesConfig] = useState([]);
     const [openPopover, setOpenPopover] = useState({ customerId: null, type: null, placement: 'bottom' });
     const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
@@ -135,6 +141,10 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
         if (service.service_code) acc[service.service_code] = service.service_name || service.service_code;
         return acc;
     }, {});
+    const serviceByCode = servicesConfig.reduce((acc, service) => {
+        if (service.service_code) acc[service.service_code] = service;
+        return acc;
+    }, {});
     const mapServiceCodesToNames = (list) => {
         if (!Array.isArray(list)) return [];
         return list.map(code => serviceNameByCode[code] || code).filter(Boolean);
@@ -143,11 +153,12 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
     useEffect(() => {
         const fetchFilterOptions = async () => {
             try {
-                const [rmRes, opRes, statesRes, bizTypeRes] = await Promise.allSettled([
+                const [rmRes, opRes, statesRes, bizTypeRes, langRes] = await Promise.allSettled([
                     api.get('/api/v1/employees/active-rm'),
                     api.get('/api/v1/employees/active-op'),
                     api.get(`/api/v1/gst-registration/config/STATE`),
                     api.get(`/api/v1/gst-registration/config/BUSINESS_TYPE`),
+                    api.get(`/api/v1/gst-registration/config/LANGUAGE`),
                 ]);
                 // emp_id-bearing rows so the RM/OP filter option values are emp_ids
                 // (the backend filters rm_id/op_id as int) — usernames would 422.
@@ -155,6 +166,7 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                 if (opRes.status === 'fulfilled') setActiveOps(parseActiveEmployeesFromApi(opRes.value));
                 if (statesRes.status === 'fulfilled') setStates(statesRes.value.data || []);
                 if (bizTypeRes.status === 'fulfilled') setBusinessTypes(bizTypeRes.value.data || []);
+                if (langRes.status === 'fulfilled') setLanguages(langRes.value.data || []);
                 try {
                     const services = await fetchStaffServiceConfig();
                     setServicesConfig(services);
@@ -168,6 +180,8 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
         fetchFilterOptions();
     }, []);
 
+    // Title Case: TILES ORGANIZATION → Tiles Organization.
+    const titleCase = (str) => (str ? String(str).toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : str);
     const getDisplayName = (list, value) => {
         if (!value) return '-';
         const match = list.find(item => item.value === value);
@@ -637,18 +651,15 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
 
             <div className="gst-table-wrapper">
                 <div className="gst-table-container">
-                    <div className={`filings-ledger-header customer-grid-template ${rmOpCols.containerClass}`}>
+                    <div className="filings-ledger-header customer-grid-template">
                         <div className="filings-ledger-header-cell">Cust ID</div>
-                        <div className="filings-ledger-header-cell">Full Name</div>
-                        <div className="filings-ledger-header-cell">Email</div>
+                        <div className="filings-ledger-header-cell">Customer</div>
                         <div className="filings-ledger-header-cell">Mobile</div>
-                        <div className="filings-ledger-header-cell">Referrer</div>
-                        <div className="filings-ledger-header-cell">Business Name</div>
-                        <div className="filings-ledger-header-cell">Business Type</div>
-                        <div className="filings-ledger-header-cell">State</div>
-                        <div className="filings-ledger-header-cell">City</div>
-                        <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM Name</div>
-                        <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>OP Name</div>
+                        <div className="filings-ledger-header-cell" style={{ justifyContent: 'center' }}>Business</div>
+                        <div className="filings-ledger-header-cell">Service Required</div>
+                        <div className="filings-ledger-header-cell">Language</div>
+                        <div className="filings-ledger-header-cell">Location</div>
+                        <div className="filings-ledger-header-cell">Staff</div>
                         <div className="filings-ledger-header-cell" style={{ justifyContent: 'center' }}>Active</div>
                         <div className="filings-ledger-header-cell customer-actions-sticky">Actions</div>
                     </div>
@@ -656,9 +667,9 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                     {loading ? (
                         <div className="filings-ledger-body">
                             {[...Array(12)].map((_, i) => (
-                                <div key={i} className={`filings-ledger-row customer-grid-template ${rmOpCols.containerClass}`}>
-                                    {[...Array(13)].map((_, j) => (
-                                        <div key={j} className={`filings-ledger-cell ${j === 9 ? rmOpCols.rmCellClass : ''}${j === 10 ? rmOpCols.opCellClass : ''}`}>
+                                <div key={i} className="filings-ledger-row customer-grid-template">
+                                    {[...Array(10)].map((_, j) => (
+                                        <div key={j} className="filings-ledger-cell">
                                             <div className="filings-ledger-skeleton-bar" />
                                         </div>
                                     ))}
@@ -676,27 +687,65 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                             {data.map(item => (
                                 <div
                                     key={item.customer_id}
-                                    className={`filings-ledger-row customer-grid-template ${rmOpCols.containerClass} ${openPopover.customerId === item.customer_id ? 'customer-row-active' : ''}`}
+                                    className={`filings-ledger-row customer-grid-template ${openPopover.customerId === item.customer_id ? 'customer-row-active' : ''}`}
                                 >
                                     <div className="filings-ledger-cell">
-                                        <span className="ui-num">{item.customer_id}</span>
+                                        <button type="button" className="row-id-link" title="View customer" onClick={(e) => openCustomerView(item, e)}>{item.customer_id}</button>
                                     </div>
-                                    <div className="filings-ledger-cell" title={item.full_name}>
-                                        <span className="customer-name-blue-v4">{item.full_name}</span>
+                                    <div className="filings-ledger-cell cust-stack" title={`${item.full_name || ''} · ${item.email || ''}`}>
+                                        <span className="customer-name-blue-v4 cust-ellipsis">{item.full_name || '-'}</span>
+                                        <span className="cust-line-sub">{item.email || '—'}</span>
                                     </div>
-                                    <div className="filings-ledger-cell" title={item.email}>{item.email || '-'}</div>
-                                    <div className="filings-ledger-cell"><span className="ui-num">{item.mobile || '-'}</span></div>
-                                    <div className="filings-ledger-cell"><span className="ui-num">{item.referral_phone_number || '-'}</span></div>
-                                    <div className="filings-ledger-cell ledger-cell-longtext" title={item.business_name}>{item.business_name || '-'}</div>
-                                    <div className="filings-ledger-cell" title={item.business_type}>
-                                        <StatusPill tone="neutral" dot={false}>
-                                            {getDisplayName(businessTypes, item.business_type)}
-                                        </StatusPill>
+                                    <div className="filings-ledger-cell cust-stack">
+                                        <span className="ui-num">{item.mobile || '-'}</span>
+                                        {item.referral_phone_number && (
+                                            <span className="cust-line-sub">ref: {item.referral_phone_number}</span>
+                                        )}
                                     </div>
-                                    <div className="filings-ledger-cell" title={item.state}>{getDisplayName(states, item.state)}</div>
-                                    <div className="filings-ledger-cell" title={item.city}>{item.city || '-'}</div>
-                                    <div className={`filings-ledger-cell ${rmOpCols.rmCellClass}`} title={item.rm_name}>{item.rm_name || '-'}</div>
-                                    <div className={`filings-ledger-cell ${rmOpCols.opCellClass}`} title={item.op_name}>{item.op_name || '-'}</div>
+                                    <div className="filings-ledger-cell cust-biz-cell" title={item.business_name}>
+                                        <span className="cust-biz-wrap">{titleCase(item.business_name || '-')}</span>
+                                    </div>
+                                    <div className="filings-ledger-cell cust-service-cell">
+                                        {(() => {
+                                            const names = mapServiceCodesToNames(item.service_required || []);
+                                            if (!names.length) return <span className="cust-svc-empty">—</span>;
+                                            const first = names[0];
+                                            const extra = names.length - 1;
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    className="cust-svc"
+                                                    title={`${names.join(', ')}\nClick to view services`}
+                                                    onClick={(e) => { e.stopPropagation(); openSidePanel(item); }}
+                                                >
+                                                    <span className="cust-svc-tag">
+                                                        <span className="cust-svc-dot" />
+                                                        {first}
+                                                    </span>
+                                                    {extra > 0 && <span className="cust-svc-more">+{extra}</span>}
+                                                    <ChevronRight size={13} className="cust-svc-arrow" />
+                                                </button>
+                                            );
+                                        })()}
+                                    </div>
+                                    <div className="filings-ledger-cell cust-lang-cell">
+                                        {item.language ? (
+                                            <span className="cust-lang-pill" title={getDisplayName(languages, item.language) || item.language}>
+                                                <Globe size={12} />
+                                                {getDisplayName(languages, item.language) || item.language}
+                                            </span>
+                                        ) : (
+                                            <span className="cust-line-sub">—</span>
+                                        )}
+                                    </div>
+                                    <div className="filings-ledger-cell cust-stack">
+                                        <span className="cust-line-main">{item.city || '-'}</span>
+                                        <span className="cust-line-sub">{getDisplayName(states, item.state) || '—'}</span>
+                                    </div>
+                                    <div className="filings-ledger-cell cust-stack">
+                                        {rmOpCols.showRmColumn && <span className="cust-line-sub"><b>RM</b>{item.rm_name || '-'}</span>}
+                                        {rmOpCols.showOpColumn && <span className="cust-line-sub"><b>OP</b>{item.op_name || '-'}</span>}
+                                    </div>
                                     <div className="filings-ledger-cell" style={{ justifyContent: 'center' }}>
                                         <StatusPill tone={item.is_active ? 'success' : 'danger'}>
                                             {item.is_active ? 'Active' : 'Inactive'}
@@ -853,23 +902,46 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
                                                 </div>
                                             </div>
 
-                                            {/* Detailed Services Section */}
+                                            {/* Detailed Services Section — grouped by category (GST, Income Tax, …) */}
                                             <div className="services-list-premium">
-                                                <div className="service-type-group required-group">
-                                                    <div className="group-header">
-                                                        <div className="group-title" style={{ fontSize: '12px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                            <ListTodo size={14} /> Required Services
-                                                        </div>
-                                                        <div className="group-count">{reqCount}</div>
-                                                    </div>
-                                                    <div className="service-items-grid">
-                                                        {reqCount > 0 ? reqSet.map((code, i) => (
-                                                            <div key={`side-req-${i}`} className="service-pill-v4">
-                                                                {serviceNameByCode[code] || code}
+                                                {(() => {
+                                                    if (reqCount === 0) {
+                                                        return (
+                                                            <div className="service-type-group required-group">
+                                                                <div className="service-items-grid">
+                                                                    <div className="service-pill-v4 muted">None</div>
+                                                                </div>
                                                             </div>
-                                                        )) : <div className="service-pill-v4 muted">None</div>}
-                                                    </div>
-                                                </div>
+                                                        );
+                                                    }
+                                                    const reqServices = reqSet.map(code => (
+                                                        serviceByCode[code] || {
+                                                            service_code: code,
+                                                            service_name: serviceNameByCode[code] || code,
+                                                            service_category: 'OTHER',
+                                                        }
+                                                    ));
+                                                    const entries = sortedStaffServiceCategoryEntries(
+                                                        groupStaffServicesByCategory(reqServices)
+                                                    );
+                                                    return entries.map(([category, items]) => (
+                                                        <div key={category} className="service-type-group required-group">
+                                                            <div className="group-header">
+                                                                <div className="group-title" style={{ fontSize: '12px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                    <ListTodo size={14} /> {getServiceCategoryLabel(category)}
+                                                                </div>
+                                                                <div className="group-count">{items.length}</div>
+                                                            </div>
+                                                            <div className="service-items-grid">
+                                                                {items.map((s, i) => (
+                                                                    <div key={`side-req-${category}-${i}`} className="service-pill-v4">
+                                                                        {s.service_name}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ));
+                                                })()}
                                             </div>
                                         </>
                                     );
@@ -878,8 +950,10 @@ const Customer = ({ handleLogout, isAdmin, canSignup, profileData }) => {
 
                             <div className="drawer-footer">
                                 <button className="btn-panel-action-full" onClick={() => {
-                                    setManageCustomerId(sidePanel.data.customer_id);
+                                    const cid = sidePanel.data.customer_id;
+                                    setManageCustomerId(cid);
                                     setIsManageModalOpen(true);
+                                    closeSidePanel();
                                 }}>
                                     <Briefcase size={16} /> Manage Services
                                 </button>

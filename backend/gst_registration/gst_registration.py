@@ -1370,7 +1370,7 @@ async def get_gst_registration_full(
 ):
     """
     Returns the `gst_registration` row (with RM/creator names) and all linked
-    `gst_registration_persons`.
+    `person_document_details` (each person carries their documents inline).
 
     `registration_id` is the primary key `gst_registration.id`.
     """
@@ -1434,7 +1434,7 @@ async def get_gst_registration_full(
                    g.created_by,
                    e_rm.first_name AS rm_name,
                    e_creator.first_name AS created_by_name
-              FROM {DB_SCHEMA}.gst_registration_persons p
+              FROM {DB_SCHEMA}.person_document_details p
               JOIN {DB_SCHEMA}.gst_registration g
                     ON p.gst_registration_id = g.id
               LEFT JOIN {DB_SCHEMA}.employees e_rm
@@ -1461,9 +1461,19 @@ async def get_gst_registration_full(
             log.exception("Database error loading GST registration bundle")
             raise HTTPException(status_code=500, detail="Database error.")
 
+        def _person_row(r):
+            d = dict(r)
+            docs = d.get("documents")
+            if isinstance(docs, str):
+                try:
+                    d["documents"] = json.loads(docs)
+                except (TypeError, ValueError):
+                    d["documents"] = []
+            return d
+
         return {
             "registration": dict(reg_row),
-            "persons": [dict(r) for r in persons],
+            "persons": [_person_row(r) for r in persons],
             "request_id": request_id,
         }
 
@@ -2097,33 +2107,17 @@ async def soft_delete_gst_registration(
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Cascade Soft Delete Persons
+                # 3️⃣ Cascade Soft Delete Persons. Documents live inline on each
+                #     person row now, so deactivating the person deactivates them.
                 # --------------------------------------------------
                 deleted_persons = await conn.fetch(
                     f"""
-                    UPDATE {DB_SCHEMA}.gst_registration_persons
+                    UPDATE {DB_SCHEMA}.person_document_details
                        SET is_active = FALSE,
                            updated_at = NOW()
                      WHERE gst_registration_id = $1
                        AND is_active = TRUE
                      RETURNING person_id
-                    """,
-                    gst_id,
-                )
-
-                # --------------------------------------------------
-                # 4️⃣ Cascade Soft Delete Documents
-                # --------------------------------------------------
-                deleted_documents = await conn.fetch(
-                    f"""
-                    UPDATE {DB_SCHEMA}.gst_registration_documents d
-                       SET is_active = FALSE,
-                           updated_at = NOW()
-                      FROM {DB_SCHEMA}.gst_registration_persons p
-                     WHERE d.person_id = p.person_id
-                       AND p.gst_registration_id = $1
-                       AND d.is_active = TRUE
-                     RETURNING d.document_id
                     """,
                     gst_id,
                 )
@@ -2155,10 +2149,9 @@ async def soft_delete_gst_registration(
                 )
 
             log.info(
-                "GST soft deleted successfully | gst_id=%s | persons_deactivated=%s | documents_deactivated=%s",
+                "GST soft deleted successfully | gst_id=%s | persons_deactivated=%s",
                 gst_id,
                 len(deleted_persons),
-                len(deleted_documents),
             )
             await _invalidate_gst_registration_cache(
                 customer_id=None,
@@ -2168,9 +2161,8 @@ async def soft_delete_gst_registration(
             return {
                 **dict(deleted_gst),
                 "persons_deactivated_count": len(deleted_persons),
-                "documents_deactivated_count": len(deleted_documents),
                 "message": "GST registration soft deleted successfully. "
-                           "All associated persons and documents deactivated.",
+                           "All associated persons and their documents deactivated.",
                 "request_id": request_id,
             }
 
@@ -2293,33 +2285,17 @@ async def activate_gst_registration(
                     )
 
                 # --------------------------------------------------
-                # 3️⃣ Cascade Activate Persons
+                # 3️⃣ Cascade Activate Persons. Documents live inline on each
+                #     person row now, so activating the person restores them.
                 # --------------------------------------------------
                 activated_persons = await conn.fetch(
                     f"""
-                    UPDATE {DB_SCHEMA}.gst_registration_persons
+                    UPDATE {DB_SCHEMA}.person_document_details
                        SET is_active = TRUE,
                            updated_at = NOW()
                      WHERE gst_registration_id = $1
                        AND is_active = FALSE
                      RETURNING person_id
-                    """,
-                    gst_id,
-                )
-
-                # --------------------------------------------------
-                # 4️⃣ Cascade Activate Documents
-                # --------------------------------------------------
-                activated_documents = await conn.fetch(
-                    f"""
-                    UPDATE {DB_SCHEMA}.gst_registration_documents d
-                       SET is_active = TRUE,
-                           updated_at = NOW()
-                      FROM {DB_SCHEMA}.gst_registration_persons p
-                     WHERE d.person_id = p.person_id
-                       AND p.gst_registration_id = $1
-                       AND d.is_active = FALSE
-                     RETURNING d.document_id
                     """,
                     gst_id,
                 )
@@ -2351,10 +2327,9 @@ async def activate_gst_registration(
                 )
 
             log.info(
-                "GST activated successfully | gst_id=%s | persons_activated=%s | documents_activated=%s",
+                "GST activated successfully | gst_id=%s | persons_activated=%s",
                 gst_id,
                 len(activated_persons),
-                len(activated_documents),
             )
             await _invalidate_gst_registration_cache(
                 customer_id=None,
@@ -2364,9 +2339,8 @@ async def activate_gst_registration(
             return {
                 **dict(activated_gst),
                 "persons_activated_count": len(activated_persons),
-                "documents_activated_count": len(activated_documents),
                 "message": "GST registration activated successfully. "
-                           "All associated persons and documents activated.",
+                           "All associated persons and their documents activated.",
                 "request_id": request_id,
             }
 

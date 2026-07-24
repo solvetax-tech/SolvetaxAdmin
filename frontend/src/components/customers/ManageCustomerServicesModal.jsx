@@ -213,7 +213,7 @@ const ManageCustomerServicesModal = ({ isOpen, onClose, customerId, onSuccess })
                                                     <div className="st-checkbox-v5">
                                                         <Check size={12} className="st-checkmark-icon" />
                                                     </div>
-                                                    <span className="service-name-text">{svc.service_name}</span>
+                                                    <span className="service-name-text" title={svc.service_name}>{svc.service_name}</span>
                                                 </label>
                                             );
                                         })}
@@ -234,10 +234,14 @@ const ManageCustomerServicesModal = ({ isOpen, onClose, customerId, onSuccess })
                     <button className="modal-close-btn" onClick={onClose} aria-label="Close">
                         <X size={20} />
                     </button>
-                    <h1>
-                        Manage Services <span className="header-badge-v4 config-mode">CONFIGURATION</span>
-                    </h1>
-                    <p><strong>{customer?.full_name || `${customerId}`}</strong> • ID: {customerId}</p>
+                    <div className="msm-header-titlerow">
+                        <h1>Manage Services</h1>
+                        <span className="header-badge-v4 config-mode">CONFIGURATION</span>
+                    </div>
+                    <p className="msm-header-sub">
+                        <strong>{customer?.full_name || `Customer #${customerId}`}</strong>
+                        <span className="msm-id-pill">ID {customerId}</span>
+                    </p>
                 </div>
 
                 <div className="modal-body">
@@ -257,17 +261,25 @@ const ManageCustomerServicesModal = ({ isOpen, onClose, customerId, onSuccess })
                                 </div>
                             )}
 
-                            <div className="services-summary-bar-v5">
-                                <div className="summary-item-v5 required">
-                                    <Shield size={14} />
-                                    <div className="summary-content-v5">
-                                        <span className="summary-label-v5">Services Required: <strong>{selectedRequired.length} SELECTED</strong></span>
+                            <div className="services-summary-bar-v5 required">
+                                <div className="summary-hero-v5">
+                                    <div className="summary-hero-badge"><Shield size={22} /></div>
+                                    <div className="summary-hero-count">{selectedRequired.length}</div>
+                                    <div className="summary-hero-meta">
+                                        <span className="summary-hero-title">Services Selected</span>
+                                        <span className="summary-hero-sub">Required for {customer?.full_name || `customer #${customerId}`}</span>
+                                    </div>
+                                </div>
+                                <div className="summary-chips-wrap-v5">
+                                    {selectedRequired.length === 0 ? (
+                                        <span className="summary-empty-v5">No services selected yet — pick from the categories below.</span>
+                                    ) : (
                                         <div className="summary-chips-v5">
                                             {getSelectedNames(selectedRequired).map((name, i) => (
                                                 <span key={i} className="service-chip-v5">{name}</span>
                                             ))}
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
                             </div>
 

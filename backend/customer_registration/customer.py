@@ -2433,26 +2433,13 @@ async def soft_delete_customer(
                         gst_id,
                     )
 
-                    # Deactivate Persons
+                    # Deactivate Persons (documents live inline on each person row).
                     await conn.execute(
                         f"""
-                        UPDATE {DB_SCHEMA}.gst_registration_persons
+                        UPDATE {DB_SCHEMA}.person_document_details
                            SET is_active = FALSE,
                                updated_at = NOW()
                          WHERE gst_registration_id = $1
-                        """,
-                        gst_id,
-                    )
-
-                    # Deactivate Documents
-                    await conn.execute(
-                        f"""
-                        UPDATE {DB_SCHEMA}.gst_registration_documents d
-                           SET is_active = FALSE,
-                               updated_at = NOW()
-                          FROM {DB_SCHEMA}.gst_registration_persons p
-                         WHERE d.person_id = p.person_id
-                           AND p.gst_registration_id = $1
                         """,
                         gst_id,
                     )
@@ -2733,26 +2720,13 @@ async def activate_customer(
                         gst_id,
                     )
 
-                    # Activate Persons
+                    # Activate Persons (documents live inline on each person row).
                     await conn.execute(
                         f"""
-                        UPDATE {DB_SCHEMA}.gst_registration_persons
+                        UPDATE {DB_SCHEMA}.person_document_details
                            SET is_active = TRUE,
                                updated_at = NOW()
                          WHERE gst_registration_id = $1
-                        """,
-                        gst_id,
-                    )
-
-                    # Activate Documents
-                    await conn.execute(
-                        f"""
-                        UPDATE {DB_SCHEMA}.gst_registration_documents d
-                           SET is_active = TRUE,
-                               updated_at = NOW()
-                          FROM {DB_SCHEMA}.gst_registration_persons p
-                         WHERE d.person_id = p.person_id
-                           AND p.gst_registration_id = $1
                         """,
                         gst_id,
                     )

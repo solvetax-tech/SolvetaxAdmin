@@ -16,14 +16,14 @@ const TONE_MAP = {
   PENDING: 'warning', DATA_PENDING: 'warning', IN_PREPARATION: 'warning',
   IN_PROGRESS: 'warning', PROCESSING: 'warning', SCHEDULED: 'warning', PARTIAL: 'warning',
   FOLLOW_UP: 'warning', FOLLOWUP: 'warning', ON_HOLD: 'warning', PENDING_REGISTRATION_DATA: 'warning',
-  SCHEDULED_PAYMENTS: 'warning', LOW: 'warning',
+  SCHEDULED_PAYMENTS: 'warning', LOW: 'warning', PENDING_OTP: 'warning',
   // danger (red — "failed / stopped")
   MISSED: 'danger', FAILED: 'danger', REJECTED: 'danger', CANCELLED: 'danger',
   CANCELED: 'danger', INACTIVE: 'danger', OVERDUE: 'danger', EXPIRED: 'danger',
   NOT_INTERESTED: 'danger', DISABLED: 'danger', ERROR: 'danger', NO: 'danger', HIGH: 'danger',
   // info (blue — "new / neutral flow state")
   NEW: 'info', FRESH_LEAD: 'info', INTERESTED: 'info', CONTACTED: 'info', DRAFT: 'info',
-  NORMAL: 'info',
+  NORMAL: 'info', DATA_RECEIVED: 'info', READY_TO_FILE: 'info',
 };
 
 export function statusTone(value) {

@@ -25,27 +25,127 @@
 
 .customer-grid-template {
     display: grid !important;
-    --col-rm: minmax(130px, 0.8fr);
-    --col-op: minmax(130px, 0.8fr);
     grid-template-columns:
-        minmax(70px, 0.5fr)     /* 1. ID (Sticky) */
-        minmax(180px, 1.2fr)    /* 2. Full Name */
-        minmax(220px, 1.5fr)    /* 3. Email */
-        minmax(130px, 0.8fr)    /* 4. Mobile */
-        minmax(120px, 0.7fr)    /* 5. Referrer mobile */
-        minmax(200px, 1.2fr)    /* 6. Business Name */
-        minmax(160px, 1fr)      /* 7. Business Type */
-        minmax(140px, 0.9fr)    /* 8. State */
-        minmax(130px, 0.8fr)    /* 9. City */
-        var(--col-rm)           /* 10. RM */
-        var(--col-op)           /* 11. OP */
-        minmax(80px, 0.6fr)     /* 12. Active */
-        minmax(88px, 0.55fr);   /* 13. Actions (sticky right) */
+        66px                    /* 1. ID (Sticky) */
+        minmax(232px, 0.3fr)    /* 2. Customer — decreased; fits longest email ~208px */
+        minmax(115px, 0.45fr)   /* 3. Mobile — tight (widest "ref: …" 90px) */
+        minmax(240px, 1.0fr)    /* 4. Business — centered, wraps 2 lines (max-width on span) */
+        minmax(158px, 0.5fr)    /* 5. Service Required — decreased (clickable → drawer) */
+        minmax(112px, 0.4fr)    /* 6. Language — globe pill */
+        minmax(122px, 0.15fr)   /* 7. Location (city / state) — minimized */
+        minmax(118px, 0.15fr)   /* 8. Staff (RM / OP) — minimized */
+        92px                    /* 9. Active */
+        96px;                   /* 10. Actions (sticky right) */
 }
 
-/* An RM/OP doesn't need the column naming themselves — collapse its track. */
-.customer-grid-template.rmop-hide-rm { --col-rm: 0px; }
-.customer-grid-template.rmop-hide-op { --col-op: 0px; }
+/* Tight columns: Customer (2), Mobile (3), Language (6), Location (7), Staff (8)
+   get slimmer horizontal padding (header + body together) so they fit their
+   content snugly. Measured widest: email 208px, ref 90px, state 100px. */
+.customer-grid-template > :nth-child(2),
+.customer-grid-template > :nth-child(3),
+.customer-grid-template > :nth-child(6),
+.customer-grid-template > :nth-child(7),
+.customer-grid-template > :nth-child(8) {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+}
+
+/* Language — subtle globe pill. */
+.customer-grid-template > .cust-lang-cell { overflow: hidden; }
+.cust-lang-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    max-width: 100%;
+    font-size: 11px; font-weight: 600; color: var(--text-primary);
+    padding: 4px 10px; border-radius: var(--radius-pill, 999px);
+    background: rgba(var(--fg-rgb), 0.05);
+    border: 1px solid var(--border-subtle);
+    white-space: nowrap; overflow: hidden;
+}
+.cust-lang-pill svg { color: var(--text-secondary); flex-shrink: 0; }
+
+/* Two-line "Service / Required" header — tighter line-height so it stays compact. */
+.cust-svc-head { line-height: 1.15; }
+
+/* Business: just the name, centered, wrapping up to 2 lines (type removed). */
+.customer-grid-template .cust-biz-cell {
+    flex-direction: column;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    white-space: normal;
+    overflow: hidden;
+}
+.cust-biz-wrap {
+    display: block;
+    text-align: center;
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
+    line-height: 1.25;
+    white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+    max-width: 240px;         /* forces long names to wrap to 2 lines like GST,
+                                 independent of how wide the column stretches */
+    margin-left: auto; margin-right: auto;
+    max-height: 2.6em;        /* ~2 lines; longer names clip (full name on hover) */
+    overflow: hidden;
+}
+
+/* Service Required — a polished, obviously-clickable widget that opens the
+   right-side services drawer. Shows the first service as a dotted pill + a "+N"
+   badge for the rest, with a chevron that lights up on hover. */
+.customer-grid-template > .cust-service-cell { overflow: hidden; }
+.cust-svc-empty { color: var(--text-muted); }
+.cust-svc {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+    font-family: inherit; cursor: pointer;
+    padding: 4px 6px 4px 5px; border-radius: var(--radius-pill, 999px);
+    background: transparent; border: 1px solid transparent;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.cust-svc:hover {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cust-svc:active { transform: scale(0.98); }
+.cust-svc-tag {
+    display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+    font-size: 11px; font-weight: 600; color: var(--text-primary);
+    padding: 3px 9px; border-radius: var(--radius-pill, 999px);
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cust-svc-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cust-svc-more {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 800; color: var(--accent);
+    min-width: 22px; height: 19px; padding: 0 5px; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    flex-shrink: 0;
+}
+.cust-svc-arrow { color: var(--text-muted); flex-shrink: 0; opacity: 0.65; transition: color 0.15s ease, opacity 0.15s ease; }
+.cust-svc:hover .cust-svc-arrow { color: var(--accent); opacity: 1; }
+
+/* Two-line dense cells: primary value on top, muted context below. */
+.customer-grid-template .cust-stack {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 1px;
+    min-width: 0;
+    white-space: normal;
+}
+.cust-ellipsis,
+.cust-line-main,
+.cust-line-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cust-line-main { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+/* Secondary values (email, staff names, state) read as crisply as the primary
+   line — pure white on dark / pure black on light. Hierarchy is kept via the
+   smaller size + lighter weight, not by dimming the colour. */
+.cust-line-sub { font-size: 11px; font-weight: 500; color: var(--text-primary); }
+.cust-line-sub b { color: var(--accent); font-weight: 800; font-size: 9px; margin-right: 4px; letter-spacing: 0.04em; }
 
 .filings-ledger-header {
     display: flex;
@@ -284,6 +384,23 @@
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;
+}
+
+/* Header + footer stay fixed; the body scrolls when the service list is long. */
+.side-panel-drawer > .drawer-header,
+.side-panel-drawer > .drawer-footer {
+    flex: 0 0 auto;
+}
+.side-panel-drawer > .drawer-body {
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    /* CustomerServices.css sets a GLOBAL `.drawer-body { overflow: visible !important }`
+       (for its floating pickers) that otherwise wins the cascade and makes this drawer
+       unscrollable. This higher-specificity + !important rule restores the scroll. */
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) transparent;
 }
 
 .side-panel-footer {

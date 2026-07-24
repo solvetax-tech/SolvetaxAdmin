@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../utils/api';
-import { CheckCircle2, CreditCard, Eye, EyeOff, ExternalLink, Link2, Loader2, Pencil, RotateCcw, Search, X } from 'lucide-react';
+import { CheckCircle2, Copy, CreditCard, Eye, EyeOff, ExternalLink, Link2, Loader2, Pencil, RotateCcw, Search, X } from 'lucide-react';
 import AddDocumentLinkModal from '../gst_filings/AddDocumentLinkModal';
 import { fetchGstFilingMonthlyMatrix, parseGstFilingFocusFromSearch } from '../../utils/dashboardApi';
 import { patchReturnDetailStatus, resolveReturnDetailIdForForm } from '../../utils/gstFilingReturnApi';
@@ -332,6 +332,7 @@ function getRowFilingTarget(row, months) {
                 emailId: cell.filing_email_id || '',
                 username: cell.filing_username || '',
                 password: cell.filing_password || '',
+                mobile: row.mobile || '',
                 period,
             };
         }
@@ -347,7 +348,7 @@ function getRowFilingTarget(row, months) {
  * Editor for the portal login on one filing. PATCHes only the three credential
  * fields — GSTFilingEditIn is a partial update, so nothing else is touched.
  */
-function GfmIdentityEditor({ target, onClose, onSaved }) {
+export function GfmIdentityEditor({ target, onClose, onSaved }) {
     const [form, setForm] = useState({ email_id: '', username: '', password: '' });
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
@@ -491,11 +492,9 @@ function GfmIdentityEditor({ target, onClose, onSaved }) {
 }
 
 function GfmFilingIdentity({ target, onEdit }) {
-    const [revealed, setRevealed] = useState(false);
-
     if (!target) return null;
-    const { emailId, username, password } = target;
-    if (!emailId && !username && !password) {
+    const { emailId, username, password, mobile } = target;
+    if (!emailId && !username && !password && !mobile) {
         return (
             <button
                 type="button"
@@ -516,6 +515,12 @@ function GfmFilingIdentity({ target, onEdit }) {
                     <span className="gfm-identity-value">{emailId}</span>
                 </span>
             )}
+            {mobile && (
+                <span className="gfm-identity-row" title={mobile}>
+                    <span className="gfm-identity-label">Mobile</span>
+                    <span className="gfm-identity-value">{mobile}</span>
+                </span>
+            )}
             {username && (
                 <span className="gfm-identity-row" title={username}>
                     <span className="gfm-identity-label">User</span>
@@ -525,17 +530,15 @@ function GfmFilingIdentity({ target, onEdit }) {
             {password && (
                 <span className="gfm-identity-row">
                     <span className="gfm-identity-label">Pass</span>
-                    <span className="gfm-identity-value">
-                        {revealed ? password : '••••••••'}
-                    </span>
+                    <span className="gfm-identity-value">••••••••</span>
                     <button
                         type="button"
                         className="gfm-identity-icon-btn"
-                        title={revealed ? 'Hide password' : 'Reveal password'}
-                        aria-label={revealed ? 'Hide password' : 'Reveal password'}
-                        onClick={() => setRevealed((v) => !v)}
+                        title="Copy password"
+                        aria-label="Copy password"
+                        onClick={() => navigator.clipboard?.writeText(String(password || ''))}
                     >
-                        {revealed ? <EyeOff size={11} /> : <Eye size={11} />}
+                        <Copy size={11} />
                     </button>
                 </span>
             )}

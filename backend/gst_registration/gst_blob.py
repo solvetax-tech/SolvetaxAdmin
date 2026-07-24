@@ -31,8 +31,8 @@ async def _authorize_gst_blob_access(blob_url: str, role, emp_id) -> bool:
     Without this, any EMPLOYEE:READ holder could pass an arbitrary blob path
     (or a leaked/guessed one) to /view or /download and receive a working SAS
     URL to any document in the container (an IDOR over PII). We require the URL
-    to match a stored gst_registration_documents.document_url AND pass the same
-    RM/OP visibility scoping used by the document list endpoints.
+    to match a document_url stored in a person_document_details.documents entry
+    AND pass the same RM/OP visibility scoping used by the list endpoints.
     """
     role_norm = str(role).strip().upper() if role else None
     vis_sql, vis_vals, _ = build_gst_visibility(role_norm, emp_id, 2, DB_SCHEMA)
@@ -42,12 +42,13 @@ async def _authorize_gst_blob_access(blob_url: str, role, emp_id) -> bool:
         found = await conn.fetchval(
             f"""
             SELECT 1
-            FROM {DB_SCHEMA}.gst_registration_documents d
-            JOIN {DB_SCHEMA}.gst_registration_persons p
-              ON d.person_id = p.person_id
+            FROM {DB_SCHEMA}.person_document_details pdd
             JOIN {DB_SCHEMA}.gst_registration g
-              ON p.gst_registration_id = g.id
-            WHERE d.document_url = $1
+              ON pdd.gst_registration_id = g.id
+            WHERE EXISTS (
+                SELECT 1 FROM jsonb_array_elements(pdd.documents) doc
+                WHERE doc->>'document_url' = $1
+            )
             {vis_clause}
             LIMIT 1
             """,

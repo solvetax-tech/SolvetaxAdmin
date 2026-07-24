@@ -82,18 +82,21 @@
 }
 
 .itr-ledger-body {
-    --itr-col-1: 88px;   /* ID */
-    --itr-col-2: 168px;  /* Client Name */
-    --itr-col-3: 140px;  /* Mobile */
-    --itr-col-4: 160px;  /* PAN */
-    --itr-col-5: 190px;  /* FY (pills wrap) */
-    --itr-col-6: 140px;  /* State */
-    --itr-col-7: 220px;  /* Source (pills wrap) */
-    --itr-col-8: 130px;  /* Status */
-    --itr-col-9: 108px;  /* Record year */
-    --itr-col-10: 140px; /* RM */
-    --itr-col-11: 140px; /* OP */
-    --itr-col-12: 156px; /* Actions — snug fit for View + Edit + Record + Schedule Payment */
+    /* Dense combined-column ledger (mirrors GST Registrations / Customers). */
+    /* Content columns FLEX (minmax w/ fr) so the grid fills the container and the
+       sticky Actions pins to the far right — like the GST tables. */
+    --itr-col-1: 66px;                  /* ID (sticky) */
+    --itr-col-2: minmax(200px, 1.4fr);  /* Client (name / mobile) */
+    --itr-col-3: minmax(172px, 1fr);    /* PAN / State */
+    --itr-col-4: minmax(190px, 1fr);    /* Financial Years (chips) */
+    --itr-col-5: minmax(224px, 1.3fr);  /* Income Source (chips) */
+    --itr-col-6: minmax(120px, 0.6fr);  /* Status */
+    --itr-col-7: minmax(100px, 0.5fr);  /* Record Year */
+    --itr-col-8: minmax(130px, 0.7fr);  /* Staff (RM / OP) */
+    --itr-col-9: 100px;                 /* Actions (sticky) — 2-row compact like GST */
+    --itr-col-10: 0px;   /* removed */
+    --itr-col-11: 0px;   /* removed */
+    --itr-col-12: 0px;   /* removed */
 
     overflow-x: auto;
     overflow-y: visible;
@@ -149,7 +152,7 @@
         var(--itr-col-12) !important;
     width: fit-content !important;
     min-width: 100% !important;
-    height: 56px;
+    min-height: 56px;
     border-bottom: 1px solid var(--border-subtle);
     transition: background 0.2s;
     gap: 0 !important;
@@ -188,25 +191,39 @@
     font-variant: normal;
 }
 
-/* FY & income source columns — pills stay on one row inside compact cell */
+/* Dense two-line cells (mirrors gstreg-stack). */
+.itr-ledger-cell.itr-stack {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 2px;
+    white-space: normal;
+}
+.itr-main,
+.itr-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.itr-main { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.itr-sub { font-size: 11px; font-weight: 500; color: var(--text-primary); display: inline-flex; align-items: center; }
+.itr-sub b { color: var(--accent); font-weight: 800; font-size: 9px; margin-right: 5px; letter-spacing: 0.04em; }
+
+/* FY & income source columns — pills WRAP onto multiple lines (row grows). */
 .itr-ledger-cell.itr-ledger-fy-cell,
 .itr-ledger-cell.itr-ledger-source-cell {
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
+    white-space: normal !important;
+    overflow: visible !important;
     align-items: center !important;
-    padding: 0 16px !important;
+    padding: 8px 16px !important;
 }
 
 .itr-source-pills {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 4px;
     justify-content: flex-start;
     align-items: center;
+    align-content: center;
     max-width: 100%;
     width: 100%;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .itr-source-pill {
@@ -842,8 +859,19 @@
     justify-content: center !important;
 }
 
+/* Actions: 2-row compact wrap like GST Portal (3 on top, rest below). */
 .itr-actions-cell .gst-action-buttons {
-    gap: 6px;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+    gap: 4px;
+    max-width: 100%;
+}
+.itr-actions-cell .btn-view-action,
+.itr-actions-cell .btn-edit-action {
+    width: 22px !important;
+    height: 22px !important;
+    border-radius: 6px;
 }
 
 .btn-view-action,

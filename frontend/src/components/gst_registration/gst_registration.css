@@ -882,32 +882,112 @@
 
 .gst-reg-grid-template {
     display: grid !important;
-    --col-rm: minmax(140px, 1fr);
-    --col-op: minmax(140px, 1fr);
     grid-template-columns:
-        70px                    /* 1. ID (Sticky) */
-        90px                    /* 2. Customer ID (Sticky) */
-        minmax(120px, 0.8fr)    /* 3. Username */
-        minmax(120px, 0.8fr)    /* 4. Password */
-        minmax(150px, 1fr)      /* 5. GSTIN */
-        minmax(200px, 1.2fr)    /* 6. Business Name */
-        minmax(120px, 0.8fr)    /* 7. Reg Type */
-        minmax(140px, 0.9fr)    /* 8. Ownership */
-        minmax(140px, 0.9fr)    /* 9. Business Type */
-        minmax(140px, 0.9fr)    /* 10. State */
-        minmax(100px, 0.7fr)    /* 11. Filing Pref */
-        var(--col-rm)           /* 12. RM Name */
-        var(--col-op)           /* 13. Assigned OP */
-        156px;                  /* 14. Actions — snug fit for View + Edit + Record + Schedule Payment */
+        66px                    /* 1. ID — sticky */
+        165px                   /* 2. GSTIN — gstin + state sub (Title Case) */
+        minmax(174px, 0.95fr)   /* 3. Login — tight fit: widest username 149px + 20px padding + margin */
+        minmax(132px, 0.8fr)    /* 4. PAN / Mobile — 10-char PAN + 10-digit mobile (roomier) */
+        minmax(200px, 1.5fr)    /* 5. Business — grows; wraps to 2 lines */
+        minmax(206px, 1.05fr)   /* 6. Category — fits "REGULAR · LESS_THAN_2CR" full */
+        minmax(106px, 0.6fr)    /* 7. Reg. Status — pill (tightened) */
+        minmax(120px, 0.62fr)   /* 8. Staff — min sized to fit "OP Mounika", no clip */
+        minmax(300px, 2.3fr)    /* 9. Email — email / secondary email (scroll region) */
+        minmax(102px, 0.6fr)    /* 10. Filing — pref / NEEDED / RCM */
+        minmax(96px, 0.5fr)     /* 11. Active — tight fit: INACTIVE pill 71px + 20px padding + margin */
+        94px;                   /* 12. Actions — sticky right */
     gap: 0 !important;
     grid-column-gap: 0 !important;
     width: fit-content !important;
     min-width: 100% !important;
 }
 
-/* An RM/OP doesn't need the column naming themselves — collapse its track. */
-.gst-reg-grid-template.rmop-hide-rm { --col-rm: 0px; }
-.gst-reg-grid-template.rmop-hide-op { --col-op: 0px; }
+/* Two-line dense cells: primary value on top, muted context below. */
+.gst-reg-grid-template .gstreg-stack {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 1px;
+    min-width: 0;
+    white-space: normal;
+}
+.gstreg-main,
+.gstreg-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gstreg-main { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+/* Secondary values read as crisply as the primary line — pure per theme.
+   Hierarchy stays via size/weight, not by dimming the colour. */
+.gstreg-sub { font-size: 11px; font-weight: 500; color: var(--text-primary); }
+.gstreg-sub b { color: var(--accent); font-weight: 800; font-size: 9px; margin-right: 4px; letter-spacing: 0.04em; }
+
+/* Business name wraps onto multiple lines instead of truncating. Plain block
+   wrapping (NOT -webkit-line-clamp, which mis-reports its height inside a flex
+   column and makes the type line overlap the name's 2nd line). */
+.gstreg-wrap {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    max-width: 100%;
+    font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+    line-height: 1.28;
+}
+
+/* Tighten row cell padding so a wrapped business name + its type line both fit. */
+.gst-reg-grid-template .filings-ledger-cell {
+    padding-top: 7px !important;
+    padding-bottom: 7px !important;
+}
+
+/* Business column: just the business name, centered, free to use the full cell
+   height (the "type:" line was removed). */
+.gst-reg-grid-template .gstreg-biz-cell {
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+}
+.gstreg-biz-cell .gstreg-wrap {
+    text-align: center;
+    font-size: 12.5px;
+    line-height: 1.25;
+    max-height: 3.75em;   /* up to ~3 lines; longer names clip (full name on hover) */
+    overflow: hidden;
+}
+
+/* Login password: masked dots + copy button. */
+.gstreg-pass { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); letter-spacing: 1.5px; }
+.gstreg-copy {
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; background: transparent; color: var(--text-muted);
+    cursor: pointer; padding: 2px; border-radius: 4px; letter-spacing: 0;
+}
+.gstreg-copy:hover { color: var(--accent); background: rgba(var(--fg-rgb), 0.06); }
+
+/* Registration status — colour-coded pill. */
+.gstreg-status {
+    display: inline-flex; align-items: center;
+    padding: 3px 9px; border-radius: var(--radius-pill, 999px);
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    white-space: nowrap; border: 1px solid transparent; line-height: 1.4;
+}
+.gstreg-status--draft {
+    color: var(--text-secondary);
+    background: rgba(var(--fg-rgb), 0.08);
+    border-color: rgba(var(--fg-rgb), 0.2);
+}
+.gstreg-status--approved {
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+    border-color: color-mix(in srgb, var(--success) 32%, transparent);
+}
+.gstreg-status--suspended {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 32%, transparent);
+}
+.gstreg-status--cancelled {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+}
 
 .gst-people-grid-template {
     display: grid !important;
@@ -1039,16 +1119,28 @@
     position: sticky !important;
     left: 0 !important;
     z-index: 5 !important;
-    min-width: 70px !important;
-    max-width: 70px !important;
+    min-width: 66px !important;
+    max-width: 66px !important;
     border-right: 1px solid var(--border-subtle) !important;
     background: var(--bg-surface) !important;
 }
 
-/* Customer ID is a normal scrolling column now — only the ID column stays frozen. */
+/* Column 2 is GSTIN now — let it follow the grid track (no fixed cap). */
 .gst-reg-grid-template > :nth-child(2) {
-    min-width: 90px !important;
-    max-width: 90px !important;
+    min-width: 0 !important;
+    max-width: none !important;
+}
+
+/* Tighter horizontal padding so these columns can be as narrow as possible
+   without clipping. Applied to header + body together to keep them aligned.
+   Measured widest values: GSTIN 128px, username 149px, QUARTERLY 75px,
+   INACTIVE pill 71px. */
+.gst-reg-grid-template > :nth-child(2),   /* GSTIN */
+.gst-reg-grid-template > :nth-child(3),   /* Login */
+.gst-reg-grid-template > :nth-child(10),  /* Filing */
+.gst-reg-grid-template > :nth-child(11) { /* Active */
+    padding-left: 10px !important;
+    padding-right: 10px !important;
 }
 
 .filings-ledger-header {
@@ -1093,11 +1185,30 @@
     position: sticky !important;
     right: 0 !important;
     z-index: 6 !important;
-    min-width: 88px !important;
-    max-width: 88px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
+    flex-wrap: wrap !important;
+    align-content: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
     background-color: var(--bg-surface) !important;
     border-left: 1px solid var(--border-subtle) !important;
     box-shadow: none;
+}
+
+/* Compact action icons → up to 5 wrap into two rows (3 on top, 2 below),
+   contained within the row height so nothing spills into neighbouring rows. */
+.gst-reg-grid-template .gst-sticky-actions button {
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    padding: 0 !important;
+    flex: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }
 
 .filings-ledger-header.gst-reg-grid-template .gst-sticky-actions {

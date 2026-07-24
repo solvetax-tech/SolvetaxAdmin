@@ -37,14 +37,17 @@ const RECORD_YEAR_OPTIONS = (() => {
     return Array.from({ length: 8 }, (_, i) => current - i);
 })();
 
+/** Title Case: JAMMU_AND_KASHMIR → Jammu And Kashmir. */
+const titleCase = (str) => (str ? String(str).toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : str);
+
 const ITRTableSkeleton = ({ rows = 12, rmOpCols = {} }) => (
     <>
         {[...Array(rows)].map((_, rowIndex) => (
             <div key={`itr-skeleton-${rowIndex}`} className="itr-ledger-row itr-skeleton-row">
-                {[...Array(12)].map((__, columnIndex) => (
+                {[...Array(9)].map((__, columnIndex) => (
                     <div
                         key={`itr-skeleton-cell-${columnIndex}`}
-                        className={`itr-ledger-cell${columnIndex === 0 ? ' itr-ledger-sticky-id' : ''}${columnIndex === 11 ? ' itr-ledger-sticky-actions' : ''}${columnIndex === 9 ? ` ${rmOpCols.rmCellClass || ''}` : ''}${columnIndex === 10 ? ` ${rmOpCols.opCellClass || ''}` : ''}`}
+                        className={`itr-ledger-cell${columnIndex === 0 ? ' itr-ledger-sticky-id' : ''}${columnIndex === 8 ? ' itr-ledger-sticky-actions' : ''}`}
                     >
                         <div className="itr-skeleton-bar" />
                     </div>
@@ -739,16 +742,13 @@ export const IncomeTax = ({ profileData }) => {
                     {/* Header - Always visible */}
                     <div className="itr-ledger-row itr-ledger-header">
                         <div className="itr-ledger-cell itr-ledger-sticky-id">ID</div>
-                        <div className="itr-ledger-cell">Client Name</div>
-                        <div className="itr-ledger-cell">Mobile</div>
-                        <div className="itr-ledger-cell">PAN Number</div>
+                        <div className="itr-ledger-cell">Client</div>
+                        <div className="itr-ledger-cell">PAN / State</div>
                         <div className="itr-ledger-cell">Financial Years</div>
-                        <div className="itr-ledger-cell">State</div>
                         <div className="itr-ledger-cell">Income Source</div>
                         <div className="itr-ledger-cell">Status</div>
                         <div className="itr-ledger-cell">Record Year</div>
-                        <div className={`itr-ledger-cell ${rmOpCols.rmCellClass}`}>RM</div>
-                        <div className={`itr-ledger-cell ${rmOpCols.opCellClass}`}>OP</div>
+                        <div className="itr-ledger-cell">Staff</div>
                         <div className="itr-ledger-cell itr-ledger-sticky-actions">Actions</div>
                     </div>
 
@@ -763,28 +763,34 @@ export const IncomeTax = ({ profileData }) => {
                                         key={item.id}
                                         className={`itr-ledger-row ${!item.is_active ? 'inactive-row' : ''}`}
                                     >
-                                        <div className="itr-ledger-cell id-cell-v4 itr-ledger-sticky-id">{item.id}</div>
-                                        <div className="itr-ledger-cell itr-ledger-client-cell">
-                                            <span>{item.client_name}</span>
+                                        <div className="itr-ledger-cell id-cell-v4 itr-ledger-sticky-id"><button type="button" className="row-id-link" title="View record" onClick={(e) => { e.stopPropagation(); openDetailsDrawer(item); }}>{item.id}</button></div>
+                                        <div className="itr-ledger-cell itr-stack itr-ledger-client-cell" title={item.client_name || ''}>
+                                            <span className="itr-main">{titleCase(item.client_name) || '-'}</span>
+                                            <span className="itr-sub">{item.mobile || '—'}</span>
                                             {item.is_active === false && (
                                                 <span className="itr-record-status-pill itr-record-status-pill--inactive">Inactive</span>
                                             )}
                                         </div>
-                                        <div className="itr-ledger-cell">{item.mobile || '-'}</div>
-                                        <div className="itr-ledger-cell gstin-cell">{item.pan_number || '-'}</div>
+                                        <div className="itr-ledger-cell itr-stack gstin-cell" title={`${item.pan_number || '-'}${item.state ? ' · ' + titleCase(item.state) : ''}`}>
+                                            <span className="itr-main">{item.pan_number || '-'}</span>
+                                            <span className="itr-sub">{item.state ? titleCase(item.state) : '—'}</span>
+                                        </div>
                                         <div className="itr-ledger-cell itr-ledger-fy-cell">
                                             <FinancialYearPills value={item.financial_year} />
                                         </div>
-                                        <div className="itr-ledger-cell">{item.state || '-'}</div>
                                         <div className="itr-ledger-cell itr-ledger-source-cell">
                                             <IncomeSourcePills value={item.source_of_income} />
                                         </div>
-                                        <div className="itr-ledger-cell">{getStatusPill(item.filed_status)}</div>
+                                        <div className="itr-ledger-cell">
+                                            {getStatusPill(item.filed_status)}
+                                        </div>
                                         <div className="itr-ledger-cell itr-ledger-record-year-cell">
                                             <RecordYearBadge year={item.year} />
                                         </div>
-                                        <div className={`itr-ledger-cell ${rmOpCols.rmCellClass}`}>{getRMUsername(item.rm_id, item.rm_name)}</div>
-                                        <div className={`itr-ledger-cell ${rmOpCols.opCellClass}`}>{getOPUsername(item.op_id, item.op_name)}</div>
+                                        <div className="itr-ledger-cell itr-stack">
+                                            {rmOpCols.showRmColumn && <span className="itr-sub"><b>RM</b>{getRMUsername(item.rm_id, item.rm_name)}</span>}
+                                            {rmOpCols.showOpColumn && <span className="itr-sub"><b>OP</b>{getOPUsername(item.op_id, item.op_name)}</span>}
+                                        </div>
                                         <div
                                             className="itr-ledger-cell itr-actions-cell itr-ledger-sticky-actions"
                                         >

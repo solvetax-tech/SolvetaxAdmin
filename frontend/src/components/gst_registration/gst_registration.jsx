@@ -32,7 +32,7 @@ import LoadingOverlay from '../common/LoadingOverlay';
 import Pagination from '../common/Pagination';
 import '../common/Filters.css';
 import FilterDateInput from '../common/FilterDateInput';
-import { Filter, X, RotateCcw, Plus, AlertCircle, CheckCircle2, Users, FileText, LayoutDashboard, Eye, Pencil, CalendarClock, CreditCard, FilePlus } from 'lucide-react';
+import { Filter, X, RotateCcw, Plus, AlertCircle, CheckCircle2, Users, FileText, LayoutDashboard, Eye, Pencil, CalendarClock, CreditCard, FilePlus, Copy } from 'lucide-react';
 import Button from '../ui/Button';
 import {
     buildGstCrmLeadActionSearchParams,
@@ -53,8 +53,7 @@ import FormCustomSelect from '../common/FormCustomSelect';
 import { optionsFromConfig, optionsFromPairs } from '../common/selectOptionUtils';
 import { sanitizeGovIdInput } from '../../utils/inputSanitizers';
 import GSTRegistrationSignup from './GSTRegistrationSignup';
-import { GSTPeople } from './gst_people';
-import { GSTDocuments } from './gst_documents';
+import { GSTPeopleDocuments } from './GSTPeopleDocuments';
 import { TableSkeleton } from '../gst_filings/gst_filings';
 import '../gst_filings/gst_filings.css';
 import GSTRegistrationViewPanel from './GSTRegistrationViewPanel';
@@ -135,7 +134,8 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
     const rmOpCols = getRmOpColumnVisibility(profileData);
     const navigate = useNavigate();
     const location = useLocation();
-    const [activeTab, setActiveTab] = useState(initialSubTab || 'registrations');
+    // 'documents' is legacy — People and Documents are one screen now.
+    const [activeTab, setActiveTab] = useState((initialSubTab === 'documents' ? 'people' : initialSubTab) || 'registrations');
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -152,7 +152,6 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
     const [viewRecordId, setViewRecordId] = useState(null);
     const rowsPerPage = 20;
     const [peopleToolbar, setPeopleToolbar] = useState(null);
-    const [documentsToolbar, setDocumentsToolbar] = useState(null);
 
     const [configs, setConfigs] = useState({
         registrationTypes: [],
@@ -238,9 +237,9 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
     const GstRegTableSkeleton = () => (
         <div className="filings-ledger-body">
             {[...Array(12)].map((_, i) => (
-                <div key={i} className={`filings-ledger-row gst-reg-grid-template ${rmOpCols.containerClass}`}>
-                    {[...Array(14)].map((_, j) => (
-                        <div key={j} className={`filings-ledger-cell ${j === 11 ? rmOpCols.rmCellClass : ''}${j === 12 ? rmOpCols.opCellClass : ''}`}>
+                <div key={i} className="filings-ledger-row gst-reg-grid-template">
+                    {[...Array(12)].map((_, j) => (
+                        <div key={j} className="filings-ledger-cell">
                             <div className="filings-ledger-skeleton-bar" />
                         </div>
                     ))}
@@ -256,8 +255,9 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
     }, [fetchGstData, activeTab]);
 
     useEffect(() => {
-        if (initialSubTab && initialSubTab !== activeTab) {
-            setActiveTab(initialSubTab);
+        const normalized = initialSubTab === 'documents' ? 'people' : initialSubTab;
+        if (normalized && normalized !== activeTab) {
+            setActiveTab(normalized);
         }
     }, [initialSubTab]);
 
@@ -618,6 +618,14 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
         }
     };
 
+    // Title Case: JAMMU_AND_KASHMIR → Jammu And Kashmir, DSANGFDH NXZB → Dsangfdh Nxzb.
+    const titleCase = (str) => (str ? String(str).toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : str);
+    // State shown under the GSTIN — config display name, else Title Case the raw value.
+    const stateLabel = (st) => {
+        if (!st) return '—';
+        return configs.states?.find(s => s.value === st)?.display_name || titleCase(st);
+    };
+
     const getRmDisplayName = (item) => {
         if (item?.rm_username) return item.rm_username;
         if (item?.rm_name) return item.rm_name;
@@ -660,14 +668,7 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                     onClick={() => setActiveTab('people')}
                 >
                     <Users size={14} />
-                    <span>People</span>
-                </button>
-                <button
-                    className={`sub-nav-btn-v4 ${activeTab === 'documents' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('documents')}
-                >
-                    <FileText size={14} />
-                    <span>Documents</span>
+                    <span>People &amp; Documents</span>
                 </button>
             </div>
 
@@ -691,14 +692,11 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                     </>
                     )}
                     {activeTab === 'people' && peopleToolbar}
-                    {activeTab === 'documents' && documentsToolbar}
                 </div>
             </div>
 
             {activeTab === 'people' ? (
-                <GSTPeople handleLogout={handleLogout} isAdmin={isAdmin} profileData={profileData} onRenderToolbar={setPeopleToolbar} />
-            ) : activeTab === 'documents' ? (
-                <GSTDocuments handleLogout={handleLogout} isAdmin={isAdmin} profileData={profileData} onRenderToolbar={setDocumentsToolbar} />
+                <GSTPeopleDocuments isAdmin={isAdmin} profileData={profileData} onRenderToolbar={setPeopleToolbar} />
             ) : (
                 <div className="gst-registration-container">
                     {hasActiveRegFilters && (
@@ -731,20 +729,18 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                     <main className="gst-main-content-table">
                         <div className="gst-table-wrapper gst-table-wrapper--portal">
                             <div className="gst-table-container gst-table-container--portal">
-                                <div className={`filings-ledger-header gst-reg-grid-template ${rmOpCols.containerClass}`}>
+                                <div className="filings-ledger-header gst-reg-grid-template">
                                     <div className="filings-ledger-header-cell">ID</div>
-                                    <div className="filings-ledger-header-cell">Customer ID</div>
-                                    <div className="filings-ledger-header-cell">Username</div>
-                                    <div className="filings-ledger-header-cell">Password</div>
-                                    <div className="filings-ledger-header-cell gst-ledger-gstin-header">GSTIN</div>
-                                    <div className="filings-ledger-header-cell">Business Name</div>
-                                    <div className="filings-ledger-header-cell">Reg Type</div>
-                                    <div className="filings-ledger-header-cell">Ownership</div>
-                                    <div className="filings-ledger-header-cell">Business Type</div>
-                                    <div className="filings-ledger-header-cell">State</div>
-                                    <div className="filings-ledger-header-cell">Filing Pref</div>
-                                    <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM Name</div>
-                                    <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>Assigned OP</div>
+                                    <div className="filings-ledger-header-cell">GSTIN</div>
+                                    <div className="filings-ledger-header-cell">Login</div>
+                                    <div className="filings-ledger-header-cell">PAN / Mobile</div>
+                                    <div className="filings-ledger-header-cell">Business</div>
+                                    <div className="filings-ledger-header-cell">Category</div>
+                                    <div className="filings-ledger-header-cell">Reg. Status</div>
+                                    <div className="filings-ledger-header-cell">Staff</div>
+                                    <div className="filings-ledger-header-cell">Email / Cst. Email</div>
+                                    <div className="filings-ledger-header-cell">Filing</div>
+                                    <div className="filings-ledger-header-cell">Active</div>
                                     <div className="filings-ledger-header-cell gst-sticky-actions" style={{ justifyContent: 'center' }}>Actions</div>
                                 </div>
                                 {loading ? (
@@ -765,25 +761,71 @@ export const GSTRegistration = ({ handleLogout, isAdmin, profileData, initialSub
                                 ) : (
                                     <div className="filings-ledger-body">
                                         {data.map((item, idx) => (
-                                            <div 
-                                                key={idx} 
-                                                className={`filings-ledger-row gst-reg-grid-template gst-table-row gst-table-row--static ${rmOpCols.containerClass}`}
+                                            <div
+                                                key={idx}
+                                                className="filings-ledger-row gst-reg-grid-template gst-table-row gst-table-row--static"
                                             >
-                                                <div className="filings-ledger-cell gst-reg-id-cell">{item.id}</div>
-                                                <div className="filings-ledger-cell">
-                                                    {item.customer_id ?? '-'}
+                                                <div className="filings-ledger-cell gst-reg-id-cell"><button type="button" className="row-id-link" title="View registration" onClick={(e) => { e.stopPropagation(); setViewRecordId(item.id); setViewModalOpen(true); }}>{item.id}</button></div>
+                                                <div className="filings-ledger-cell gstreg-stack" title={`${item.gstin || '-'}${item.state ? ' · ' + stateLabel(item.state) : ''}`}>
+                                                    <span className="gstreg-main">{item.gstin || '-'}</span>
+                                                    <span className="gstreg-sub">{stateLabel(item.state)}</span>
                                                 </div>
-                                                <div className="filings-ledger-cell" title={item.username || ''}>{item.username || '-'}</div>
-                                                <div className="filings-ledger-cell" title={item.password || ''}>{item.password || '-'}</div>
-                                                <div className="filings-ledger-cell" style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{item.gstin}</div>
-                                                <div className="filings-ledger-cell ledger-cell-longtext" style={{ fontWeight: '600' }} title={item.business_name || item.legal_name || item.username || ''}>{item.business_name || item.legal_name || item.username || '-'}</div>
-                                                <div className="filings-ledger-cell" title={item.registration_type || ''}>{item.registration_type || '-'}</div>
-                                                <div className="filings-ledger-cell" title={item.ownership_category || ''}>{item.ownership_category || '-'}</div>
-                                                <div className="filings-ledger-cell" title={item.business_type || ''}>{item.business_type || '-'}</div>
-                                                <div className="filings-ledger-cell">{item.state || '-'}</div>
-                                                <div className="filings-ledger-cell">{item.filing_preference || '-'}</div>
-                                                <div className={`filings-ledger-cell ${rmOpCols.rmCellClass}`} title={getRmDisplayName(item)}>{getRmDisplayName(item)}</div>
-                                                <div className={`filings-ledger-cell ${rmOpCols.opCellClass}`} title={item.created_by_name || item.op_name || ''}>{getOpDisplayName(item)}</div>
+                                                <div className="filings-ledger-cell gstreg-stack" title={item.username || ''}>
+                                                    <span className="gstreg-main">{item.username || '-'}</span>
+                                                    {item.password ? (
+                                                        <span className="gstreg-pass">
+                                                            <span>••••••••</span>
+                                                            <button
+                                                                type="button"
+                                                                className="gstreg-copy"
+                                                                title="Copy password"
+                                                                onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(String(item.password || '')); }}
+                                                            >
+                                                                <Copy size={11} />
+                                                            </button>
+                                                        </span>
+                                                    ) : (
+                                                        <span className="gstreg-sub">—</span>
+                                                    )}
+                                                </div>
+                                                <div className="filings-ledger-cell gstreg-stack" title={`PAN ${item.pan || '-'} · Mobile ${item.mobile || '-'}`}>
+                                                    <span className="gstreg-main">{item.pan || '-'}</span>
+                                                    <span className="gstreg-sub">{item.mobile || '—'}</span>
+                                                </div>
+                                                <div className="filings-ledger-cell gstreg-stack gstreg-biz-cell" title={item.business_name || item.legal_name || item.username || ''}>
+                                                    <span className="gstreg-wrap">{titleCase(item.business_name || item.legal_name || item.username || '-')}</span>
+                                                </div>
+                                                <div className="filings-ledger-cell gstreg-stack">
+                                                    <span className="gstreg-main">{titleCase(item.ownership_category || '-')}</span>
+                                                    <span className="gstreg-sub">{[item.registration_type, item.turnover_details].filter(Boolean).map(titleCase).join(' · ') || '—'}</span>
+                                                </div>
+                                                <div className="filings-ledger-cell">
+                                                    {item.registration_status ? (
+                                                        <span className={`gstreg-status gstreg-status--${String(item.registration_status).toLowerCase()}`}>
+                                                            {item.registration_status}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="gstreg-sub">—</span>
+                                                    )}
+                                                </div>
+                                                <div className="filings-ledger-cell gstreg-stack">
+                                                    {rmOpCols.showRmColumn && <span className="gstreg-sub"><b>RM</b>{getRmDisplayName(item)}</span>}
+                                                    {rmOpCols.showOpColumn && <span className="gstreg-sub"><b>OP</b>{getOpDisplayName(item)}</span>}
+                                                </div>
+                                                <div className="filings-ledger-cell gstreg-stack" title={`${item.email || ''}${item.secondary_email ? ' · ' + item.secondary_email : ''}`}>
+                                                    <span className="gstreg-main">{item.email || '—'}</span>
+                                                    <span className="gstreg-sub">{item.secondary_email || '—'}</span>
+                                                </div>
+                                                <div className="filings-ledger-cell gstreg-stack">
+                                                    <span className="gstreg-main">{item.filing_preference || '—'}</span>
+                                                    <span className="gstreg-sub"><b>NEEDED</b>{item.is_filing_needed ? 'Yes' : 'No'}</span>
+                                                    <span className="gstreg-sub"><b>RCM</b>{item.is_rcm_applicable ? 'Yes' : 'No'}</span>
+                                                </div>
+                                                <div className="filings-ledger-cell">
+                                                    <span className={`gstreg-status gstreg-status--${item.is_active ? 'approved' : 'cancelled'}`}>
+                                                        {item.is_active ? 'ACTIVE' : 'INACTIVE'}
+                                                    </span>
+                                                </div>
                                                 <div className="filings-ledger-cell gst-action-buttons gst-sticky-actions" style={{ justifyContent: 'center' }}>
                                                     <button 
                                                         className="btn-view-action" 

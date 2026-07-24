@@ -748,3 +748,103 @@ class RegistrationDocumentOut(BaseSchema):
     updated_at: datetime
     is_active: bool
     message: Optional[str] = None
+
+
+# =========================================================================== #
+# person_document_details — one person + their documents (documents inline as
+# a JSONB array). Replaces RegistrationPerson* + RegistrationDocument* schemas.
+# =========================================================================== #
+
+class PersonDocumentItem(BaseSchema):
+    """One uploaded document. The type IS the name; nothing else is stored."""
+    document_type: str = Field(..., min_length=2, max_length=50)
+    document_url: HttpUrl
+
+    @field_validator("document_type", mode="before")
+    @classmethod
+    def _normalize_document_type(cls, v):
+        if isinstance(v, str):
+            return html.escape(v.strip().upper())
+        return v
+
+
+class PersonWithDocumentsIn(BaseSchema):
+    """Create a person and their whole document set in one save."""
+    gst_registration_id: int = Field(..., gt=0)
+
+    full_name: str = Field(..., min_length=2, max_length=150)
+    designation: str = Field(..., min_length=2, max_length=100)
+
+    phone: Optional[str] = Field(None, pattern=r"^\d{10}$")
+    email: Optional[EmailStr] = None
+    pan: Optional[str] = Field(None, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+    aadhaar: Optional[str] = Field(None, pattern=r"^\d{12}$")
+
+    is_primary: bool = False
+
+    documents: List[PersonDocumentItem] = Field(default_factory=list)
+
+    @field_validator("pan", mode="before")
+    @classmethod
+    def _norm_pan(cls, v):
+        return v.strip().upper() if v else v
+
+    @field_validator("aadhaar", "phone", mode="before")
+    @classmethod
+    def _norm_numeric(cls, v):
+        return v.strip() if v else v
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _norm_email(cls, v):
+        return v.strip().lower() if v else v
+
+    @field_validator("full_name", "designation", mode="before")
+    @classmethod
+    def _sanitize(cls, v):
+        return html.escape(v.strip()) if isinstance(v, str) else v
+
+
+class PersonWithDocumentsEditIn(BaseSchema):
+    """Edit person fields only. Documents are managed via the document endpoints."""
+    full_name: Optional[str] = Field(None, min_length=2, max_length=150)
+    designation: Optional[str] = Field(None, min_length=2, max_length=100)
+    phone: Optional[Annotated[str, Field(pattern=r"^\d{10}$")]] = None
+    email: Optional[EmailStr] = None
+    pan: Optional[Annotated[str, Field(pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")]] = None
+    aadhaar: Optional[Annotated[str, Field(pattern=r"^\d{12}$")]] = None
+    is_primary: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("pan", mode="before")
+    @classmethod
+    def _norm_pan(cls, v):
+        return v.strip().upper() if v else v
+
+    @field_validator("aadhaar", "phone", mode="before")
+    @classmethod
+    def _norm_numeric(cls, v):
+        return v.strip() if v else v
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _norm_email(cls, v):
+        return v.strip().lower() if v else v
+
+    @field_validator("full_name", "designation", mode="before")
+    @classmethod
+    def _sanitize(cls, v):
+        return html.escape(v.strip()) if isinstance(v, str) else v
+
+
+class DocumentUpsertIn(BaseSchema):
+    """Add or replace one document (upsert by document_type) on a person."""
+    document_type: str = Field(..., min_length=2, max_length=50)
+    document_url: HttpUrl
+
+    @field_validator("document_type", mode="before")
+    @classmethod
+    def _normalize_document_type(cls, v):
+        if isinstance(v, str):
+            return html.escape(v.strip().upper())
+        return v

@@ -791,7 +791,7 @@ import mimetypes
 AZURE_SAS_EXPIRY_MINUTES = int(os.getenv("AZURE_SAS_EXPIRY_MINUTES", 15))
 
 
-def generate_blob_sas_url(blob_path: str, disposition: str = "inline") -> str:
+def generate_blob_sas_url(blob_path: str, disposition: str = "inline", download_filename: str = None) -> str:
 
     blob_service_client = get_blob_service_client()
 
@@ -803,7 +803,16 @@ def generate_blob_sas_url(blob_path: str, disposition: str = "inline") -> str:
 
     # Set content disposition
     if disposition == "attachment":
-        content_disposition = f'attachment; filename="{filename}"'
+        # Prefer an explicit caller-supplied download name (e.g. the document
+        # type), but keep the real file extension. Sanitize to prevent header
+        # injection via the Content-Disposition filename.
+        if download_filename:
+            ext = filename.rsplit(".", 1)[-1] if "." in filename else ""
+            base = download_filename.strip().replace("\r", "").replace("\n", "").replace('"', "")
+            dl_name = f"{base}.{ext}" if ext and not base.lower().endswith(f".{ext.lower()}") else base
+        else:
+            dl_name = filename
+        content_disposition = f'attachment; filename="{dl_name}"'
     else:
         content_disposition = "inline"
 

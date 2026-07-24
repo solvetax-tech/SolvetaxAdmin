@@ -26,8 +26,7 @@ import './common/CustomSelect.css';
 import { GSTRegistration } from './gst_registration/gst_registration';
 import { GSTFilings } from './gst_filings/gst_filings';
 import { IncomeTax } from './income_tax/IncomeTax';
-import { GSTPeople } from './gst_registration/gst_people';
-import { GSTDocuments } from './gst_registration/gst_documents';
+// GST People & Documents are merged into gst_registration's GSTPeopleDocuments.
 import Employee from './employees/Employee';
 import Customer from './customers/Customer';
 import { Payments } from './payments/Payments';

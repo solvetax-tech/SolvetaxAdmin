@@ -17,3 +17,6 @@ migrations:
   - version: "V001"
     name: "baseline"
     script: "V001__baseline.sql"
+  - version: "V002"
+    name: "gst_person_document_details"
+    script: "V002__gst_person_document_details.sql"

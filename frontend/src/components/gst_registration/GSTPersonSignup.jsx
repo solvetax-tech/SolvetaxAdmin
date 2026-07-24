@@ -40,7 +40,7 @@ const GSTPersonSignup = () => {
         }
         setFetchingDesignations(true);
         try {
-            const res = await api.get(`/api/v1/gst-people/gst-registration/${gstId}/designations`);
+            const res = await api.get(`/api/v1/person-document-details/gst-registration/${gstId}/designations`);
             setDesignations(res.data.designations || []);
         } catch (err) {
             console.error("Error fetching designations:", err);
@@ -147,21 +147,21 @@ const GSTPersonSignup = () => {
         setLoading(true);
 
         try {
-            const rawPayload = {
-                ...formData,
+            // person_document_details expects `phone` / `is_primary` (not mobile /
+            // is_primary_customer) and forbids unknown fields — build a clean payload.
+            const payload = {
                 gst_registration_id: parseInt(formData.gst_registration_id, 10),
+                full_name: formData.full_name?.trim(),
+                designation: formData.designation,
+                phone: formData.mobile || null,
+                email: formData.email || null,
                 pan: formData.pan ? formData.pan.toUpperCase() : null,
                 aadhaar: formData.aadhaar || null,
-                email: formData.email || null,
-                mobile: formData.mobile || null,
+                is_primary: !!(formData.is_primary_customer ?? formData.is_primary),
+                documents: [],
             };
 
-            // Remove empty strings so backend doesn't fail validation
-            const payload = Object.fromEntries(
-                Object.entries(rawPayload).filter(([_, v]) => v !== '' && v !== null)
-            );
-
-            await api.post(`/api/v1/gst-people`, payload);
+            await api.post(`/api/v1/person-document-details`, payload);
 
             setSuccess(true);
             setTimeout(() => {

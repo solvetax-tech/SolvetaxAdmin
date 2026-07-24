@@ -108,7 +108,7 @@ const UploadDocuments = ({ isOpen = true, onClose, mode: modeProp, initialPerson
             setError('');
             try {
                 // 1. Get the registration ID for this person
-                const personRes = await api.get(`/api/v1/gst-people/dynamic_filter?person_id=${formData.person_id}`);
+                const personRes = await api.get(`/api/v1/person-document-details/dynamic_filter?person_id=${formData.person_id}`);
                 const personData = personRes.data?.data?.[0];
 
                 if (personData && personData.gst_registration_id) {
@@ -185,15 +185,15 @@ const UploadDocuments = ({ isOpen = true, onClose, mode: modeProp, initialPerson
                 finalUrl = uploadRes.data.blob_url;
             }
 
-            // Step 2: Create document record
+            // Step 2: Attach the document to the person. Documents live inline on
+            // the person row now; the upsert endpoint takes only type + url.
+            const personId = parseInt(formData.person_id, 10);
             const payload = {
-                ...formData,
-                person_id: parseInt(formData.person_id, 10),
                 document_type: formData.document_type.trim().toUpperCase(),
                 document_url: finalUrl.trim(),
             };
 
-            await api.post(`/api/v1/gst-documents`, payload);
+            await api.post(`/api/v1/person-document-details/${personId}/documents`, payload);
 
             setSuccess(true);
             setTimeout(() => {

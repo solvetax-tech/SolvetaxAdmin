@@ -68,7 +68,8 @@ import {
     EyeOff,
     Pencil,
     CreditCard,
-    Link2
+    Link2,
+    Copy
 } from 'lucide-react';
 import GstFilingDocuments from './GstFilingDocuments';
 import GSTFilingViewPanel from './GSTFilingViewPanel';
@@ -81,7 +82,19 @@ import {
     buildRmOpSelectOptions,
 } from '../../utils/activeEmployees';
 import Button from '../ui/Button';
-import StatusPill from '../ui/StatusPill';
+import StatusPill, { statusTone } from '../ui/StatusPill';
+
+/** Tone → colour for the inline status <select> options (matches the pills). */
+const STATUS_OPTION_COLOR = {
+    success: 'var(--success)',
+    warning: 'var(--warning)',
+    danger: 'var(--danger)',
+    info: 'var(--info)',
+    neutral: 'var(--text-secondary)',
+};
+
+/** Title Case: MONTHLY → Monthly, JUN-2026 → Jun-2026, TILES ORG → Tiles Org. */
+const titleCase = (str) => (str ? String(str).toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : str);
 
 /** Priority → pill tone: HIGH/URGENT danger, LOW neutral, NORMAL info. */
 const priorityTone = (p) => {
@@ -480,12 +493,9 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
     const [registrations, setRegistrations] = useState([]);
     const [activeSubTab, setActiveSubTab] = useState('GST Filings');
 
-    useEffect(() => {
-        const params = new URLSearchParams(location.search);
-        if (params.get('filing_view') === 'returns') {
-            setActiveSubTab('GST Filings Returns');
-        }
-    }, [location.search]);
+    // Returns/Documents sub-tabs were removed from the GST Portal (documents are
+    // attached via GST Filings and tracked in the dashboard), so this view always
+    // stays on 'GST Filings'.
 
     // --- Hoisted Document States for Unified UI ---
     const [docsLoading, setDocsLoading] = useState(false);
@@ -551,6 +561,18 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
         } catch (err) {
             console.error("Triple-collision check failed:", err);
             setExistingPeriods([]);
+        }
+    };
+
+    // Inline status change from the table — PATCHes only the parent filing's
+    // status (partial update; the edit schema accepts `status` on its own).
+    const handleInlineStatusChange = async (item, newStatus) => {
+        if (!newStatus || newStatus === item.status) return;
+        try {
+            await api.patch(`/api/v1/gst-filings/${item.id}`, { status: newStatus });
+            fetchFilings();
+        } catch (err) {
+            setError(extractErrorMessage(err));
         }
     };
 
@@ -1368,20 +1390,6 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                     <FileText size={14} />
                     <span>GST Filings</span>
                 </button>
-                <button
-                    className={`sub-nav-btn-v4 ${activeSubTab === 'GST Filings Returns' ? 'active' : ''}`}
-                    onClick={() => setActiveSubTab('GST Filings Returns')}
-                >
-                    <History size={14} />
-                    <span>GST Filings Returns</span>
-                </button>
-                <button
-                    className={`sub-nav-btn-v4 ${activeSubTab === 'Documents' ? 'active' : ''}`}
-                    onClick={() => setActiveSubTab('Documents')}
-                >
-                    <Files size={14} />
-                    <span>Documents</span>
-                </button>
             </div>
 
                 <div className="gst-portal-top-actions">
@@ -1527,79 +1535,76 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
 
                             <div className={`filings-ledger-header filings-ledger-grid-template ${rmOpCols.containerClass}`}>
                                 <div className="filings-ledger-header-cell filings-ledger-sticky-id filings-ledger-sticky-col-1">ID</div>
-                                <div className="filings-ledger-header-cell filings-ledger-sticky-id filings-ledger-sticky-col-2">Cust ID</div>
-                                <div className="filings-ledger-header-cell filings-ledger-sticky-id filings-ledger-sticky-col-3">GST ID</div>
-                                <div className="filings-ledger-header-cell">Period</div>
-                                <div className="filings-ledger-header-cell">Category</div>
-                                <div className="filings-ledger-header-cell">Priority</div>
                                 <div className="filings-ledger-header-cell">GSTIN</div>
-                                <div className="filings-ledger-header-cell">Type</div>
-                                <div className="filings-ledger-header-cell">Frequency</div>
+                                <div className="filings-ledger-header-cell">Email</div>
+                                <div className="filings-ledger-header-cell">Login</div>
+                                <div className="filings-ledger-header-cell">Business</div>
+                                <div className="filings-ledger-header-cell">Period</div>
                                 <div className="filings-ledger-header-cell">Status</div>
-                                <div className="filings-ledger-header-cell">State</div>
-                                <div className={`filings-ledger-header-cell ${rmOpCols.rmCellClass}`}>RM</div>
-                                <div className={`filings-ledger-header-cell ${rmOpCols.opCellClass}`}>OP</div>
-                                <div className="filings-ledger-header-cell">Business Name</div>
-                                <div className="filings-ledger-header-cell">Business Type</div>
-                                <div className="filings-ledger-header-cell">Remarks</div>
+                                <div className="filings-ledger-header-cell">Staff</div>
                                 <div className="filings-ledger-header-cell gst-sticky-actions" style={{ justifyContent: 'center' }}>Actions</div>
                             </div>
 
                             {loading ? (
-                                <TableSkeleton columns={17} rows={12} rmOpCols={rmOpCols} rmIndex={11} opIndex={12} />
+                                <TableSkeleton columns={9} rows={12} />
                             ) : data.length > 0 ? (
                                 <div className="filings-ledger-body">
                                     {data.map((item) => (
                                         <div key={item.id} className={`filings-ledger-row filings-ledger-grid-template gst-table-row gst-table-row--static ${rmOpCols.containerClass}`}>
                                             <div className="filings-ledger-cell filings-ledger-sticky-id filings-ledger-sticky-col-1 gst-filings-filing-id-cell">
-                                                <span className="ui-num">{item.id ?? '-'}</span>
+                                                <button type="button" className="row-id-link" title="View filing" onClick={(e) => { e.stopPropagation(); setViewFilingId(item.id); }}>{item.id ?? '-'}</button>
                                             </div>
-                                            <div className="filings-ledger-cell filings-ledger-sticky-id filings-ledger-sticky-col-2">
-                                                <span className="ui-num">{item.customer_id ?? '-'}</span>
+                                            <div className="filings-ledger-cell gstfl-stack gstin-cell" title={item.gstin}>
+                                                <span className="gstfl-main ui-num">{item.gstin || '-'}</span>
+                                                <span className="gstfl-sub">{configs.states?.find(s => s.value === item.state)?.display_name || item.state || '—'}</span>
                                             </div>
-                                            <div className="filings-ledger-cell filings-ledger-sticky-id filings-ledger-sticky-col-3">
-                                                <span className="ui-num">{item.gst_registration_id || '-'}</span>
+                                            <div className="filings-ledger-cell gstfl-stack gstfl-email-cell" title={`${item.email_id || '—'}${item.mobile ? ' · ' + item.mobile : ''}`}>
+                                                <span className="gstfl-main">{item.email_id || '—'}</span>
+                                                <span className="gstfl-sub">{item.mobile || '—'}</span>
                                             </div>
-                                            <div className="filings-ledger-cell">
-                                                <span className="ui-num" style={{ color: 'var(--text-primary)' }}>{item.filing_period}</span>
+                                            <div className="filings-ledger-cell gstfl-login-cell">
+                                                <span className="gstfl-sub gstfl-login-line"><b>USER</b><span className="gstfl-login-val" title={item.username || ''}>{item.username || '—'}</span></span>
+                                                <span className="gstfl-sub gstfl-login-line gstfl-login-pass">
+                                                    <b>PASS</b>
+                                                    <span className="gstfl-login-val">••••••••</span>
+                                                    {item.password ? (
+                                                        <button type="button" className="gstfl-login-icon" title="Copy password" onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(String(item.password || '')); }}>
+                                                            <Copy size={13} />
+                                                        </button>
+                                                    ) : null}
+                                                </span>
                                             </div>
-                                            <div className="filings-ledger-cell">
-                                                <StatusPill tone="neutral" dot={false}>{item.filing_category}</StatusPill>
+                                            <div className="filings-ledger-cell gstfl-biz-cell" title={item.business_name}>
+                                                <span className="gstfl-biz-wrap">{titleCase(item.business_name || '-')}</span>
                                             </div>
-                                            <div className="filings-ledger-cell">
-                                                <StatusPill value={item.priority} tone={priorityTone(item.priority)} dot={false} />
+                                            <div className="filings-ledger-cell gstfl-stack">
+                                                <span className="gstfl-main">{titleCase(item.filing_period || '-')}</span>
+                                                <span className="gstfl-sub">{titleCase(item.filing_frequency || '—')}</span>
                                             </div>
-                                            <div className="filings-ledger-cell gstin-cell">
-                                                <span className="ui-num">{item.gstin}</span>
-                                            </div>
-                                            <div className="filings-ledger-cell">
-                                                <StatusPill tone="neutral" dot={false}>{item.taxpayer_type}</StatusPill>
-                                            </div>
-                                            <div className="filings-ledger-cell">
-                                                <span className="freq-subtext">{item.filing_frequency}</span>
-                                            </div>
-                                            <div className="filings-ledger-cell">
+                                            <div className="filings-ledger-cell gstfl-status-cell" title="Click to change status">
                                                 <StatusPill value={item.status} />
+                                                <ChevronDown size={12} className="gstfl-status-caret" />
+                                                <select
+                                                    className="gstfl-status-select"
+                                                    value={item.status || ''}
+                                                    onChange={(e) => handleInlineStatusChange(item, e.target.value)}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    aria-label="Change filing status"
+                                                >
+                                                    {gstFilingStatusOptions(false).map(opt => (
+                                                        <option
+                                                            key={opt.value}
+                                                            value={opt.value}
+                                                            style={{ color: STATUS_OPTION_COLOR[statusTone(opt.value)] || 'var(--text-primary)', fontWeight: 600 }}
+                                                        >
+                                                            {opt.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             </div>
-                                            <div className="filings-ledger-cell state-cell">
-                                                {configs.states?.find(s => s.value === item.state)?.display_name || item.state || '-'}
-                                            </div>
-                                            <div className={`filings-ledger-cell staff-cell ${rmOpCols.rmCellClass}`} title={`RM ID: ${item.rm_id}`}>
-                                                {configs.employees.find(e => Number(e.emp_id) === Number(item.rm_id))?.username || '-'}
-                                            </div>
-                                            <div className={`filings-ledger-cell staff-cell ${rmOpCols.opCellClass}`} title={`OP ID: ${item.op_id}`}>
-                                                {configs.employees.find(e => Number(e.emp_id) === Number(item.op_id))?.username || '-'}
-                                            </div>
-                                            <div className="filings-ledger-cell business-name-cell" title={item.business_name}>
-                                                {item.business_name || '-'}
-                                            </div>
-                                            <div className="filings-ledger-cell business-type-cell">
-                                                {item.business_type || '-'}
-                                            </div>
-                                            <div className="filings-ledger-cell remarks-cell">
-                                                <div className="remarks-scroll-box-ledger" title={item.remarks}>
-                                                    {item.remarks || '-'}
-                                                </div>
+                                            <div className="filings-ledger-cell gstfl-stack">
+                                                {rmOpCols.showRmColumn && <span className="gstfl-sub"><b>RM</b>{configs.employees.find(e => Number(e.emp_id) === Number(item.rm_id))?.username || '-'}</span>}
+                                                {rmOpCols.showOpColumn && <span className="gstfl-sub"><b>OP</b>{configs.employees.find(e => Number(e.emp_id) === Number(item.op_id))?.username || '-'}</span>}
                                             </div>
                                             <div className="filings-ledger-cell gst-action-buttons gst-sticky-actions" style={{ justifyContent: 'center' }}>
                                                 <Button
@@ -2252,6 +2257,7 @@ export const GSTFilings = ({ isAdmin, profileData }) => {
                 recordId={viewFilingId}
                 configs={configs}
             />
+
 
             {/* Row action on the GST Filings tab opens the document form in place.
                 On the Documents tab GstFilingDocuments hosts its own instance (and

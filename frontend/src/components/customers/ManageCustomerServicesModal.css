@@ -20,14 +20,27 @@
 
 .manage-services-modal .modal-header h1 {
     font-family: var(--font-heading), serif;
-    font-size: 24px;
+    font-size: 23px;
     font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--text-primary);
-    margin-bottom: 6px;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.msm-header-titlerow {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
+}
+
+.msm-id-pill {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.06em;
+    padding: 3px 9px; border-radius: var(--radius-pill, 999px);
+    background: rgba(var(--fg-rgb), 0.06); color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    text-transform: uppercase;
 }
 
 .header-badge-v4 {
@@ -47,17 +60,27 @@
 }
 
 .manage-services-modal .modal-header p {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
     font-size: 13px;
-    color: var(--text-primary);
+    color: var(--text-muted);
     margin: 0;
 }
 
 .manage-services-modal .modal-header {
-    padding: 32px 40px 20px 40px;
-    background: var(--bg-surface);
+    padding: 28px 40px 22px 40px;
+    background:
+        radial-gradient(120% 130% at 100% 0%, rgba(var(--accent-rgb), 0.08), transparent 55%),
+        var(--bg-surface);
     border-bottom: 1px solid var(--border-subtle);
     position: relative;
     padding-right: 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 9px;
 }
 
 .modal-close-btn {
@@ -88,6 +111,7 @@
 .manage-services-modal .modal-header p strong {
     color: var(--accent);
     font-weight: 700;
+    font-size: 14px;
 }
 
 .modal-body {
@@ -101,6 +125,12 @@
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 32px;
+}
+
+/* Single "Services Required" card must span the FULL modal width (otherwise it
+   sits in the left column of the 2-col grid and the right half is empty). */
+.services-manager-grid--single {
+    grid-template-columns: 1fr;
 }
 
 /* --- Service Column Cards --- */
@@ -191,10 +221,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 12px;
+    padding: 11px 14px;
     margin-bottom: 4px;
-    border-radius: 10px;
-    transition: all 0.2s ease;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    background: rgba(var(--fg-rgb), 0.02);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .category-header-v5.clickable {
@@ -204,19 +236,31 @@
 
 .category-header-v5.clickable:hover {
     background: var(--bg-hover);
+    border-color: var(--border-subtle);
+}
+
+.service-category-group.expanded .category-header-v5 {
+    background: rgba(var(--info-rgb), 0.06);
+    border-color: rgba(var(--info-rgb), 0.22);
 }
 
 .category-header-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 11px;
 }
 
 .category-icon-v5 {
+    width: 28px; height: 28px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
     color: var(--info);
-    opacity: 0.6;
-    display: flex;
-    align-items: center;
+    background: rgba(var(--info-rgb), 0.1);
+    border: 1px solid rgba(var(--info-rgb), 0.16);
+    transition: all 0.2s ease;
+}
+.service-category-group.expanded .category-icon-v5 {
+    background: rgba(var(--info-rgb), 0.16);
+    border-color: rgba(var(--info-rgb), 0.32);
 }
 
 .category-label {
@@ -228,10 +272,16 @@
 }
 
 .category-toggle-icon {
+    width: 24px; height: 24px; border-radius: 50%;
     color: var(--text-muted);
     display: flex;
     align-items: center;
+    justify-content: center;
+    background: rgba(var(--fg-rgb), 0.05);
     transition: all 0.2s ease;
+}
+.service-category-group.expanded .category-toggle-icon {
+    background: rgba(var(--info-rgb), 0.16);
 }
 
 .category-header-v5.clickable:hover .category-toggle-icon {
@@ -250,9 +300,15 @@
 
 /* --- Custom Checkbox Items --- */
 .services-options-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+    gap: 6px;
+    padding: 4px 0 10px 8px;
+    animation: svc-expand 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes svc-expand {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .service-checkbox-item {
@@ -265,6 +321,13 @@
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     user-select: none;
     border: 1px solid transparent;
+    min-width: 0;
+}
+.service-checkbox-item .service-name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .service-checkbox-item:hover {
@@ -277,7 +340,7 @@
 }
 
 /* Required Theme */
-.required .service-checkbox-item.checked { border-color: rgba(var(--info-rgb), 0.15); background: rgba(var(--info-rgb), 0.03); }
+.required .service-checkbox-item.checked { border-color: rgba(var(--info-rgb), 0.28); background: rgba(var(--info-rgb), 0.07); }
 
 /* Provided Theme */
 .provided .service-checkbox-item.checked { border-color: rgba(var(--accent-rgb), 0.15); background: rgba(var(--accent-rgb), 0.03); }
@@ -300,6 +363,7 @@
 .required .service-checkbox-item.checked .st-checkbox-v5 {
     background: var(--info);
     border-color: var(--info);
+    box-shadow: 0 0 0 3px rgba(var(--info-rgb), 0.16);
 }
 
 .provided .service-checkbox-item.checked .st-checkbox-v5 {
@@ -359,22 +423,22 @@
     align-items: center;
     justify-content: center;
     gap: 10px;
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
     border: none;
     color: var(--text-inverse);
-    padding: 12px 28px;
+    padding: 13px 30px;
     border-radius: var(--radius-md);
-    font-size: 11px;
+    font-size: 14px;
     font-weight: 700;
+    letter-spacing: 0.01em;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.28);
 }
 
 .btn-primary-v4:hover:not(:disabled) {
-    transform: translateY(-1px);
-    background: var(--accent-hover);
-    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 26px rgba(var(--accent-rgb), 0.36);
 }
 
 .btn-primary-v4:active {
@@ -397,82 +461,76 @@
         padding: 24px;
     }
 }
-/* --- Summary Bar V5 --- */
+/* --- Summary Hero Bar --- */
 .services-summary-bar-v5 {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: start;
-    gap: 20px;
-    padding: 20px 32px;
-    background: var(--bg-surface-2);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    margin-bottom: 32px;
-}
-
-@media (max-width: 768px) {
-    .services-summary-bar-v5 {
-        grid-template-columns: 1fr;
-        gap: 16px;
-        padding: 16px;
-    }
-    .summary-divider-v5 {
-        width: 100%;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(var(--fg-rgb), 0.1), transparent);
-        margin: 8px 0;
-    }
-}
-
-.summary-item-v5 {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    min-width: 0;
-}
-
-.summary-item-v5 svg {
-    margin-top: 2px;
-    flex-shrink: 0;
-}
-
-.summary-content-v5 {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    min-width: 0;
-    flex: 1;
+    gap: 18px;
+    padding: 24px 28px;
+    background:
+        radial-gradient(130% 150% at 0% 0%, rgba(var(--info-rgb), 0.12), transparent 62%),
+        var(--bg-surface-2);
+    border: 1px solid rgba(var(--info-rgb), 0.18);
+    border-radius: var(--radius-xl, 20px);
+    margin-bottom: 28px;
+    position: relative;
+    overflow: hidden;
+}
+.services-summary-bar-v5::before {
+    content: '';
+    position: absolute; top: 0; bottom: 0; left: 0; width: 4px;
+    background: linear-gradient(180deg, var(--info), transparent);
+    opacity: 0.85;
 }
 
-.summary-label-v5 {
-    font-size: 13px;
-    color: var(--text-primary);
-    white-space: nowrap;
+.summary-hero-v5 {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 18px;
 }
-
-.summary-label-v5 strong {
-    color: var(--text-primary);
-    font-size: 14px;
-    letter-spacing: 0.02em;
+.summary-hero-badge {
+    width: 46px; height: 46px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--info);
+    background: rgba(var(--info-rgb), 0.14);
+    border: 1px solid rgba(var(--info-rgb), 0.28);
+    box-shadow: 0 6px 18px rgba(var(--info-rgb), 0.18);
+    flex-shrink: 0;
 }
+.summary-hero-count {
+    font-family: var(--font-heading), sans-serif;
+    font-size: 44px; font-weight: 800; line-height: 1;
+    color: var(--info);
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    min-width: 44px;
+}
+.summary-hero-meta { display: flex; flex-direction: column; gap: 3px; }
+.summary-hero-title {
+    font-size: 15px; font-weight: 800; color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+.summary-hero-sub { font-size: 12px; font-weight: 500; color: var(--text-muted); }
 
+.summary-chips-wrap-v5 {
+    border-top: 1px dashed rgba(var(--fg-rgb), 0.1);
+    padding-top: 16px;
+}
+.summary-empty-v5 { font-size: 12.5px; color: var(--text-muted); font-style: italic; }
 .summary-chips-v5 {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    max-height: 80px;
+    gap: 7px;
+    max-height: 108px;
     overflow-y: auto;
     padding-right: 6px;
 }
+.summary-chips-v5::-webkit-scrollbar { width: 4px; }
+.summary-chips-v5::-webkit-scrollbar-thumb { background: rgba(var(--info-rgb), 0.2); border-radius: 10px; }
 
-.summary-divider-v5 {
-    width: 1px;
-    align-self: stretch;
-    background: linear-gradient(180deg, transparent, rgba(var(--fg-rgb), 0.1), transparent);
-    margin: 0 10px;
+@media (max-width: 768px) {
+    .services-summary-bar-v5 { padding: 18px; }
+    .summary-hero-count { font-size: 36px; }
 }
 
 /* --- Skeleton Loading V5 --- */
@@ -523,15 +581,17 @@
 .summary-item-v5.provided .summary-label-v5 strong { color: var(--accent); }
 
 .service-chip-v5 {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 11px;
+    border-radius: var(--radius-pill, 999px);
     background: rgba(var(--fg-rgb), 0.05);
     border: 1px solid var(--border-subtle);
     color: var(--text-primary);
     white-space: nowrap;
+    transition: transform 0.12s ease;
 }
+.service-chip-v5:hover { transform: translateY(-1px); }
 
 .required .service-chip-v5 {
     background: rgba(var(--info-rgb), 0.1);
