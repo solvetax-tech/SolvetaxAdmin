@@ -48,12 +48,16 @@ async def _request(method: str, path: str, json: dict | None = None) -> httpx.Re
     try:
         async with await _make_client() as client:
             response = await client.request(method, url, json=json)
-    except httpx.TimeoutException as exc:
-        logger.error("evolution_api_timeout url=%s error=%s", url, exc)
-        raise EvolutionAPIError(f"Request to Evolution API timed out: {exc}") from exc
-    except httpx.ConnectError as exc:
-        logger.error("evolution_api_connect_error url=%s error=%s", url, exc)
-        raise EvolutionAPIError(f"Could not connect to Evolution API: {exc}") from exc
+    except httpx.RequestError as exc:
+        # Covers timeouts, connection failures, and UnsupportedProtocol/InvalidURL
+        # (e.g. EVOLUTION_API_URL unset) — all must surface as 502, never a 500.
+        logger.error(
+            "evolution_api_request_error type=%s url=%s error=%s",
+            type(exc).__name__, url, exc,
+        )
+        raise EvolutionAPIError(
+            f"Evolution API request failed ({type(exc).__name__}): {exc}"
+        ) from exc
 
     if not response.is_success:
         snippet = response.text[:200]

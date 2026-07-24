@@ -161,3 +161,14 @@ async def test_connection_state_non_2xx_raises(monkeypatch):
 
     with pytest.raises(EvolutionAPIError):
         await connection_state("primary")
+
+
+async def test_missing_base_url_raises_evolution_error(monkeypatch):
+    """EVOLUTION_API_URL unset → UnsupportedProtocol must map to EvolutionAPIError,
+    not escape as an unhandled 500 (QA bug 2, 2026-07-24)."""
+    from backend.whatsapp import client as client_mod
+
+    monkeypatch.delenv("EVOLUTION_API_URL", raising=False)
+    with pytest.raises(client_mod.EvolutionAPIError) as exc_info:
+        await client_mod.connection_state("primary")
+    assert "UnsupportedProtocol" in str(exc_info.value) or "request failed" in str(exc_info.value)
