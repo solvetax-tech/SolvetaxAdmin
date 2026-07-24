@@ -1,0 +1,69 @@
+# Evolution API — Phase 0 Sandbox Stack
+#
+# SANDBOX ONLY: binds all ports to 0.0.0.0 for local developer access.
+# For prod hardening (nginx TLS termination, 127.0.0.1 bindings, resource limits,
+# S3 media storage) see docs/evolution-api/02-deployment.md.
+#
+# Image: evoapicloud/evolution-api:v2.3.7
+# Source: docs/evolution-api/02-deployment.md §1 "Recommended for prod" tag row.
+# Do NOT use atendai/evolution-api — it silently overrides externally supplied env vars (issue #1474).
+# Do NOT use :latest — tag moves and breaks reproducible deploys.
+#
+# Manager UI: embedded in the API container at http://localhost:8080/manager —
+# no separate manager service is needed on v2.x.
+
+version: "3.8"
+
+services:
+  evolution_api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: evolution_api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # sandbox: open to all interfaces; prod → 127.0.0.1:8080:8080
+    env_file:
+      - .env
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      - evolution_postgres
+      - evolution_redis
+    networks:
+      - evolution-net
+
+  evolution_postgres:
+    image: postgres:16
+    container_name: evolution_postgres
+    restart: unless-stopped
+    command: postgres -c max_connections=200
+    environment:
+      POSTGRES_USER: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # non-standard host port; avoids conflict if host already runs Postgres
+    networks:
+      - evolution-net
+
+  evolution_redis:
+    image: redis:7-alpine
+    container_name: evolution_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - evolution_redis_data:/data
+    ports:
+      - "6380:6379"   # non-standard host port; avoids conflict with SolvetaxAdmin Redis
+    networks:
+      - evolution-net
+
+volumes:
+  evolution_instances:      # WhatsApp session files — most critical; back up hourly
+  evolution_postgres_data:  # Prisma schema + instance metadata
+  evolution_redis_data:     # Cache; safe to lose (rebuilt from DB on restart)
+
+networks:
+  evolution-net:
+    driver: bridge
