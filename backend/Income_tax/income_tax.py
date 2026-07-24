@@ -857,7 +857,7 @@ async def filter_income_tax(
     if client_name:
         idx = append_fuzzy_name_filter(conditions, values, idx, "i.client_name", client_name)
     if email_id:
-        idx = append_ilike_contains(conditions, values, idx, "lower(i.email_id)", email_id)
+        idx = append_fuzzy_name_filter(conditions, values, idx, "lower(i.email_id)", email_id)
     fy_filters = normalize_query_str_list(financial_year)
     if fy_filters:
         conditions.append(f"i.financial_year && ${idx}::varchar[]")

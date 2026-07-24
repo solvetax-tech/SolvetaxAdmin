@@ -18,7 +18,7 @@ import {
   CreditCard,
   BookOpen,
   History,
-  Briefcase, Camera, Edit2, Shield, Clock, Activity, Mail, Phone, Hash, Calendar, CalendarCheck, ShieldCheck, CheckCircle2, XCircle, MoreVertical, Loader2, X, AlertCircle, ArrowRight, Lock, Landmark, ListTodo, Headphones, Sun, Moon, Bug, UserPlus
+  Briefcase, Camera, Edit2, Shield, Clock, Activity, Mail, Phone, Hash, Calendar, CalendarCheck, ShieldCheck, CheckCircle2, XCircle, MoreVertical, Loader2, X, AlertCircle, ArrowRight, Lock, Landmark, ListTodo, Headphones, Sun, Moon, Bug, ClipboardList, UserPlus
 } from 'lucide-react';
 import './Dashboard.css';
 import './common/AppSideDrawer.css';
@@ -39,6 +39,7 @@ import ServiceDonePaymentPending from './dashboard/ServiceDonePaymentPending';
 import GstFilingMonthlyMatrix from './dashboard/GstFilingMonthlyMatrix';
 import ContactSupportLeads from './contact_support/ContactSupportLeads';
 import RaiseIssueModal from './issues/RaiseIssueModal';
+import MyIssuesModal from './issues/MyIssuesModal';
 import TasksPage from './tasks/TasksPage';
 import useTaskReminders from '../hooks/useTaskReminders';
 import api from '../utils/api';
@@ -214,6 +215,7 @@ const Dashboard = ({ onLogout }) => {
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [hasNotifications, setHasNotifications] = useState(false);
   const [showRaiseIssue, setShowRaiseIssue] = useState(false);
+  const [showMyIssues, setShowMyIssues] = useState(false);
   const [showCrmDropdown, setShowCrmDropdown] = useState(false);
 
   // --- Follow-up Reminders (service + payment only; GST filings are separate) ---
@@ -1756,6 +1758,13 @@ const Dashboard = ({ onLogout }) => {
                 <Bug size={20} />
               </button>
               <button
+                className="topbar-icon-btn v4-btn"
+                onClick={() => setShowMyIssues(true)}
+                title="My issues — track your reported bugs"
+              >
+                <ClipboardList size={20} />
+              </button>
+              <button
                 className={`topbar-icon-btn v4-btn ${activeTab === 'notifications' ? 'active' : ''}`}
                 onClick={() => handleTabChange('notifications')}
                 title="Notifications"
@@ -2139,6 +2148,14 @@ const Dashboard = ({ onLogout }) => {
         <RaiseIssueModal
           onClose={() => setShowRaiseIssue(false)}
           onCreated={() => setToastMessage('Issue reported. Thank you!')}
+        />
+      )}
+
+      {/* My Issues — reporters track their own submitted bugs and see resolution status */}
+      {showMyIssues && (
+        <MyIssuesModal
+          onClose={() => setShowMyIssues(false)}
+          onReport={() => setShowRaiseIssue(true)}
         />
       )}
 

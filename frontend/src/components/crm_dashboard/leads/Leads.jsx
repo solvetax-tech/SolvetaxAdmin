@@ -56,7 +56,8 @@ const Leads = ({
   const [loading, setLoading] = useState(true);
   const [totalLeads, setTotalLeads] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 20;
+  const [sort, setSort] = useState({ by: 'id', dir: 'desc' });
+  const rowsPerPage = 50;
 
   // Drawer States
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -223,6 +224,8 @@ const Leads = ({
           const pageParams = new URLSearchParams(searchParams.toString());
           pageParams.set('limit', String(pageLimit));
           pageParams.set('offset', String(pageOffset));
+          pageParams.set('sort_by', sort.by);
+          pageParams.set('sort_dir', sort.dir);
 
           const response = await api.get(`${apiBase}/filter?${pageParams.toString()}`);
           const batch = unwrapListPayload(response).items;
@@ -249,6 +252,8 @@ const Leads = ({
       const pageParams = new URLSearchParams(searchParams.toString());
       pageParams.set('limit', String(rowsPerPage));
       pageParams.set('offset', String((currentPage - 1) * rowsPerPage));
+      pageParams.set('sort_by', sort.by);
+      pageParams.set('sort_dir', sort.dir);
       const response = await api.get(`${apiBase}/filter?${pageParams.toString()}`);
       const { items, total } = unwrapListPayload(response);
       setLeads(items);
@@ -257,7 +262,7 @@ const Leads = ({
       console.error("Error fetching leads:", error);
     }
     });
-  }, [currentPage, appliedFilters, rowsPerPage, entityType, wrapFetch, boardPreset, todayAssignedRoleFilter]);
+  }, [currentPage, appliedFilters, rowsPerPage, entityType, wrapFetch, boardPreset, todayAssignedRoleFilter, sort]);
 
   const openFilterDrawer = () => {
     setFilterInputs({ ...appliedFilters, stages: [...appliedFilters.stages] });
@@ -654,6 +659,10 @@ const Leads = ({
                 showFiltersButton={!hideFilters}
                 pushFeedback={pushFeedback}
                 onCreateLead={canCreateLead ? () => setShowCreateModal(true) : null}
+                sortBy={sort.by}
+                sortDir={sort.dir}
+                onSortChange={(by, dir) => { setSort({ by, dir }); setCurrentPage(1); }}
+                isIncomeTaxCrm={isIncomeTaxCrm}
               />
             )}
 

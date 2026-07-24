@@ -1,6 +1,7 @@
 import React from 'react';
 import { Filter, RotateCcw, Plus } from 'lucide-react';
 import Button from '../ui/Button';
+import CrmLeadSortControl from './CrmLeadSortControl';
 import {
     CRM_TIMESTAMP_FILTER_FIELDS,
     getTimestampFilterSummary,
@@ -19,10 +20,16 @@ export default function CrmLeadFiltersToolbar({
     contextPill = null,
     pushFeedback = null,
     onCreateLead = null,
+    sortBy,
+    sortDir,
+    onSortChange,
+    isIncomeTaxCrm = false,
+    showSort = true,
 }) {
     const filtersActive = hasActiveLeadFilters(appliedFilters);
+    const showSortControl = showSort && !!onSortChange;
 
-    if (!showFiltersButton && !filtersActive && !contextPill && !onCreateLead) {
+    if (!showFiltersButton && !showSortControl && !filtersActive && !contextPill && !onCreateLead) {
         return null;
     }
 
@@ -91,7 +98,7 @@ export default function CrmLeadFiltersToolbar({
                     </button>
                 )}
             </div>
-            {(showFiltersButton || onCreateLead) && (
+            {(showFiltersButton || showSortControl || onCreateLead) && (
                 <div className="crm-lead-filters-toolbar-actions">
                     {pushFeedback && (
                         <span
@@ -100,6 +107,14 @@ export default function CrmLeadFiltersToolbar({
                         >
                             {pushFeedback.text}
                         </span>
+                    )}
+                    {showSortControl && (
+                        <CrmLeadSortControl
+                            sortBy={sortBy}
+                            sortDir={sortDir}
+                            onChange={onSortChange}
+                            isIncomeTaxCrm={isIncomeTaxCrm}
+                        />
                     )}
                     {showFiltersButton && (
                         <Button variant="secondary" size="sm" icon={<Filter size={13} />} onClick={onOpenFilters}>

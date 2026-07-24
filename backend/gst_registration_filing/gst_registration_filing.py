@@ -563,7 +563,7 @@ def _collect_gst_filings_only_conditions(
         idx = append_fuzzy_name_filter(conditions, values, idx, "f.username", username_norm)
 
     if email_id_norm:
-        idx = append_ilike_contains(conditions, values, idx, "lower(f.email_id)", email_id_norm)
+        idx = append_fuzzy_name_filter(conditions, values, idx, "lower(f.email_id)", email_id_norm)
 
     if rent_min is not None:
         conditions.append(f"f.rent >= ${idx}")

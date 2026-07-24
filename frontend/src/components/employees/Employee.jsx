@@ -623,7 +623,7 @@ const Employee = ({ handleLogout, canSignup, isAdmin, profileData }) => {
                                     className="filings-ledger-row employee-grid-template"
                                 >
                                     <div className="filings-ledger-cell sticky-id-column">
-                                        <span className="ui-num">{item.emp_id}</span>
+                                        <button type="button" className="row-id-link" title="View employee" onClick={(e) => openEmployeeView(item, e)}>{item.emp_id}</button>
                                     </div>
                                     <div className="filings-ledger-cell" style={{ color: 'var(--text-primary)' }}>{item.email}</div>
                                     <div className="filings-ledger-cell">{item.first_name || '-'}</div>

@@ -214,6 +214,79 @@
     flex-shrink: 0;
 }
 
+/* ── Typeable time entry: type the hour/minute, arrow keys to step, AM/PM toggle.
+   Wider and easier to hit than the old compact dropdowns. ── */
+.time-selectors--typeable {
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.time-selectors--typeable .time-input {
+    width: 58px;
+    height: 42px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.time-selectors--typeable .time-input:hover {
+    border-color: var(--accent);
+}
+
+.time-selectors--typeable .time-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
+}
+
+.time-selectors--typeable .time-sep {
+    font-size: 20px;
+    margin: 0 -2px;
+}
+
+.time-period-toggle {
+    display: inline-flex;
+    height: 42px;
+    margin-left: 4px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.time-period-btn {
+    border: none;
+    background: var(--bg-surface-2);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 0 15px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.time-period-btn + .time-period-btn {
+    border-left: 1px solid var(--border);
+}
+
+.time-period-btn.active {
+    background: var(--accent);
+    color: var(--text-inverse);
+}
+
+.time-period-btn:not(.active):hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
 .today-btn {
     width: 100%;
     background: rgba(var(--accent-rgb), 0.1);

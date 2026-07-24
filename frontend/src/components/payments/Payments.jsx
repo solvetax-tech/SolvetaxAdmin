@@ -430,7 +430,6 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
             <div className="payments-ledger-container">
                         <div className="payments-ledger-row payments-ledger-header">
                             <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-1">ID</div>
-                            <div className="payments-ledger-cell pay-ledger-col-2">Cust ID</div>
                             <div className="payments-ledger-cell pay-ledger-col-3">Entity ID</div>
                             <div className="payments-ledger-cell">Type</div>
                             <div className="payments-ledger-cell justify-end">Amount</div>
@@ -448,12 +447,11 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                         {loading ? (
                             Array(limit).fill(0).map((_, i) => (
                                 <div key={`skeleton-${i}`} className="payments-ledger-row skeleton-row-v2">
-                                    {Array(14).fill(0).map((_, j) => {
+                                    {Array(13).fill(0).map((_, j) => {
                                         let stickyClass = '';
                                         if (j === 0) stickyClass = 'pay-ledger-sticky-id pay-ledger-sticky-col-1';
-                                        if (j === 1) stickyClass = 'pay-ledger-col-2';
-                                        if (j === 2) stickyClass = 'pay-ledger-col-3';
-                                        if (j === 13) stickyClass = 'pay-ledger-actions-sticky';
+                                        if (j === 1) stickyClass = 'pay-ledger-col-3';
+                                        if (j === 12) stickyClass = 'pay-ledger-actions-sticky';
                                         return (
                                             <div key={j} className={`payments-ledger-cell ${stickyClass}`}>
                                                 <div className="skeleton-item-v2 skeleton-pulse-v2" />
@@ -476,8 +474,7 @@ export const Payments = ({ handleLogout, isAdmin, onNewPayment }) => {
                                     key={p.id}
                                     className={`payments-ledger-row${selectedPaymentId === p.id || activeFollowupId === p.id ? ' active-drawer-row' : ''}`}
                                 >
-                                    <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-1 pay-col-id"><span className="ui-num" style={{ fontWeight: 600 }}>{p.id}</span></div>
-                                    <div className="payments-ledger-cell pay-ledger-col-2 pay-col-id"><span className="ui-num">{p.customer_id}</span></div>
+                                    <div className="payments-ledger-cell pay-ledger-sticky-id pay-ledger-sticky-col-1 pay-col-id"><button type="button" className="row-id-link" title="View payment" onClick={(e) => { e.stopPropagation(); setSelectedPaymentId(p.id); }}>{p.id}</button></div>
                                     <div className="payments-ledger-cell pay-ledger-col-3 pay-col-id"><span className="ui-num">{p.entity_id}</span></div>
                                     <div className="payments-ledger-cell">{getEntityTypeBadge(p.entity_type)}</div>
                                     <div className="payments-ledger-cell pay-col-amount justify-end"><span className="ui-num">₹{formatCurrency(p.amount)}</span></div>

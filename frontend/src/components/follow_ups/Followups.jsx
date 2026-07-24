@@ -2357,7 +2357,7 @@ const Followups = ({ isAdmin, profileData, setToastMessage }) => {
                                             {act.service_name}
                                         </span>
                                         <span style={{ fontSize: '9px', padding: '2px 5px', borderRadius: '4px', background: 'rgba(var(--fg-rgb), 0.04)', border: '1px solid rgba(var(--fg-rgb), 0.08)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                                            {act.lead_id}
+                                            <button type="button" className="row-id-link" title="View follow-up" onClick={(e) => { e.stopPropagation(); if (act.originalItem) { setSelectedDetailTask(act.originalItem); setShowDetailDrawer(true); } }}>{act.lead_id}</button>
                                         </span>
                                     </div>
                                     <span className={`timeline-status-badge ${statusBadgeClass}`} style={{ fontSize: '9px', fontWeight: 800, padding: '3px 8px', borderRadius: '20px', letterSpacing: '0.03em', whiteSpace: 'nowrap', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>

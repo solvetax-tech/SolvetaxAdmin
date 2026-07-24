@@ -1585,7 +1585,7 @@ async def filter_customers(
             if business_name:
                 idx = append_fuzzy_name_filter(conditions, values, idx, "business_name", business_name)
             if email:
-                idx = append_ilike_contains(conditions, values, idx, "lower(c.email)", email)
+                idx = append_fuzzy_name_filter(conditions, values, idx, "lower(c.email)", email)
             if state and state.strip():
                 # State comes from a fixed dropdown (same config the value is
                 # stored from) — exact match. Fuzzy over-matched: "ANDHRA PRADESH"

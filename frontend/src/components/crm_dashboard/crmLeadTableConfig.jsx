@@ -5,10 +5,10 @@ import { getRmOpColumnVisibility } from '../../utils/rmOpAssignmentFields';
 
 const CRM_LEAD_TABLE_COLUMNS_BASE = [
     { key: 'id', label: 'Id' },
-    { key: 'mobile', label: 'Mobile' },
     { key: 'full_name', label: 'Full Name' },
+    { key: 'mobile', label: 'Mobile' },
     { key: 'entity_id', label: 'Entity Id' },
-    { key: 'preferred_language', label: 'Preferred Language' },
+    { key: 'preferred_language', label: 'Preferred Language', className: 'lang-column' },
     { key: 'stage', label: 'Stage' },
     { key: 'call_attempted_count', label: 'Call Attempts', className: 'count-column' },
     { key: 'call_connected_count', label: 'Call Connected', className: 'count-column' },
@@ -33,10 +33,26 @@ export function getCrmLeadTableColumns({ isIncomeTaxCrm = false, profileData } =
         const entityIdx = cols.findIndex((col) => col.key === 'entity_id');
         cols.splice(entityIdx + 1, 0, { key: 'ay', label: 'AY', className: 'crm-col-ay' });
     }
-    if (showRmColumn && showOpColumn) return cols;
-    return cols.filter((col) => (
-        (col.key !== 'rm_name' || showRmColumn) && (col.key !== 'op_name' || showOpColumn)
-    ));
+    // Merge RM Name + OP Name into a single two-line "Staff" column (RM above,
+    // OP below), the same treatment the GST/ITR ledgers use. The Staff column
+    // carries which sub-rows to render; it drops out entirely when the viewer's
+    // role means neither sub-row adds information (an RM's rows are all theirs).
+    const staffCol = (showRmColumn || showOpColumn)
+        ? { key: 'staff', label: 'Staff', className: 'crm-col-staff', showRm: showRmColumn, showOp: showOpColumn }
+        : null;
+    const merged = [];
+    let staffInserted = false;
+    for (const col of cols) {
+        if (col.key === 'rm_name' || col.key === 'op_name') {
+            if (staffCol && !staffInserted) {
+                merged.push(staffCol);
+                staffInserted = true;
+            }
+            continue;
+        }
+        merged.push(col);
+    }
+    return merged;
 }
 
 export function formatCrmLeadDateTime(dateStr) {
@@ -54,6 +70,26 @@ export function formatCrmLeadDateTime(dateStr) {
 export function renderCrmLeadTableCell(lead, col, formatDateTime = formatCrmLeadDateTime) {
     const key = col.key;
     const val = lead[key];
+
+    if (key === 'staff') {
+        return (
+            <div className="crm-staff-cell">
+                {col.showRm && (
+                    <span className="crm-staff-line"><b>RM</b><span>{lead.rm_name || '-'}</span></span>
+                )}
+                {col.showOp && (
+                    <span className="crm-staff-line"><b>OP</b><span>{lead.op_name || '-'}</span></span>
+                )}
+            </div>
+        );
+    }
+
+    if (key === 'remarks') {
+        const text = (val == null || val === '') ? '-' : String(val);
+        return (
+            <div className="crm-remarks-clamp" title={text === '-' ? undefined : text}>{text}</div>
+        );
+    }
 
     if (key === 'stage') {
         return (

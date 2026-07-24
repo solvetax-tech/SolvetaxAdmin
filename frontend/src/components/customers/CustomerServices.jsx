@@ -933,7 +933,7 @@ const CustomerServices = ({ isAdmin, profileData, setToastMessage }) => {
                                 key={item.id}
                                 className={`filings-ledger-row cs-services-grid-template ${rmOpCols.containerClass} ${activeFollowupId === item.id ? 'active-drawer-row' : ''} ${selectedServiceId === item.id ? 'cs-row-active' : ''}`}
                             >
-                                <div className="filings-ledger-cell">{item.id}</div>
+                                <div className="filings-ledger-cell"><button type="button" className="row-id-link" title="View service" onClick={(e) => openServiceView(item, e)}>{item.id}</button></div>
                                 <div className="filings-ledger-cell">{item.customer_id ?? '-'}</div>
                                 <div className="filings-ledger-cell bold-cell">
                                     {item.customer_id == null

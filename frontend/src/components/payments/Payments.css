@@ -126,7 +126,7 @@
     --pay-col-13: 90px;  /* Active */
     --pay-col-14: 88px;  /* Actions (sticky right) */
     --pay-total-width: calc(
-        var(--pay-col-1) + var(--pay-col-2) + var(--pay-col-3) +
+        var(--pay-col-1) + var(--pay-col-3) +
         var(--pay-col-4) + var(--pay-col-5) + var(--pay-col-6) +
         var(--pay-col-7) + var(--pay-col-8) + var(--pay-col-9) +
         var(--pay-col-10) + var(--pay-col-11) + var(--pay-col-12) +
@@ -183,8 +183,8 @@
 
 .payments-ledger-row {
     display: grid !important;
-    grid-template-columns: 
-        var(--pay-col-1) var(--pay-col-2) var(--pay-col-3)
+    grid-template-columns:
+        var(--pay-col-1) var(--pay-col-3)
         var(--pay-col-4) var(--pay-col-5) var(--pay-col-6)
         var(--pay-col-7) var(--pay-col-8) var(--pay-col-9)
         var(--pay-col-10) var(--pay-col-11) var(--pay-col-12)

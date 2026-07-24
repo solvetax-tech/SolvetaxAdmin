@@ -249,12 +249,17 @@ async def insert_payment_from_ledger(
             net_amount,
             remaining_amount,
             payment_status,
+            payment_date,
             remarks,
             created_at,
             updated_at
         )
         VALUES (
-            NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()
+            NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            -- Stamp the payment date only when real cash was collected this
+            -- installment (paid_amount > 0). $6 is paid_amount.
+            CASE WHEN $6 > 0 THEN NOW() ELSE NULL END,
+            $10, NOW(), NOW()
         )
         RETURNING *
         """,

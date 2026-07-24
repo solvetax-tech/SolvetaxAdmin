@@ -26,6 +26,7 @@ export default function CreateLeadModal({ entityType, currentRole, onClose, onCr
     const roleU = (currentRole || '').trim().toUpperCase();
     const isRM = roleU === 'RM';
     const isOP = roleU === 'OP';
+    const isAdmin = roleU === 'ADMIN';
 
     const [form, setForm] = useState({
         mobile: '', full_name: '', email: '', preferred_language: '',
@@ -187,13 +188,15 @@ export default function CreateLeadModal({ entityType, currentRole, onClose, onCr
                                 </div>
                             )}
 
-                            {/* Advanced fields — collapsed by default, shown on demand */}
-                            <button type="button" onClick={() => setShowMore((v) => !v)} style={moreToggleStyle}>
-                                {showMore ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-                                {showMore ? 'Hide extra details' : 'Add more details'}
-                            </button>
+                            {/* Advanced fields — admin only; collapsed by default, shown on demand */}
+                            {isAdmin && (
+                                <button type="button" onClick={() => setShowMore((v) => !v)} style={moreToggleStyle}>
+                                    {showMore ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                                    {showMore ? 'Hide extra details' : 'Add more details'}
+                                </button>
+                            )}
 
-                            {showMore && (
+                            {isAdmin && showMore && (
                                 <div style={{ marginTop: '12px' }}>
                                     <div className="filter-row-v4" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '12px', marginBottom: '12px' }}>
                                         <div className="filter-group-v4">

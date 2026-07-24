@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     getCrmLeadTableColumns,
     formatCrmLeadDateTime,
@@ -22,6 +23,19 @@ export default function CrmLeadsListTable({
 }) {
     const columns = getCrmLeadTableColumns({ isIncomeTaxCrm });
     const colSpan = columns.length + 1;
+    const navigate = useNavigate();
+
+    // Entity ID links to the linked record over in the main system (the GST
+    // registration or ITR this lead was pushed to).
+    const openEntityInMainSystem = (lead) => {
+        const eid = lead.entity_id;
+        if (eid == null || eid === '') return;
+        if (isIncomeTaxCrm) {
+            navigate('/dashboard?tab=income-tax');
+        } else {
+            navigate(`/dashboard?tab=gst&sub=registrations&gst_registration_id=${encodeURIComponent(eid)}`);
+        }
+    };
 
     return (
         <table className="gst-registrations-table bordered crm-leads-table">
@@ -59,7 +73,22 @@ export default function CrmLeadsListTable({
                         <tr key={lead.id} className="gst-reg-table-row">
                             {columns.map((col) => (
                                 <td key={col.key} className={col.className || ''}>
-                                    {renderCrmLeadTableCell(lead, col, formatCrmLeadDateTime)}
+                                    {col.key === 'id' ? (
+                                        <button type="button" className="row-id-link" title="View lead" onClick={(e) => onViewLead(e, lead)}>{lead.id ?? '-'}</button>
+                                    ) : col.key === 'entity_id' ? (
+                                        (lead.entity_id != null && lead.entity_id !== '') ? (
+                                            <button
+                                                type="button"
+                                                className="row-id-link"
+                                                title="Open this record in the main system"
+                                                onClick={(e) => { e.stopPropagation(); openEntityInMainSystem(lead); }}
+                                            >
+                                                {lead.entity_id}
+                                            </button>
+                                        ) : '-'
+                                    ) : (
+                                        renderCrmLeadTableCell(lead, col, formatCrmLeadDateTime)
+                                    )}
                                 </td>
                             ))}
                             <td className="crm-col-sticky-details">

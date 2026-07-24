@@ -90,13 +90,114 @@
     min-width: 100%;
 }
 
+/* Remarks takes the width freed by the narrowed columns, but caps at a sensible
+   width and clamps to two lines so it never runs away or forces a scroll. */
 .crm-leads-table .remarks-column {
-    max-width: 220px;
+    width: 100%;
+    min-width: 200px;
+    max-width: 340px;
+    white-space: normal;
+    vertical-align: middle;
+}
+.crm-remarks-clamp {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.35;
+    word-break: break-word;
 }
 
-/* Actions column: fixed width fits up to 4 buttons without clipping */
+/* Assessment Year (Income Tax CRM only): a narrow fixed column carved out of
+   the remarks width, so the Income Tax table fits without a horizontal scroll. */
+.crm-leads-table th.crm-col-ay,
+.crm-leads-table td.crm-col-ay {
+    width: 84px;
+    min-width: 84px;
+    max-width: 84px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Call Attempts / Call Connected: wrap each header onto two lines ("Call" over
+   "Attempts") so the columns stay narrow and the table loses its horizontal
+   scroll. The numbers below stay centered under the stacked label. */
+.crm-leads-table thead th.count-column {
+    white-space: normal !important;
+    line-height: 1.2;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+    width: 82px;
+    min-width: 82px;
+    max-width: 82px;
+}
+.crm-leads-table tbody td.count-column {
+    text-align: center;
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+/* Preferred Language: same two-line header treatment ("Preferred" / "Language")
+   so the column is narrow and its width can go to Remarks. */
+.crm-leads-table thead th.lang-column {
+    white-space: normal !important;
+    line-height: 1.2;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    width: 96px;
+    min-width: 96px;
+    max-width: 96px;
+}
+
+/* Merged Staff column: RM above, OP below, each with a small accent label. */
+.crm-leads-table th.crm-col-staff,
+.crm-leads-table td.crm-col-staff {
+    min-width: 118px;
+}
+.crm-staff-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.35;
+}
+.crm-staff-cell .crm-staff-line {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+.crm-staff-cell .crm-staff-line b {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    min-width: 16px;
+}
+
+/* Actions column: compact, GST-Registration style — three 22px icons per row,
+   a 4th/5th wraps below. The slack the table used to give this column now goes
+   to the flexible text columns instead. */
 .crm-leads-table col.crm-col-actions {
-    width: 320px;
+    width: 108px;
+}
+
+/* Base column sizing pinned in the SHARED stylesheet so every CRM board — Leads,
+   Pipeline, Smart Board — renders the exact same column ratios, independent of
+   which board stylesheet loads. The column-specific widths (count, language,
+   staff, remarks, actions) are defined elsewhere and win by specificity. */
+.crm-leads-table {
+    width: max-content;
+    min-width: 100%;
+}
+.crm-leads-table thead th {
+    padding: 12px 16px;
+    white-space: nowrap;
+}
+.crm-leads-table tbody td {
+    padding: 10px 16px;
 }
 
 .crm-col-sticky-details {
@@ -108,13 +209,13 @@
     /* Reads as a pinned layer rather than a column sitting on top of the one it
        overlaps when the table scrolls horizontally. */
     box-shadow: -6px 0 12px -8px rgba(0, 0, 0, 0.28);
-    /* Sized for icon-only row actions: 4 buttons x 30px + 3 x 6px gaps + 24px
-       padding = 162px. Was 320px back when the buttons carried text labels. */
-    min-width: 170px;
-    width: 170px;
-    max-width: 170px;
+    /* Compact, GST-Registration-style actions: up to three 22px icons per row
+       in a tight sticky column; a 4th/5th wraps to a second row below. */
+    min-width: 108px;
+    width: 108px;
+    max-width: 108px;
     overflow: visible;
-    padding: 8px 12px !important;
+    padding: 8px 8px !important;
     text-align: center !important;
     vertical-align: middle;
     white-space: nowrap;
@@ -125,35 +226,46 @@
     background-color: var(--bg-surface-2) !important;
 }
 
-/* Fixed 4-slot grid, not flex: Push and Call-status are conditional, so a
-   centred flex row would place View/History at a different x on every row and
-   the column would read as ragged. Each action owns a slot, so icons line up
-   vertically down the whole table regardless of how many a row shows. */
+/* Actions mirror the GST Registration pattern: a compact flex-wrap block in a
+   tight sticky column. Up to three 22px icons sit on the top line; a 4th/5th
+   wrap to a second line (three on top, the rest below). flex-wrap + the fixed
+   column width does the wrapping, so it works for every row regardless of how
+   many actions it shows. Applies to every board/stage (Leads, Smart Board,
+   Pipeline) since they all render this shared table. */
 .crm-leads-table .crm-col-sticky-details .crm-row-actions {
-    display: grid;
-    grid-template-columns: repeat(4, 30px);
-    gap: 6px;
-    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: center;
     justify-content: center;
+    gap: 4px;
     width: 100%;
     margin: 0 auto;
 }
 
-.crm-leads-table .crm-row-actions .btn-push-mini { grid-column: 1; }
-.crm-leads-table .crm-row-actions .btn-view-mini { grid-column: 2; }
-.crm-leads-table .crm-row-actions .btn-edit-mini { grid-column: 3; }
-.crm-leads-table .crm-row-actions .btn-history-mini { grid-column: 4; }
+/* Four actions read better as a balanced 2 x 2 block with a touch more spacing
+   than three on top and a lone icon below. */
+.crm-leads-table .crm-col-sticky-details .crm-row-actions[data-action-count="4"] {
+    display: grid;
+    grid-template-columns: repeat(2, 22px);
+    gap: 6px;
+    justify-content: center;
+    align-content: center;
+    width: auto;
+}
 
 /* Icon-only squares. Specificity must beat `.crm-leads-table .btn-history-mini`,
-   which sets its own padding/gap. */
+   which sets its own padding/gap. 22px matches GST Registration and keeps two
+   wrapped rows inside the row height. */
 .crm-leads-table .crm-row-actions button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0;
-    width: 30px;
-    height: 30px;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
     padding: 0;
+    flex: none;
     white-space: nowrap;
 }
 

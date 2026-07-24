@@ -152,6 +152,7 @@ async def create_issue_report(
 async def list_issue_reports(
     status: Optional[str] = Query(None, description="Filter by status (OPEN/IN_PROGRESS/RESOLVED)"),
     priority: Optional[str] = Query(None, description="Filter by priority (LOW/MEDIUM/HIGH/URGENT)"),
+    mine: bool = Query(False, description="Only issues reported by the caller (any role), for a personal 'My Issues' view."),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -163,10 +164,16 @@ async def list_issue_reports(
     values: List = []
     idx = 1
 
-    vis_sql, vis_params, idx = _visibility_sql(role, emp_id, idx)
-    if vis_sql:
-        conditions.append(vis_sql)
-        values.extend(vis_params)
+    if mine:
+        # Personal view: strictly the caller's own reports, regardless of role.
+        conditions.append(f"ir.reporter_emp_id = ${idx}")
+        values.append(emp_id)
+        idx += 1
+    else:
+        vis_sql, vis_params, idx = _visibility_sql(role, emp_id, idx)
+        if vis_sql:
+            conditions.append(vis_sql)
+            values.extend(vis_params)
 
     if status:
         s = status.strip().upper()

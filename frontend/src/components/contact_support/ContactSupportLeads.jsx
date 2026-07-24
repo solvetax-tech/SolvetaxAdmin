@@ -556,7 +556,7 @@ const ContactSupportLeads = () => {
                                                         className={`filings-ledger-row cs-leads-grid ${activeTab === TAB_REFERRAL ? 'cs-leads-grid--referral' : ''} ${rmOpCols.containerClass}`}
                                                     >
                                                         <div className="filings-ledger-cell">
-                                                            <span className="customer-id-green-v4">{row.id}</span>
+                                                            <button type="button" className="row-id-link" title="View lead" onClick={(e) => { e.stopPropagation(); openEdit(row); }}>{row.id}</button>
                                                         </div>
                                                         <div className="filings-ledger-cell">{row.your_name || '—'}</div>
                                                         <div className="filings-ledger-cell">{row.phone_number || '—'}</div>

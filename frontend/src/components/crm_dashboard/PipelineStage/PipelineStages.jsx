@@ -32,7 +32,8 @@ const PipelineStages = ({ entityType = 'GST_REGISTRATION', stage = null, initial
   const [loading, setLoading] = useState(true);
   const [totalLeads, setTotalLeads] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 20;
+  const [sort, setSort] = useState({ by: 'id', dir: 'desc' });
+  const rowsPerPage = 50;
 
   // Drawer States
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -122,6 +123,8 @@ const PipelineStages = ({ entityType = 'GST_REGISTRATION', stage = null, initial
         stage: appliedFilters.stages.length === 0 ? (stage || undefined) : undefined,
         is_active: true,
       });
+      params.sort_by = sort.by;
+      params.sort_dir = sort.dir;
 
       const apiBase = '/api/v1/crm/leads';
       const response = await api.get(`${apiBase}/filter?${serializeCrmLeadFilterParams(params)}`);
@@ -134,7 +137,7 @@ const PipelineStages = ({ entityType = 'GST_REGISTRATION', stage = null, initial
       console.error("Error fetching leads:", error);
     }
     });
-  }, [currentPage, appliedFilters, rowsPerPage, stage, entityType, wrapFetch]);
+  }, [currentPage, appliedFilters, rowsPerPage, stage, entityType, sort, wrapFetch]);
 
   const openFilterDrawer = () => {
     setFilterInputs({ ...appliedFilters, stages: [...appliedFilters.stages] });
@@ -414,6 +417,10 @@ const PipelineStages = ({ entityType = 'GST_REGISTRATION', stage = null, initial
               onOpenFilters={() => setIsFilterOpen(true)}
               onResetFilters={handleResetFilters}
               pushFeedback={pushFeedback}
+              sortBy={sort.by}
+              sortDir={sort.dir}
+              onSortChange={(by, dir) => { setSort({ by, dir }); setCurrentPage(1); }}
+              isIncomeTaxCrm={isIncomeTaxCrm}
               contextPill={
                 appliedFilters.stages.length > 0 ? (
                   <span className="filter-pill">

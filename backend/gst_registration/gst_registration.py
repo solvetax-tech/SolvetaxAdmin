@@ -24,7 +24,7 @@ from backend.crm.crm_leads_common import (
 from backend.utils import get_db_pool, DB_SCHEMA, generate_uuid, build_gst_visibility
 from backend.security.rbac import require_permission
 from backend.logger import logger
-from backend.text_search_filters import append_fuzzy_name_filter
+from backend.text_search_filters import append_fuzzy_name_filter, append_fuzzy_mobile_filter
 from backend.redis_cache import (
     build_cache_key,
     get_or_set_json as redis_get_or_set_json,
@@ -1090,9 +1090,8 @@ async def list_gst_registrations(
         if mobile_is_null is not None:
             conditions.append("g.mobile IS NULL" if mobile_is_null else "g.mobile IS NOT NULL")
         elif mobile:
-            conditions.append(f"btrim(g.mobile) = btrim(${param_index}::text)")
-            values.append(mobile)
-            param_index += 1
+            # Fuzzy phone match on digits (substring OR >=50% trigram).
+            param_index = append_fuzzy_mobile_filter(conditions, values, param_index, "g.mobile", mobile)
 
         if email_is_null is not None:
             conditions.append("g.email IS NULL" if email_is_null else "g.email IS NOT NULL")

@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Clock, Calendar as CalendarIcon, X } from 'lucide-react';
-import CustomSelect from './CustomSelect';
 import { getAnchorRect, getViewportSize } from '../../utils/zoom';
 import './ModernDateTimePicker.css';
 
@@ -36,21 +35,6 @@ function apply12HourParts(baseDate, hour12, minute, period) {
     next.setHours(h24, parseInt(minute, 10), 0, 0);
     return next;
 }
-
-const HOUR_OPTIONS = Array.from({ length: 12 }, (_, i) => {
-    const v = i + 1;
-    return { value: v, label: String(v) };
-});
-
-const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, i) => ({
-    value: i,
-    label: String(i).padStart(2, '0'),
-}));
-
-const PERIOD_OPTIONS = [
-    { value: 'AM', label: 'AM' },
-    { value: 'PM', label: 'PM' },
-];
 
 const ModernDateTimePicker = ({
     value,
@@ -157,6 +141,18 @@ const ModernDateTimePicker = ({
     const getTimeBase = () => selectedDate || minDate || new Date();
     const timeParts = to12HourParts(getTimeBase());
 
+    // Typeable hour/minute: keep local text so the user can type freely; the
+    // value is committed (clamped + emitted) on blur / Enter. This effect keeps
+    // the fields in sync when the time changes from elsewhere (date pick, etc.).
+    const [hourText, setHourText] = useState(String(timeParts.hour12));
+    const [minuteText, setMinuteText] = useState(String(timeParts.minute).padStart(2, '0'));
+
+    useEffect(() => {
+        setHourText(String(timeParts.hour12));
+        setMinuteText(String(timeParts.minute).padStart(2, '0'));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [timeParts.hour12, timeParts.minute, timeParts.period]);
+
     const handlePrevMonth = () => {
         setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
     };
@@ -180,16 +176,37 @@ const ModernDateTimePicker = ({
         emitValue(apply12HourParts(baseDate, hour12, minute, period));
     };
 
-    const handleHour12Change = (hour12) => {
-        apply12HourAndEmit(getTimeBase(), hour12, timeParts.minute, timeParts.period);
-    };
-
-    const handleMinuteChange = (minute) => {
-        apply12HourAndEmit(getTimeBase(), timeParts.hour12, minute, timeParts.period);
-    };
-
     const handlePeriodChange = (period) => {
         apply12HourAndEmit(getTimeBase(), timeParts.hour12, timeParts.minute, period);
+    };
+
+    const commitHour = (raw) => {
+        const n = parseInt(raw, 10);
+        if (Number.isNaN(n)) { setHourText(String(timeParts.hour12)); return; }
+        const clamped = Math.min(12, Math.max(1, n));
+        apply12HourAndEmit(getTimeBase(), clamped, timeParts.minute, timeParts.period);
+    };
+
+    const commitMinute = (raw) => {
+        const n = parseInt(raw, 10);
+        if (Number.isNaN(n)) { setMinuteText(String(timeParts.minute).padStart(2, '0')); return; }
+        const clamped = Math.min(59, Math.max(0, n));
+        apply12HourAndEmit(getTimeBase(), timeParts.hour12, clamped, timeParts.period);
+    };
+
+    const onHourInput = (e) => setHourText(e.target.value.replace(/[^0-9]/g, '').slice(0, 2));
+    const onMinuteInput = (e) => setMinuteText(e.target.value.replace(/[^0-9]/g, '').slice(0, 2));
+
+    const onHourKeyDown = (e) => {
+        if (e.key === 'ArrowUp') { e.preventDefault(); commitHour(String((timeParts.hour12 % 12) + 1)); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); commitHour(String(timeParts.hour12 <= 1 ? 12 : timeParts.hour12 - 1)); }
+        else if (e.key === 'Enter') { e.preventDefault(); commitHour(hourText); }
+    };
+
+    const onMinuteKeyDown = (e) => {
+        if (e.key === 'ArrowUp') { e.preventDefault(); commitMinute(String((timeParts.minute + 1) % 60)); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); commitMinute(String((timeParts.minute + 59) % 60)); }
+        else if (e.key === 'Enter') { e.preventDefault(); commitMinute(minuteText); }
     };
 
     const isDayDisabled = (day) => {
@@ -309,32 +326,50 @@ const ModernDateTimePicker = ({
                     <Clock size={14} />
                     <span>Set Time (12-hour)</span>
                 </div>
-                <div className="time-selectors time-selectors--12h">
-                    <CustomSelect
-                        className="custom-select--compact"
-                        value={timeParts.hour12}
-                        options={HOUR_OPTIONS}
-                        onChange={handleHour12Change}
-                        ariaLabel="Hour"
-                        menuMaxHeight={160}
+                <div className="time-selectors time-selectors--typeable">
+                    <input
+                        className="time-input"
+                        type="text"
+                        inputMode="numeric"
+                        aria-label="Hour"
+                        value={hourText}
+                        onChange={onHourInput}
+                        onKeyDown={onHourKeyDown}
+                        onBlur={() => commitHour(hourText)}
+                        onFocus={(e) => e.target.select()}
+                        maxLength={2}
                     />
                     <span className="time-sep">:</span>
-                    <CustomSelect
-                        className="custom-select--compact"
-                        value={timeParts.minute}
-                        options={MINUTE_OPTIONS}
-                        onChange={handleMinuteChange}
-                        ariaLabel="Minute"
-                        menuMaxHeight={160}
+                    <input
+                        className="time-input"
+                        type="text"
+                        inputMode="numeric"
+                        aria-label="Minute"
+                        value={minuteText}
+                        onChange={onMinuteInput}
+                        onKeyDown={onMinuteKeyDown}
+                        onBlur={() => commitMinute(minuteText)}
+                        onFocus={(e) => e.target.select()}
+                        maxLength={2}
                     />
-                    <CustomSelect
-                        className="custom-select--compact"
-                        value={timeParts.period}
-                        options={PERIOD_OPTIONS}
-                        onChange={handlePeriodChange}
-                        ariaLabel="AM or PM"
-                        menuMaxHeight={96}
-                    />
+                    <div className="time-period-toggle" role="group" aria-label="AM or PM">
+                        <button
+                            type="button"
+                            className={`time-period-btn ${timeParts.period === 'AM' ? 'active' : ''}`}
+                            aria-pressed={timeParts.period === 'AM'}
+                            onClick={() => handlePeriodChange('AM')}
+                        >
+                            AM
+                        </button>
+                        <button
+                            type="button"
+                            className={`time-period-btn ${timeParts.period === 'PM' ? 'active' : ''}`}
+                            aria-pressed={timeParts.period === 'PM'}
+                            onClick={() => handlePeriodChange('PM')}
+                        >
+                            PM
+                        </button>
+                    </div>
                 </div>
             </div>
 

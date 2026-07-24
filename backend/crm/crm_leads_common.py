@@ -29,6 +29,7 @@ from backend.crm.schemas_common import (
 from backend.logger import logger
 from backend.text_search_filters import (
     append_fuzzy_name_filter,
+    append_fuzzy_mobile_filter,
     append_ilike_contains,
     build_fuzzy_name_clause,
 )
@@ -1038,6 +1039,8 @@ async def _svc_filter_crm_leads(
             "call pattern (0-0, then N-0, then N-N, then other), then updated_at."
         ),
     ),
+    sort_by: Optional[str] = None,
+    sort_dir: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -1177,21 +1180,17 @@ async def _svc_filter_crm_leads(
                 if follow_up_status:
                     params.append(follow_up_status)
                     where.append(f"l.follow_up_status = ${len(params)}")
-                if mobile_exact:
-                    params.append(mobile_exact)
-                    where.append(f"l.mobile = ${len(params)}")
-                elif mobile_partial:
-                    params.append(f"%{mobile_partial}%")
-                    where.append(
-                        f"regexp_replace(COALESCE(l.mobile, ''), '[^0-9]', '', 'g') LIKE ${len(params)}"
-                    )
+                mobile_query = mobile_exact or mobile_partial
+                if mobile_query:
+                    # Fuzzy phone match on digits (substring OR >=50% trigram).
+                    append_fuzzy_mobile_filter(where, params, len(params) + 1, "l.mobile", mobile_query)
                 filter_idx = len(params) + 1
                 if full_name_norm:
                     filter_idx = append_fuzzy_name_filter(
                         where, params, filter_idx, "l.full_name", full_name_norm
                     )
                 if email_norm:
-                    filter_idx = append_ilike_contains(
+                    filter_idx = append_fuzzy_name_filter(
                         where, params, filter_idx, "lower(COALESCE(l.email, ''))", email_norm
                     )
                 if rm_id is not None:
@@ -1253,10 +1252,35 @@ async def _svc_filter_crm_leads(
                 count_params = list(params)
                 params.extend([limit, offset])
                 count_sql = f"SELECT COUNT(*) FROM {DB_SCHEMA}.crm_leads l WHERE {' AND '.join(where)}"
-                if smart_board:
+                # Dynamic ORDER BY: whitelist-only column mapping (SQL-injection safe).
+                SORTABLE = {
+                    "id": "l.id",
+                    "full_name": "l.full_name",
+                    "mobile": "l.mobile",
+                    "entity_id": "l.entity_id",
+                    "stage": "l.stage",
+                    "call_attempts": "l.call_attempted_count",
+                    "call_connected": "l.call_connected_count",
+                    "ay": "l.ay",
+                    "preferred_language": "l.preferred_language",
+                    "rm_name": "erm.first_name",
+                    "op_name": "eop.first_name",
+                    "followup_at": "l.followup_at",
+                    "created_at": "l.created_at",
+                    "updated_at": "l.updated_at",
+                }
+                col = SORTABLE.get((sort_by or "").strip().lower())
+                direction = "ASC" if (sort_dir or "").strip().lower() == "asc" else "DESC"
+                if col:
+                    # A valid sort_by overrides smart-board ordering.
+                    if col == "l.id":
+                        order_sql = f"l.id {direction}"
+                    else:
+                        order_sql = f"{col} {direction} NULLS LAST, l.id DESC"
+                elif smart_board:
                     order_sql = _smart_board_order_sql(entity_type)
                 else:
-                    order_sql = "l.updated_at DESC NULLS LAST, l.id DESC"
+                    order_sql = "l.id DESC"
                 list_sql = f"""
                     SELECT l.*,
                            erm.first_name AS rm_name,
@@ -1644,7 +1668,7 @@ async def _svc_get_bulk_assign_candidates(
                 LEFT JOIN {DB_SCHEMA}.employees erm ON erm.emp_id = l.rm_id
                 LEFT JOIN {DB_SCHEMA}.employees eop ON eop.emp_id = l.op_id
                 {where_sql}
-                ORDER BY l.updated_at DESC, l.id DESC
+                ORDER BY l.id DESC
                 LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
             """
             total = await conn.fetchval(count_sql, *params)
@@ -3270,6 +3294,8 @@ async def filter_crm_leads(
     entity_id: Optional[int] = Query(None, ge=1),
     ay: Optional[str] = Query(None, description="Filter by assessment year (exact match)."),
     smart_board: bool = Query(False, description="Smart Board stage filter and priority sort."),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user=Depends(require_permission("EMPLOYEE", "READ")),
@@ -3302,6 +3328,8 @@ async def filter_crm_leads(
         entity_id=entity_id,
         ay=ay,
         smart_board=smart_board,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
         limit=limit,
         offset=offset,
         current_user=current_user,

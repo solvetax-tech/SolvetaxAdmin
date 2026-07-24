@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     X, User, Mail, Phone, Briefcase, Hash, MapPin,
     FileText, Link as LinkIcon, Trash2,
@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import './CustomerDetailsModal.css';
 import api from '../../utils/api';
+import useAdaptiveDrawerColumns from '../../utils/useAdaptiveDrawerColumns';
 import { getRmOpAssignmentVisibility } from '../../utils/rmOpAssignmentFields';
 import { addNotification } from '../../utils/notificationUtils';
 import {
@@ -64,6 +65,10 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
     const [locationLoading, setLocationLoading] = useState(false);
     const [showLocationResults, setShowLocationResults] = useState(false);
     const ignoreSearchRef = React.useRef(false);
+
+    // Adaptive-width drawer: flow sections into columns sized to the content.
+    const panelRef = useRef(null);
+    const bodyRef = useRef(null);
 
     const fetchData = useCallback(async () => {
         if (!customerId) return;
@@ -202,6 +207,14 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
 
     const isEditing = editMode || initialEditMode;
     const showEditFooter = isEditing;
+
+    // Flow sections into adaptive columns (max 2) in both view and edit mode.
+    useAdaptiveDrawerColumns(
+        panelRef,
+        bodyRef,
+        { enabled: isOpen, maxCols: 2 },
+        [isOpen, isEditing, loading, customer],
+    );
 
     // Location Search Effect
     useEffect(() => {
@@ -486,7 +499,7 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
 
     return (
         <div className="modal-overlay app-side-drawer-mode" onClick={onClose}>
-            <div className={`modal-content-v4 customer-details-modal gst-reg-side-drawer-shell app-drawer-panel${isEditing ? ' edit-mode' : ''}`} onClick={(e) => e.stopPropagation()}>
+            <div ref={panelRef} className={`modal-content-v4 customer-details-modal gst-reg-side-drawer-shell app-drawer-panel${isEditing ? ' edit-mode' : ''}`} onClick={(e) => e.stopPropagation()}>
                 <div className="modal-form-wrapper">
                     <div className="modal-header">
                         <div className="header-header-top">
@@ -508,7 +521,8 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
                         </button>
                     </div>
 
-                        <div className="form-sections-container">
+                        <div ref={bodyRef} className="form-sections-container">
+                            <div className="fsc-cols">
                             {loading ? (
                                 <div className="gst-skeleton-v4">
                                     {[1, 2, 3].map(section => (
@@ -922,6 +936,7 @@ const CustomerDetailsModal = ({ isOpen, onClose, customerId, isAdmin, profileDat
 
                                 </>
                             )}
+                            </div>
                         </div>
 
                         {showEditFooter && !loading && (

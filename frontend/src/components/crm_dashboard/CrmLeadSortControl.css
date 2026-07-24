@@ -1,0 +1,63 @@
+.crm-lead-sort {
+    position: relative;
+    display: inline-flex;
+}
+
+/* Trigger inherits the shared secondary button look so Sort + Filters match. */
+.crm-lead-sort-trigger {
+    gap: 6px;
+}
+
+.crm-lead-sort-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 40;
+    min-width: 220px;
+    max-height: 340px;
+    overflow-y: auto;
+    padding: 6px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+
+.crm-lead-sort-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-accent);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+}
+
+.crm-lead-sort-option:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.crm-lead-sort-option.is-active {
+    color: var(--accent);
+}
+
+.crm-lead-sort-option-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.crm-lead-sort-option-check {
+    flex-shrink: 0;
+    color: var(--accent);
+}
